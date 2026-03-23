@@ -341,6 +341,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.HideCraftUI), Type.EmptyTypes, null, nameof(HideCraftUiPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.CraftResultChoosen), new[] { typeof(ItemData) }, nameof(CraftResultChoosenPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.FinishCraft), Type.EmptyTypes, nameof(FinishCraftPrefix), nameof(FinishCraftPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.FinishCraftPoison), Type.EmptyTypes, nameof(FinishCraftPoisonPrefix), nameof(FinishCraftPoisonPostfix));
         PatchMethod(typeof(DrinkUIController), nameof(DrinkUIController.ShowDrinkUI), new[] { typeof(DrinkType), typeof(HeroData), typeof(ItemData), typeof(string) }, null, nameof(DrinkShowUiPostfix));
         PatchMethod(typeof(DrinkUIController), nameof(DrinkUIController.GetDrinkCost), new[] { typeof(float) }, null, nameof(DrinkGetCostPostfix));
         PatchMethod(typeof(DrinkUIController), nameof(DrinkUIController.HideDrinkUI), Type.EmptyTypes, null, nameof(DrinkHideUiPostfix));
@@ -2375,6 +2376,16 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _pendingCraftSelection = null;
     }
 
+    private static void FinishCraftPoisonPrefix()
+    {
+        ActivateCraftRewardBonus("PlotController.FinishCraftPoison");
+    }
+
+    private static void FinishCraftPoisonPostfix()
+    {
+        FinishCraftPostfix();
+    }
+
     private static void DrinkShowUiPostfix(DrinkUIController __instance)
     {
         ResetDrinkTracking(__instance);
@@ -3342,17 +3353,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             return;
         }
 
-        var selection = _pendingCraftSelection;
-        if (selection == null)
-        {
-            if (_traceMode.Value)
-            {
-                LoggerInstance.LogInfo($"Craft quantity bonus skipped from {source}: no selected result is pending.");
-            }
-
-            return;
-        }
-
         var controller = CraftUIController.Instance;
         var addedMaterial = ResolveCraftAddedMaterial(controller);
         if (addedMaterial == null)
@@ -3380,7 +3380,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
         _activeCraftRewardBonus = new CraftRewardBonusState
         {
-            Selection = selection,
             MaterialName = addedMaterial.name ?? $"id={addedMaterial.itemID}",
             MaterialMajorTier = materialMajorTier,
             ExtraItemCount = extraItemCount
@@ -3389,7 +3388,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         if (_traceMode.Value)
         {
             LoggerInstance.LogInfo(
-                $"Craft quantity bonus armed from {source}: material={DescribeItemSummary(addedMaterial)}, majorTier={materialMajorTier}, extraItems={extraItemCount}, result={selection.ResultName}/{selection.ResultItemId}.");
+                $"Craft quantity bonus armed from {source}: material={DescribeItemSummary(addedMaterial)}, majorTier={materialMajorTier}, extraItems={extraItemCount}.");
         }
     }
 
@@ -3410,13 +3409,44 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             return null;
         }
 
-        // The game only exposes one optional added-material slot for the extra craft effect.
-        return controller.craftMaterialDataSub;
+        var primary = controller.craftMaterialData;
+        var secondary = controller.craftMaterialDataSub;
+        var primaryRate = TryGetCraftMaterialExtraRate(primary);
+        var secondaryRate = TryGetCraftMaterialExtraRate(secondary);
+
+        if (secondary != null && secondaryRate > primaryRate)
+        {
+            return secondary;
+        }
+
+        if (primary != null && primaryRate > 0f)
+        {
+            return primary;
+        }
+
+        return secondary ?? primary;
     }
 
     private static int GetCraftExtraItemCountFromMaterial(ItemData? material)
     {
         return Mathf.Clamp(GetCraftMajorTier(material) - 1, 0, 4);
+    }
+
+    private static float TryGetCraftMaterialExtraRate(ItemData? material)
+    {
+        if (material == null)
+        {
+            return 0f;
+        }
+
+        try
+        {
+            return Mathf.Max(0f, material.GetMaterialExtraCraftRate());
+        }
+        catch
+        {
+            return 0f;
+        }
     }
 
     private static void TryGrantCraftBonusItems(HeroData? targetHero, ItemData? itemData, int treasureChestClickTime, bool skipManageItemPoison)
@@ -3427,7 +3457,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         var bonusState = _activeCraftRewardBonus;
-        if (bonusState == null || bonusState.ExtraItemCount <= 0)
+        if (bonusState == null || bonusState.ExtraItemCount <= 0 || bonusState.Consumed)
         {
             return;
         }
@@ -3438,12 +3468,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             return;
         }
 
-        if (!DoesItemMatchCraftSelection(itemData, bonusState.Selection))
-        {
-            return;
-        }
-
         var grantedCount = 0;
+        bonusState.Consumed = true;
         _grantingCraftBonusItems = true;
 
         try
@@ -3476,21 +3502,10 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             return;
         }
 
-        PushPlayerLog($"【巧手增产】：加入【{bonusState.MaterialName}】后，额外获得 {grantedCount} 个【{bonusState.Selection.ResultName}】");
+        var resultName = itemData.name ?? $"id={itemData.itemID}";
+        PushPlayerLog($"【巧手增产】：加入【{bonusState.MaterialName}】后，额外获得 {grantedCount} 个【{resultName}】");
         LoggerInstance.LogInfo(
-            $"Craft quantity bonus granted: result={bonusState.Selection.ResultName}/{bonusState.Selection.ResultItemId}, material={bonusState.MaterialName}, materialMajorTier={bonusState.MaterialMajorTier}, extraItems={grantedCount}.");
-    }
-
-    private static bool DoesItemMatchCraftSelection(ItemData? item, CraftRewardSelection selection)
-    {
-        if (item == null)
-        {
-            return false;
-        }
-
-        return item.itemID == selection.ResultItemId
-               && item.itemLv == selection.ResultItemLv
-               && item.rareLv == selection.ResultRareLv;
+            $"Craft quantity bonus granted: result={DescribeItemSummary(itemData)}, material={bonusState.MaterialName}, materialMajorTier={bonusState.MaterialMajorTier}, extraItems={grantedCount}.");
     }
 
     private static ItemData? TryCloneItem(ItemData? item)

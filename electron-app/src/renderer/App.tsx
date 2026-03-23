@@ -837,6 +837,15 @@ export function App() {
                   step={1}
                 />
                 <NumberField
+                  label="战斗武学经验倍率"
+                  value={settings.battleSkillExpMultiplier}
+                  onChange={(value) => updateSetting('battleSkillExpMultiplier', value)}
+                  min={1}
+                  max={999}
+                  step={1}
+                  hint="只影响战斗内通过出招获得的武学经验，敌我双方都会生效。"
+                />
+                <NumberField
                   label="创作点倍率"
                   value={settings.creationPointMultiplier}
                   onChange={(value) => updateSetting('creationPointMultiplier', value)}

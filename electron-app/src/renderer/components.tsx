@@ -35,6 +35,7 @@ export function defaultSettings(): VisibleSettings {
     lockStamina: true,
     treasureChestAutoPickMostValuable: true,
     expMultiplier: 1,
+    battleSkillExpMultiplier: 1,
     creationPointMultiplier: 1,
     horseBaseSpeedMultiplier: 1,
     horseTurboSpeedMultiplier: 1,

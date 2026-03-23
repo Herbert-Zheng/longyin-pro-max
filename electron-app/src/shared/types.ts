@@ -7,6 +7,7 @@ export interface VisibleSettings {
   lockStamina: boolean;
   treasureChestAutoPickMostValuable: boolean;
   expMultiplier: number;
+  battleSkillExpMultiplier: number;
   creationPointMultiplier: number;
   horseBaseSpeedMultiplier: number;
   horseTurboSpeedMultiplier: number;

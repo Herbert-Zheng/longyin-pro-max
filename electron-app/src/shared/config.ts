@@ -46,6 +46,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   lockStamina: true,
   treasureChestAutoPickMostValuable: true,
   expMultiplier: 1,
+  battleSkillExpMultiplier: 1,
   creationPointMultiplier: 1,
   horseBaseSpeedMultiplier: 1,
   horseTurboSpeedMultiplier: 1,
@@ -350,6 +351,7 @@ PointMultiplier = ${settings.creationPointMultiplier}
 
 [Battle]
 SpeedMultiplier = 2
+SkillExpMultiplier = ${settings.battleSkillExpMultiplier}
 
 [WorldMapHorse]
 BaseSpeedMultiplier = ${formatFloat(settings.horseBaseSpeedMultiplier)}
@@ -516,6 +518,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     lockStamina: input.lockStamina,
     treasureChestAutoPickMostValuable: input.treasureChestAutoPickMostValuable,
     expMultiplier: Math.round(clamp(input.expMultiplier, 1, 999)),
+    battleSkillExpMultiplier: Math.round(clamp(input.battleSkillExpMultiplier, 1, 999)),
     creationPointMultiplier: Math.round(clamp(input.creationPointMultiplier, 1, 999)),
     horseBaseSpeedMultiplier: clamp(input.horseBaseSpeedMultiplier, 0.01, 999),
     horseTurboSpeedMultiplier: clamp(input.horseTurboSpeedMultiplier, 0.01, 999),
@@ -559,6 +562,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
 }
 
 function parseVisibleFromMain(text: string | undefined): VisibleSettings {
+  const battleSection = getIniSectionBody(text, 'Battle');
   const dialogFlowSection = getIniSectionBody(text, 'DialogFlow');
   const dailySkillInsightSection = getIniSectionBody(text, 'DailySkillInsight');
   const relationshipSection = getIniSectionBody(text, 'Relationship');
@@ -572,6 +576,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       DEFAULT_VISIBLE_SETTINGS.treasureChestAutoPickMostValuable
     ),
     expMultiplier: readInt(text, 'ExpMultiplier', DEFAULT_VISIBLE_SETTINGS.expMultiplier),
+    battleSkillExpMultiplier: readInt(
+      battleSection ?? text,
+      'SkillExpMultiplier',
+      DEFAULT_VISIBLE_SETTINGS.battleSkillExpMultiplier
+    ),
     creationPointMultiplier: readInt(text, 'PointMultiplier', DEFAULT_VISIBLE_SETTINGS.creationPointMultiplier),
     horseBaseSpeedMultiplier: readFloat(text, 'BaseSpeedMultiplier', DEFAULT_VISIBLE_SETTINGS.horseBaseSpeedMultiplier),
     horseTurboSpeedMultiplier: readFloat(text, 'TurboSpeedMultiplier', DEFAULT_VISIBLE_SETTINGS.horseTurboSpeedMultiplier),
@@ -865,6 +874,7 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     boolText(normalized.treasureChestAutoPickMostValuable)
   );
   nextMain = upsertIniValue(nextMain, 'ExpMultiplier', String(normalized.expMultiplier));
+  nextMain = upsertIniSectionValue(nextMain, 'Battle', 'SkillExpMultiplier', String(normalized.battleSkillExpMultiplier));
   nextMain = upsertIniValue(nextMain, 'PointMultiplier', String(normalized.creationPointMultiplier));
   nextMain = upsertIniValue(nextMain, 'BaseSpeedMultiplier', formatFloat(normalized.horseBaseSpeedMultiplier));
   nextMain = upsertIniValue(nextMain, 'TurboSpeedMultiplier', formatFloat(normalized.horseTurboSpeedMultiplier));

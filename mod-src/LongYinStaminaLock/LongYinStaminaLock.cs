@@ -46,6 +46,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<int> _treasureChestChoiceOptions = null!;
     private static ConfigEntry<int> _treasureChestTotalItems = null!;
     private static ConfigEntry<int> _bookExpMultiplier = null!;
+    private static ConfigEntry<int> _battleSkillExpMultiplier = null!;
     private static ConfigEntry<int> _creationPointMultiplier = null!;
     private static ConfigEntry<int> _battleSpeedMultiplier = null!;
     private static ConfigEntry<float> _horseBaseSpeedMultiplier = null!;
@@ -78,6 +79,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<bool> _dialogFastForwardAssistEnabled = null!;
     private static ConfigEntry<KeyCode> _dialogFastForwardAssistHotkey = null!;
     private static ConfigEntry<bool> _traceMode = null!;
+    private static ConfigEntry<bool> _traceBattleSkillExp = null!;
     private static ConfigEntry<bool> _traceDialogFastForward = null!;
     private static ConfigEntry<bool> _traceTreasureChestEvents = null!;
     private static ConfigEntry<bool> _freezeDate = null!;
@@ -190,6 +192,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _treasureChestChoiceOptions = Config.Bind("Exploration", "TreasureChestChoiceOptions", 3, "How many reward options each exploration treasure chest should show when choice mode is enabled.");
         _treasureChestTotalItems = Config.Bind("Exploration", "TreasureChestTotalItems", 2, "Total item rewards to grant from exploration treasure chests. Set to 1 for vanilla behavior.");
         _bookExpMultiplier = Config.Bind("ReadBook", "ExpMultiplier", 1, "Multiplies EXP gained from reading books.");
+        _battleSkillExpMultiplier = Config.Bind("Battle", "SkillExpMultiplier", 1, "Multiplies martial-skill EXP gained from battle actions for every combatant, including enemies.");
         _creationPointMultiplier = Config.Bind("CharacterCreation", "PointMultiplier", 1, "Multiplies the remaining point pools during character creation.");
         _battleSpeedMultiplier = Config.Bind("Battle", "SpeedMultiplier", 2, "Multiplies the selected in-battle speed option.");
         _horseBaseSpeedMultiplier = Config.Bind("WorldMapHorse", "BaseSpeedMultiplier", 1f, "Multiplies the player horse's normal world-map travel speed.");
@@ -222,6 +225,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _dialogFastForwardAssistEnabled = Config.Bind("DialogFlow", "FastForwardAssistEnabled", false, "When true, the mod automatically turns on plot fast-forward (快进) whenever the current dialog actually exposes the skip button.");
         _dialogFastForwardAssistHotkey = Config.Bind("DialogFlow", "ToggleFastForwardAssistHotkey", KeyCode.P, "Hotkey that toggles the dialog fast-forward assist while in game.");
         _traceMode = Config.Bind("Debug", "TracerEnabled", false, "Master switch for all mod tracer logs. When false, trace helpers stay silent.");
+        _traceBattleSkillExp = Config.Bind("Debug", "TraceBattleSkillExp", false, "When TracerEnabled is true, logs each in-battle martial-skill EXP award before and after the multiplier.");
         _traceDialogFastForward = Config.Bind("Debug", "TraceDialogFastForward", false, "When TracerEnabled is true, logs dialog fast-forward assist decisions and key PlotController fast-forward events.");
         _traceTreasureChestEvents = Config.Bind("Debug", "TraceTreasureChestEvents", false, "When TracerEnabled is true, logs treasure chest interception, choice UI, and reward resolution.");
         _freezeDate = Config.Bind("Time", "FreezeDate", false, "Blocks in-game day, month, and year progression.");
@@ -269,6 +273,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(UIButtonMessage), nameof(UIButtonMessage.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
         PatchMethod(typeof(ButtonClick), nameof(ButtonClick.OnPointerClick), new[] { typeof(PointerEventData) }, null, nameof(TreasureChestChoiceButtonClickedPostfix));
         PatchMethod(typeof(HeroData), nameof(HeroData.AddSkillBookExp), new[] { typeof(float), typeof(KungfuSkillLvData), typeof(bool) }, nameof(AddSkillBookExpPrefix), null);
+        PatchMethod(typeof(HeroData), nameof(HeroData.BattleChangeSkillFightExp), new[] { typeof(float), typeof(KungfuSkillLvData), typeof(bool) }, nameof(BattleChangeSkillFightExpPrefix), null);
         PatchMethod(typeof(HeroData), nameof(HeroData.ChangeMoney), new[] { typeof(int), typeof(bool) }, nameof(ChangeMoneyPrefix), nameof(ChangeMoneyPostfix));
         PatchMethod(typeof(HeroData), nameof(HeroData.ChangeFavor), new[] { typeof(float), typeof(bool), typeof(float), typeof(float), typeof(bool) }, nameof(ChangeFavorPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.ManageTeachSkill), new[] { typeof(HeroData), typeof(HeroData), typeof(int), typeof(float), typeof(bool) }, nameof(ManageTeachSkillPrefix), nameof(ManageTeachSkillPostfix));
@@ -308,6 +313,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             $"and highest-value auto-pick {(_treasureChestAutoPickMostValuable.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Exploration treasure chest rewards start at x{Math.Max(1, _treasureChestTotalItems.Value)} total items when choice mode is OFF.");
         Log.LogInfo($"Read-book EXP multiplier starts at x{Mathf.Max(1, _bookExpMultiplier.Value)}.");
+        Log.LogInfo($"Battle skill EXP multiplier starts at x{Mathf.Max(1, _battleSkillExpMultiplier.Value)}.");
         Log.LogInfo($"Character creation point multiplier starts at x{Math.Max(1, _creationPointMultiplier.Value)}.");
         Log.LogInfo($"Battle speed multiplier starts at x{Math.Max(1, _battleSpeedMultiplier.Value)}.");
         Log.LogInfo($"World-map horse base speed multiplier starts at x{FormatConfigFloat(_horseBaseSpeedMultiplier.Value)}.");
@@ -338,6 +344,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo($"Dialog monthly limit multiplier starts at x{FormatConfigFloat(_dialogMonthlyLimitMultiplier.Value)}.");
         Log.LogInfo($"Dialog fast-forward assist starts {(_dialogFastForwardAssistEnabled.Value ? "ON" : "OFF")} with hotkey {_dialogFastForwardAssistHotkey.Value}.");
         Log.LogInfo($"Tracer master starts {(_traceMode.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Battle skill EXP tracer starts {(_traceBattleSkillExp.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Dialog fast-forward tracer starts {(_traceDialogFastForward.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Treasure chest tracer starts {(_traceTreasureChestEvents.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Date freeze starts {(_freezeDate.Value ? "ON" : "OFF")} with hotkey {_freezeDateHotkey.Value}.");
@@ -1214,6 +1221,31 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         num *= multiplier;
+    }
+
+    private static void BattleChangeSkillFightExpPrefix(HeroData __instance, ref float num, KungfuSkillLvData targetSkill, bool showInfo)
+    {
+        var originalExp = num;
+        var multiplier = Mathf.Max(1, _battleSkillExpMultiplier.Value);
+        if (multiplier <= 1 || num <= 0f)
+        {
+            if (_traceMode.Value && _traceBattleSkillExp.Value && originalExp > 0f)
+            {
+                LoggerInstance.LogInfo(
+                    $"Battle skill EXP trace: hero={TryGetHeroName(__instance)}, skill={TryGetSkillName(targetSkill)}, " +
+                    $"baseExp={SafeFormatValue(originalExp)}, finalExp={SafeFormatValue(originalExp)}, multiplier=x{multiplier}, showInfo={showInfo}.");
+            }
+            return;
+        }
+
+        num *= multiplier;
+
+        if (_traceMode.Value && _traceBattleSkillExp.Value)
+        {
+            LoggerInstance.LogInfo(
+                $"Battle skill EXP trace: hero={TryGetHeroName(__instance)}, skill={TryGetSkillName(targetSkill)}, " +
+                $"baseExp={SafeFormatValue(originalExp)}, finalExp={SafeFormatValue(num)}, multiplier=x{multiplier}, showInfo={showInfo}.");
+        }
     }
 
     private static void ManageTeachSkillPrefix(HeroData sourceHero, HeroData targetHero, int skillID, float rate, bool showInfo, out TeachSkillSplashState __state)

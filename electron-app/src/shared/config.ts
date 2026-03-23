@@ -67,6 +67,11 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   debatePlayerDamageTakenMultiplier: 1,
   debateEnemyDamageTakenMultiplier: 1,
   craftRandomPickUpgrade: true,
+  craftTier1ExtraItems: 0,
+  craftTier2ExtraItems: 1,
+  craftTier3ExtraItems: 2,
+  craftTier4ExtraItems: 3,
+  craftTier5ExtraItems: 4,
   drinkPlayerPowerCostMultiplier: 1,
   drinkEnemyPowerCostMultiplier: 1,
   dialogMonthlyLimitMultiplier: 3,
@@ -385,6 +390,11 @@ EnemyDamageTakenMultiplier = ${formatFloat(settings.debateEnemyDamageTakenMultip
 
 [Craft]
 RandomPickUpgrade = ${boolText(settings.craftRandomPickUpgrade)}
+Tier1ExtraItems = ${settings.craftTier1ExtraItems}
+Tier2ExtraItems = ${settings.craftTier2ExtraItems}
+Tier3ExtraItems = ${settings.craftTier3ExtraItems}
+Tier4ExtraItems = ${settings.craftTier4ExtraItems}
+Tier5ExtraItems = ${settings.craftTier5ExtraItems}
 
 [Drink]
 PlayerPowerCostMultiplier = ${formatFloat(settings.drinkPlayerPowerCostMultiplier)}
@@ -541,6 +551,11 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     debatePlayerDamageTakenMultiplier: clamp(input.debatePlayerDamageTakenMultiplier, 0, 999),
     debateEnemyDamageTakenMultiplier: clamp(input.debateEnemyDamageTakenMultiplier, 0, 999),
     craftRandomPickUpgrade: input.craftRandomPickUpgrade,
+    craftTier1ExtraItems: Math.round(clamp(input.craftTier1ExtraItems, 0, 999)),
+    craftTier2ExtraItems: Math.round(clamp(input.craftTier2ExtraItems, 0, 999)),
+    craftTier3ExtraItems: Math.round(clamp(input.craftTier3ExtraItems, 0, 999)),
+    craftTier4ExtraItems: Math.round(clamp(input.craftTier4ExtraItems, 0, 999)),
+    craftTier5ExtraItems: Math.round(clamp(input.craftTier5ExtraItems, 0, 999)),
     drinkPlayerPowerCostMultiplier: clamp(input.drinkPlayerPowerCostMultiplier, 0, 999),
     drinkEnemyPowerCostMultiplier: clamp(input.drinkEnemyPowerCostMultiplier, 0, 999),
     dialogMonthlyLimitMultiplier: clamp(input.dialogMonthlyLimitMultiplier, 0, 999),
@@ -636,6 +651,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       DEFAULT_VISIBLE_SETTINGS.debateEnemyDamageTakenMultiplier
     ),
     craftRandomPickUpgrade: readBool(text, 'RandomPickUpgrade', DEFAULT_VISIBLE_SETTINGS.craftRandomPickUpgrade),
+    craftTier1ExtraItems: readInt(text, 'Tier1ExtraItems', DEFAULT_VISIBLE_SETTINGS.craftTier1ExtraItems),
+    craftTier2ExtraItems: readInt(text, 'Tier2ExtraItems', DEFAULT_VISIBLE_SETTINGS.craftTier2ExtraItems),
+    craftTier3ExtraItems: readInt(text, 'Tier3ExtraItems', DEFAULT_VISIBLE_SETTINGS.craftTier3ExtraItems),
+    craftTier4ExtraItems: readInt(text, 'Tier4ExtraItems', DEFAULT_VISIBLE_SETTINGS.craftTier4ExtraItems),
+    craftTier5ExtraItems: readInt(text, 'Tier5ExtraItems', DEFAULT_VISIBLE_SETTINGS.craftTier5ExtraItems),
     drinkPlayerPowerCostMultiplier: readFloat(
       text,
       'PlayerPowerCostMultiplier',
@@ -937,6 +957,11 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     formatFloat(normalized.debateEnemyDamageTakenMultiplier)
   );
   nextMain = upsertIniValue(nextMain, 'RandomPickUpgrade', boolText(normalized.craftRandomPickUpgrade));
+  nextMain = upsertIniValue(nextMain, 'Tier1ExtraItems', String(normalized.craftTier1ExtraItems));
+  nextMain = upsertIniValue(nextMain, 'Tier2ExtraItems', String(normalized.craftTier2ExtraItems));
+  nextMain = upsertIniValue(nextMain, 'Tier3ExtraItems', String(normalized.craftTier3ExtraItems));
+  nextMain = upsertIniValue(nextMain, 'Tier4ExtraItems', String(normalized.craftTier4ExtraItems));
+  nextMain = upsertIniValue(nextMain, 'Tier5ExtraItems', String(normalized.craftTier5ExtraItems));
   nextMain = upsertIniValue(
     nextMain,
     'PlayerPowerCostMultiplier',

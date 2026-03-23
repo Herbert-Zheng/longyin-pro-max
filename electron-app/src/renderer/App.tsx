@@ -907,7 +907,52 @@ export function App() {
                   label="追加材料按大阶增产"
                   value={settings.craftRandomPickUpgrade}
                   onChange={(value) => updateSetting('craftRandomPickUpgrade', value)}
-                  hint="按追加材料的大阶给成品加数量：凡品 +0、二阶 +1、三阶 +2、四阶 +3、绝世 +4。"
+                  hint="按追加材料的大阶给成品加数量。下面 5 个数值分别对应一阶到五阶，可自由修改。"
+                />
+                <NumberField
+                  label="一阶额外数量"
+                  value={settings.craftTier1ExtraItems}
+                  onChange={(value) => updateSetting('craftTier1ExtraItems', value)}
+                  min={0}
+                  max={999}
+                  step={1}
+                  hint="默认 0，对应凡品/最低大阶。"
+                />
+                <NumberField
+                  label="二阶额外数量"
+                  value={settings.craftTier2ExtraItems}
+                  onChange={(value) => updateSetting('craftTier2ExtraItems', value)}
+                  min={0}
+                  max={999}
+                  step={1}
+                  hint="默认 1。"
+                />
+                <NumberField
+                  label="三阶额外数量"
+                  value={settings.craftTier3ExtraItems}
+                  onChange={(value) => updateSetting('craftTier3ExtraItems', value)}
+                  min={0}
+                  max={999}
+                  step={1}
+                  hint="默认 2。"
+                />
+                <NumberField
+                  label="四阶额外数量"
+                  value={settings.craftTier4ExtraItems}
+                  onChange={(value) => updateSetting('craftTier4ExtraItems', value)}
+                  min={0}
+                  max={999}
+                  step={1}
+                  hint="默认 3。"
+                />
+                <NumberField
+                  label="五阶额外数量"
+                  value={settings.craftTier5ExtraItems}
+                  onChange={(value) => updateSetting('craftTier5ExtraItems', value)}
+                  min={0}
+                  max={999}
+                  step={1}
+                  hint="默认 4，对应绝世/最高大阶。"
                 />
                 <NumberField
                   label="商人现金下限"

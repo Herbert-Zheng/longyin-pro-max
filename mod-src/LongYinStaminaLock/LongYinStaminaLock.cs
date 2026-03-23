@@ -11,7 +11,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.28.5")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.29.0")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -70,6 +70,11 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<float> _debatePlayerDamageTakenMultiplier = null!;
     private static ConfigEntry<float> _debateEnemyDamageTakenMultiplier = null!;
     private static ConfigEntry<bool> _craftRandomPickUpgradeEnabled = null!;
+    private static ConfigEntry<int> _craftTier1ExtraItems = null!;
+    private static ConfigEntry<int> _craftTier2ExtraItems = null!;
+    private static ConfigEntry<int> _craftTier3ExtraItems = null!;
+    private static ConfigEntry<int> _craftTier4ExtraItems = null!;
+    private static ConfigEntry<int> _craftTier5ExtraItems = null!;
     private static ConfigEntry<float> _drinkPlayerPowerCostMultiplier = null!;
     private static ConfigEntry<float> _drinkEnemyPowerCostMultiplier = null!;
     private static ConfigEntry<int> _dailySkillInsightHitChancePercent = null!;
@@ -98,6 +103,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static bool _applyingDailySkillInsightExp;
     private static bool _applyingTeamAutoFavor;
     private static bool _grantingCraftBonusItems;
+    private static bool _repeatingCraftChoiceReward;
     private static bool _exploreFullRevealConsumed;
     private static bool _grantingTreasureChestChoiceReward;
     private static bool _grantingTreasureChestBonusItems;
@@ -215,6 +221,12 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         public bool Consumed { get; set; }
     }
 
+    private sealed class PlotItemGrantState
+    {
+        public ItemData? ItemBefore { get; init; }
+        public string Source { get; init; } = string.Empty;
+    }
+
     private static TreasureChestChoiceSession? _activeTreasureChestChoiceSession;
     private static CraftRewardSelection? _pendingCraftSelection;
     private static CraftRewardBonusState? _activeCraftRewardBonus;
@@ -258,7 +270,12 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _maxLoverCount = Config.Bind("Relationship", "MaxLoverCount", 8, "Overrides the maximum number of lovers/couples the player can have at the same time. Vanilla appears to be 4.");
         _debatePlayerDamageTakenMultiplier = Config.Bind("Debate", "PlayerDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the player side when a round is lost.");
         _debateEnemyDamageTakenMultiplier = Config.Bind("Debate", "EnemyDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the enemy side when a round is won.");
-        _craftRandomPickUpgradeEnabled = Config.Bind("Craft", "RandomPickUpgrade", true, "Adds extra crafted items based on the added crafting material's major tier. Trash grants +0, top tier grants +4.");
+        _craftRandomPickUpgradeEnabled = Config.Bind("Craft", "RandomPickUpgrade", true, "Adds extra crafted items based on the added crafting material's major tier.");
+        _craftTier1ExtraItems = Config.Bind("Craft", "Tier1ExtraItems", 0, "Extra items granted when the added crafting material resolves to major tier 1.");
+        _craftTier2ExtraItems = Config.Bind("Craft", "Tier2ExtraItems", 1, "Extra items granted when the added crafting material resolves to major tier 2.");
+        _craftTier3ExtraItems = Config.Bind("Craft", "Tier3ExtraItems", 2, "Extra items granted when the added crafting material resolves to major tier 3.");
+        _craftTier4ExtraItems = Config.Bind("Craft", "Tier4ExtraItems", 3, "Extra items granted when the added crafting material resolves to major tier 4.");
+        _craftTier5ExtraItems = Config.Bind("Craft", "Tier5ExtraItems", 4, "Extra items granted when the added crafting material resolves to major tier 5.");
         _drinkPlayerPowerCostMultiplier = Config.Bind("Drink", "PlayerPowerCostMultiplier", 1f, "Multiplies Qi cost paid by the player side during the drinking minigame.");
         _drinkEnemyPowerCostMultiplier = Config.Bind("Drink", "EnemyPowerCostMultiplier", 1f, "Multiplies Qi cost paid by the enemy side during the drinking minigame.");
         _dailySkillInsightHitChancePercent = Config.Bind("DailySkillInsight", "HitChancePercent", 0, "Chance from 0 to 100 that each elapsed in-game day grants bonus skill EXP to one eligible martial skill.");
@@ -286,6 +303,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(ExploreController), nameof(ExploreController.PlayerFinishMove), Type.EmptyTypes, null, nameof(PlayerFinishMovePostfix));
         PatchMethod(typeof(ExploreController), nameof(ExploreController.ManageTileEvent), new[] { typeof(ExploreTileData) }, nameof(ManageTileEventPrefix), nameof(ManageTileEventPostfix));
         PatchMethod(typeof(HeroData), nameof(HeroData.GetItem), new[] { typeof(ItemData), typeof(bool), typeof(bool), typeof(int), typeof(bool) }, nameof(TreasureChestGetItemPrefix), nameof(TreasureChestGetItemPostfix));
+        PatchMethod(typeof(HeroData), nameof(HeroData.GetItem), new[] { typeof(ItemData), typeof(bool) }, null, nameof(BasicGetItemPostfix));
+        PatchMethod(typeof(ItemListData), nameof(ItemListData.GetItem), new[] { typeof(ItemData), typeof(bool) }, null, nameof(ItemListGetItemPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.ChangePlotDataBase), new[] { typeof(string) }, nameof(TreasureChestChoicePlotCallbackPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.PlotBackgroundClicked), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.ChangeNextPlot), Type.EmptyTypes, nameof(TreasureChestChoiceAdvancePrefix), null);
@@ -339,7 +358,13 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(DebateUIController), nameof(DebateUIController.ChangePatient), new[] { typeof(bool), typeof(float) }, nameof(DebateChangePatientPrefix), null);
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.OpenCraftUI), new[] { typeof(CraftType), typeof(AreaBuildingData), typeof(bool) }, null, nameof(OpenCraftUiPostfix));
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.HideCraftUI), Type.EmptyTypes, null, nameof(HideCraftUiPostfix));
-        PatchMethod(typeof(PlotController), nameof(PlotController.CraftResultChoosen), new[] { typeof(ItemData) }, nameof(CraftResultChoosenPrefix), null);
+        PatchMethod(typeof(CraftUIController), nameof(CraftUIController.GetMaretialExtraCraftRate), Type.EmptyTypes, null, nameof(GetCraftMaterialExtraCraftRatePostfix));
+        PatchMethod(typeof(CraftUIController), nameof(CraftUIController.CraftResultChoosen), new[] { typeof(int) }, null, nameof(CraftUiResultChoosenPostfix));
+        PatchMethod(typeof(ItemData), nameof(ItemData.GetMaterialExtraCraftRate), Type.EmptyTypes, null, nameof(GetItemMaterialExtraCraftRatePostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.CraftResultChoosen), new[] { typeof(ItemData) }, nameof(CraftResultChoosenPrefix), nameof(CraftResultChoosenPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.SetPlotItem), new[] { typeof(ItemData), typeof(bool) }, null, nameof(SetPlotItemPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.PlayerGetPlotItem), Type.EmptyTypes, nameof(PlayerGetPlotItemPrefix), nameof(PlayerGetPlotItemPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.PlayerGetPlotItemSimple), Type.EmptyTypes, nameof(PlayerGetPlotItemSimplePrefix), nameof(PlayerGetPlotItemSimplePostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.FinishCraft), Type.EmptyTypes, nameof(FinishCraftPrefix), nameof(FinishCraftPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.FinishCraftPoison), Type.EmptyTypes, nameof(FinishCraftPoisonPrefix), nameof(FinishCraftPoisonPostfix));
         PatchMethod(typeof(DrinkUIController), nameof(DrinkUIController.ShowDrinkUI), new[] { typeof(DrinkType), typeof(HeroData), typeof(ItemData), typeof(string) }, null, nameof(DrinkShowUiPostfix));
@@ -386,7 +411,9 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo($"Max lover count override starts at {Math.Max(1, _maxLoverCount.Value)}.");
         Log.LogInfo($"Debate player damage taken multiplier starts at x{FormatConfigFloat(_debatePlayerDamageTakenMultiplier.Value)}.");
         Log.LogInfo($"Debate enemy damage taken multiplier starts at x{FormatConfigFloat(_debateEnemyDamageTakenMultiplier.Value)}.");
-        Log.LogInfo($"Craft added-material quantity bonus starts {(_craftRandomPickUpgradeEnabled.Value ? "ON" : "OFF")}.");
+        Log.LogInfo(
+            $"Craft added-material quantity bonus starts {(_craftRandomPickUpgradeEnabled.Value ? "ON" : "OFF")} " +
+            $"with tier bonuses [{GetCraftConfiguredExtraItems(1)},{GetCraftConfiguredExtraItems(2)},{GetCraftConfiguredExtraItems(3)},{GetCraftConfiguredExtraItems(4)},{GetCraftConfiguredExtraItems(5)}].");
         Log.LogInfo($"Drink player Qi cost multiplier starts at x{FormatConfigFloat(_drinkPlayerPowerCostMultiplier.Value)}.");
         Log.LogInfo($"Drink enemy Qi cost multiplier starts at x{FormatConfigFloat(_drinkEnemyPowerCostMultiplier.Value)}.");
         Log.LogInfo(
@@ -498,6 +525,37 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         TryGrantCraftBonusItems(__instance, itemData, treasureChestClickTime, skipManageItemPoison);
+    }
+
+    private static void BasicGetItemPostfix(HeroData __instance, ItemData itemData, bool showPopInfo)
+    {
+        TryGrantCraftBonusItems(__instance, itemData, 0, false);
+    }
+
+    private static void ItemListGetItemPostfix(ItemListData __instance, ItemData targetItem, bool showPopInfo)
+    {
+        var bonusState = _activeCraftRewardBonus;
+        if (!_craftRandomPickUpgradeEnabled.Value || bonusState == null || bonusState.ExtraItemCount <= 0)
+        {
+            return;
+        }
+
+        var playerInventory = TryGetPlayerHero()?.itemListData;
+        LogCraftEvent(
+            $"ItemListData.GetItem observed item={DescribeItemSummary(targetItem)}, activeBonus={bonusState.ExtraItemCount}, consumed={bonusState.Consumed}, playerInventory={SafeFormatValue(playerInventory != null && ReferenceEquals(playerInventory, __instance))}, replayingChoice={SafeFormatValue(_repeatingCraftChoiceReward)}");
+    }
+
+    private static void CraftUiResultChoosenPostfix(CraftUIController __instance, int id)
+    {
+        if (!_craftRandomPickUpgradeEnabled.Value || _repeatingCraftChoiceReward)
+        {
+            return;
+        }
+
+        var bonusState = _activeCraftRewardBonus;
+        var craftResult = ResolveCraftResultByIndex(__instance, id);
+        LogCraftEvent(
+            $"CraftUIController.CraftResultChoosen observed id={id}, item={DescribeItemSummary(craftResult)}, activeBonus={(bonusState == null ? "none" : bonusState.ExtraItemCount.ToString())}, consumed={SafeFormatValue(bonusState?.Consumed)}");
     }
 
     private static bool TreasureChestChoicePlotCallbackPrefix(object[] __args)
@@ -1394,6 +1452,99 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         ResetCraftRewardTracking("CraftUI.HideCraftUI");
     }
 
+    private static void GetCraftMaterialExtraCraftRatePostfix(CraftUIController __instance, ref float __result)
+    {
+        if (!_craftRandomPickUpgradeEnabled.Value)
+        {
+            return;
+        }
+
+        var material = ResolveCraftAddedMaterial(__instance);
+        var mappedBonus = GetCraftExtraItemCountFromMaterial(material);
+        if (mappedBonus <= 0f)
+        {
+            return;
+        }
+
+        __result = mappedBonus;
+
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo(
+                $"Craft material extra rate overridden from controller: material={DescribeItemSummary(material)}, mappedBonus={SafeFormatValue(mappedBonus)}.");
+        }
+    }
+
+    private static void GetItemMaterialExtraCraftRatePostfix(ItemData __instance, ref float __result)
+    {
+        if (!_craftRandomPickUpgradeEnabled.Value)
+        {
+            return;
+        }
+
+        var mappedBonus = GetCraftExtraItemCountFromMaterial(__instance);
+        if (mappedBonus <= 0f)
+        {
+            return;
+        }
+
+        __result = mappedBonus;
+
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo(
+                $"Craft material extra rate overridden from item: material={DescribeItemSummary(__instance)}, mappedBonus={SafeFormatValue(mappedBonus)}.");
+        }
+    }
+
+    private static void SetPlotItemPostfix(PlotController __instance, ItemData targetItem, bool show)
+    {
+        if (!_craftRandomPickUpgradeEnabled.Value)
+        {
+            return;
+        }
+
+        LogCraftEvent($"SetPlotItem show={show}, target={DescribeItemSummary(targetItem)}, activePlotItem={DescribeItemSummary(__instance?.plotInteractItem)}");
+    }
+
+    private static void PlayerGetPlotItemPrefix(PlotController __instance, out PlotItemGrantState __state)
+    {
+        __state = new PlotItemGrantState
+        {
+            ItemBefore = __instance?.plotInteractItem,
+            Source = nameof(PlotController.PlayerGetPlotItem)
+        };
+
+        if (_craftRandomPickUpgradeEnabled.Value)
+        {
+            LogCraftEvent($"PlayerGetPlotItem prefix item={DescribeItemSummary(__state.ItemBefore)}");
+        }
+    }
+
+    private static void PlayerGetPlotItemPostfix(PlotController __instance, PlotItemGrantState __state)
+    {
+        TryRepeatCraftPlotItemReward(__instance, __state);
+    }
+
+    private static void PlayerGetPlotItemSimplePrefix(PlotController __instance, out PlotItemGrantState __state)
+    {
+        __state = new PlotItemGrantState
+        {
+            ItemBefore = __instance?.plotInteractItem,
+            Source = nameof(PlotController.PlayerGetPlotItemSimple)
+        };
+
+        if (_craftRandomPickUpgradeEnabled.Value)
+        {
+            LogCraftEvent($"PlayerGetPlotItemSimple prefix item={DescribeItemSummary(__state.ItemBefore)}");
+        }
+    }
+
+    private static void PlayerGetPlotItemSimplePostfix(PlotController __instance, PlotItemGrantState __state)
+    {
+        TryRepeatCraftPlotItemReward(__instance, __state);
+    }
+
     private static void UpdateTreasureTradeOverlay(TradeUIController tradeUi, int identifyCost)
     {
         var opportunity = TryResolveTreasureTradeOpportunity(tradeUi, identifyCost);
@@ -2004,6 +2155,54 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         return false;
     }
 
+    private static int CountMatchingItems(ItemListData? itemList, ItemData? targetItem)
+    {
+        if (itemList == null || targetItem == null)
+        {
+            return 0;
+        }
+
+        var allItems = itemList.allItem;
+        var count = TryGetCollectionCount(allItems);
+        if (count <= 0)
+        {
+            return 0;
+        }
+
+        var matches = 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (AreItemsEquivalent(TryGetIndexedValue(allItems, i) as ItemData, targetItem))
+            {
+                matches++;
+            }
+        }
+
+        return matches;
+    }
+
+    private static bool AreItemsEquivalent(ItemData? left, ItemData? right)
+    {
+        if (left == null || right == null)
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        if (left.itemID > 0 && right.itemID > 0)
+        {
+            return left.itemID == right.itemID && left.itemLv == right.itemLv && left.rareLv == right.rareLv;
+        }
+
+        return string.Equals(left.name, right.name, StringComparison.Ordinal) &&
+               left.itemLv == right.itemLv &&
+               left.rareLv == right.rareLv;
+    }
+
     private static void AdjustItemListMoney(ItemListData? itemList, int delta)
     {
         if (itemList == null || delta == 0)
@@ -2360,6 +2559,56 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         RememberCraftSelection(craftResult);
     }
 
+    private static void CraftResultChoosenPostfix(PlotController __instance, ItemData craftResult)
+    {
+        if (!_craftRandomPickUpgradeEnabled.Value || _repeatingCraftChoiceReward)
+        {
+            return;
+        }
+
+        var bonusState = _activeCraftRewardBonus;
+        LogCraftEvent(
+            $"PlotController.CraftResultChoosen observed item={DescribeItemSummary(craftResult)}, activeBonus={(bonusState == null ? "none" : bonusState.ExtraItemCount.ToString())}, consumed={SafeFormatValue(bonusState?.Consumed)}, replayingChoice={SafeFormatValue(_repeatingCraftChoiceReward)}");
+
+        if (bonusState == null || bonusState.ExtraItemCount <= 0 || bonusState.Consumed || craftResult == null)
+        {
+            return;
+        }
+
+        bonusState.Consumed = true;
+        _activeCraftRewardBonus = null;
+        _pendingCraftSelection = null;
+        _repeatingCraftChoiceReward = true;
+
+        var repeated = 0;
+        try
+        {
+            for (var i = 0; i < bonusState.ExtraItemCount; i++)
+            {
+                __instance.CraftResultChoosen(craftResult);
+                repeated++;
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to repeat PlotController.CraftResultChoosen for crafted reward: {ex.Message}");
+        }
+        finally
+        {
+            _repeatingCraftChoiceReward = false;
+        }
+
+        if (repeated <= 0)
+        {
+            LogCraftEvent($"PlotController.CraftResultChoosen repeat failed for item={DescribeItemSummary(craftResult)}");
+            return;
+        }
+
+        PushPlayerLog($"【巧手增产】：加入【{bonusState.MaterialName}】后，额外获得 {repeated} 个【{craftResult.name ?? $"id={craftResult.itemID}"}】");
+        LogCraftEvent(
+            $"PlotController.CraftResultChoosen repeated {repeated}x item={DescribeItemSummary(craftResult)} using material={bonusState.MaterialName}, majorTier={bonusState.MaterialMajorTier}");
+    }
+
     private static void FinishCraftPrefix()
     {
         ActivateCraftRewardBonus("PlotController.FinishCraft");
@@ -2367,13 +2616,10 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
     private static void FinishCraftPostfix()
     {
-        if (_activeCraftRewardBonus != null && _traceMode.Value)
+        if (_activeCraftRewardBonus != null)
         {
-            LoggerInstance.LogInfo("Craft quantity bonus window closed before any matching item grant consumed it.");
+            LogCraftEvent($"FinishCraft postfix activeBonus={_activeCraftRewardBonus.ExtraItemCount}, plotItem={DescribeItemSummary(PlotController.Instance?.plotInteractItem)}");
         }
-
-        _activeCraftRewardBonus = null;
-        _pendingCraftSelection = null;
     }
 
     private static void FinishCraftPoisonPrefix()
@@ -3385,11 +3631,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             ExtraItemCount = extraItemCount
         };
 
-        if (_traceMode.Value)
-        {
-            LoggerInstance.LogInfo(
-                $"Craft quantity bonus armed from {source}: material={DescribeItemSummary(addedMaterial)}, majorTier={materialMajorTier}, extraItems={extraItemCount}.");
-        }
+        LogCraftEvent(
+            $"armed from {source}: material={DescribeItemSummary(addedMaterial)}, majorTier={materialMajorTier}, extraItems={extraItemCount}, primary={DescribeItemSummary(controller?.craftMaterialData)}, secondary={DescribeItemSummary(controller?.craftMaterialDataSub)}");
     }
 
     private static string DescribeItemSummary(ItemData? item)
@@ -3427,9 +3670,38 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         return secondary ?? primary;
     }
 
+    private static ItemData? ResolveCraftResultByIndex(CraftUIController? controller, int index)
+    {
+        if (controller == null || index < 0)
+        {
+            return null;
+        }
+
+        var craftResultList = SafeProperty(controller, "craftResultList") ?? SafeField(controller, "craftResultList");
+        if (craftResultList == null)
+        {
+            return null;
+        }
+
+        return TryGetIndexedValue(craftResultList, index) as ItemData;
+    }
+
     private static int GetCraftExtraItemCountFromMaterial(ItemData? material)
     {
-        return Mathf.Clamp(GetCraftMajorTier(material) - 1, 0, 4);
+        return GetCraftConfiguredExtraItems(GetCraftMajorTier(material));
+    }
+
+    private static int GetCraftConfiguredExtraItems(int majorTier)
+    {
+        return majorTier switch
+        {
+            1 => Math.Max(0, _craftTier1ExtraItems.Value),
+            2 => Math.Max(0, _craftTier2ExtraItems.Value),
+            3 => Math.Max(0, _craftTier3ExtraItems.Value),
+            4 => Math.Max(0, _craftTier4ExtraItems.Value),
+            5 => Math.Max(0, _craftTier5ExtraItems.Value),
+            _ => 0
+        };
     }
 
     private static float TryGetCraftMaterialExtraRate(ItemData? material)
@@ -3451,20 +3723,80 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
     private static void TryGrantCraftBonusItems(HeroData? targetHero, ItemData? itemData, int treasureChestClickTime, bool skipManageItemPoison)
     {
-        if (_grantingCraftBonusItems || treasureChestClickTime > 0 || targetHero == null || itemData == null)
+        var bonusState = _activeCraftRewardBonus;
+        if (bonusState == null || bonusState.ExtraItemCount <= 0)
+        {
+            return;
+        }
+
+        LogCraftEvent(
+            $"HeroData.GetItem observed item={DescribeItemSummary(itemData)}, chestClick={treasureChestClickTime}, activeBonus={bonusState.ExtraItemCount}, consumed={bonusState.Consumed}, hero={TryGetHeroName(targetHero)}");
+    }
+
+    private static int TryGrantCraftBonusViaHeroFallback(ItemData? item, int remainingCopies)
+    {
+        if (item == null || remainingCopies <= 0)
+        {
+            return 0;
+        }
+
+        var player = TryGetPlayerHero();
+        if (player == null)
+        {
+            LogCraftEvent("Hero fallback skipped: player unavailable");
+            return 0;
+        }
+
+        var granted = 0;
+        try
+        {
+            for (var i = 0; i < remainingCopies; i++)
+            {
+                var bonusItem = TryCloneItem(item);
+                if (bonusItem == null)
+                {
+                    LogCraftEvent($"Hero fallback clone failed for item={DescribeItemSummary(item)} at repeatIndex={i + 1}");
+                    continue;
+                }
+
+                player.GetItem(bonusItem, false, false, 0, false);
+                granted++;
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Hero fallback failed for crafted reward replay: {ex.Message}");
+        }
+
+        if (granted > 0)
+        {
+            LogCraftEvent($"Hero fallback granted {granted}x item={DescribeItemSummary(item)}");
+        }
+
+        return granted;
+    }
+
+    private static void TryRepeatCraftPlotItemReward(PlotController? plotController, PlotItemGrantState? state)
+    {
+        if (!_craftRandomPickUpgradeEnabled.Value)
         {
             return;
         }
 
         var bonusState = _activeCraftRewardBonus;
-        if (bonusState == null || bonusState.ExtraItemCount <= 0 || bonusState.Consumed)
+        var item = state?.ItemBefore;
+        LogCraftEvent(
+            $"{state?.Source ?? "PlotItem"} postfix itemBefore={DescribeItemSummary(item)}, itemAfter={DescribeItemSummary(plotController?.plotInteractItem)}, activeBonus={(bonusState == null ? "none" : bonusState.ExtraItemCount.ToString())}, consumed={SafeFormatValue(bonusState?.Consumed)}");
+
+        if (bonusState == null || bonusState.ExtraItemCount <= 0 || bonusState.Consumed || item == null || _grantingCraftBonusItems)
         {
             return;
         }
 
         var player = TryGetPlayerHero();
-        if (player == null || TryGetHeroId(targetHero) != TryGetHeroId(player))
+        if (player == null)
         {
+            LogCraftEvent("repeat skipped: player unavailable");
             return;
         }
 
@@ -3476,19 +3808,19 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         {
             for (var i = 0; i < bonusState.ExtraItemCount; i++)
             {
-                var bonusItem = TryCloneItem(itemData);
+                var bonusItem = TryCloneItem(item);
                 if (bonusItem == null)
                 {
                     continue;
                 }
 
-                player.GetItem(bonusItem, false, false, 0, skipManageItemPoison);
+                player.GetItem(bonusItem, false);
                 grantedCount++;
             }
         }
         catch (Exception ex)
         {
-            LoggerInstance.LogWarning($"Failed to grant craft quantity bonus items: {ex.Message}");
+            LoggerInstance.LogWarning($"Failed to repeat crafted plot item reward: {ex.Message}");
         }
         finally
         {
@@ -3499,13 +3831,18 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
         if (grantedCount <= 0)
         {
+            LogCraftEvent($"repeat finished with no cloned rewards for {DescribeItemSummary(item)}");
             return;
         }
 
-        var resultName = itemData.name ?? $"id={itemData.itemID}";
-        PushPlayerLog($"【巧手增产】：加入【{bonusState.MaterialName}】后，额外获得 {grantedCount} 个【{resultName}】");
-        LoggerInstance.LogInfo(
-            $"Craft quantity bonus granted: result={DescribeItemSummary(itemData)}, material={bonusState.MaterialName}, materialMajorTier={bonusState.MaterialMajorTier}, extraItems={grantedCount}.");
+        PushPlayerLog($"【巧手增产】：加入【{bonusState.MaterialName}】后，额外获得 {grantedCount} 个【{item.name ?? $"id={item.itemID}"}】");
+        LogCraftEvent(
+            $"repeat granted {grantedCount}x item={DescribeItemSummary(item)} using material={bonusState.MaterialName}, majorTier={bonusState.MaterialMajorTier}");
+    }
+
+    private static void LogCraftEvent(string message)
+    {
+        LoggerInstance.LogInfo($"[CraftTrace] {message}");
     }
 
     private static ItemData? TryCloneItem(ItemData? item)

@@ -28,6 +28,11 @@ export interface VisibleSettings {
   debatePlayerDamageTakenMultiplier: number;
   debateEnemyDamageTakenMultiplier: number;
   craftRandomPickUpgrade: boolean;
+  craftTier1ExtraItems: number;
+  craftTier2ExtraItems: number;
+  craftTier3ExtraItems: number;
+  craftTier4ExtraItems: number;
+  craftTier5ExtraItems: number;
   drinkPlayerPowerCostMultiplier: number;
   drinkEnemyPowerCostMultiplier: number;
   dialogMonthlyLimitMultiplier: number;

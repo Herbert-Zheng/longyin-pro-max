@@ -9,11 +9,13 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.16")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.18")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
     private const string TreasureChestChoicePlotCallbackName = nameof(PlotController.ChangePlotDataBase);
+    private const string LoverChoiceTextKeyword = "结缘";
+    private const string LoverLimitReachedText = "情侣数已达上限";
     private const int DailySkillInsightMaxLevel = 10;
     private const int LuckyMoneyMinPercent = 1;
     private const int LuckyMoneyMaxPercent = 30;
@@ -59,6 +61,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<bool> _teamAutoFavorEnabled = null!;
     private static ConfigEntry<float> _teamAutoFavorPerDay = null!;
     private static ConfigEntry<float> _teamStayDurationMultiplier = null!;
+    private static ConfigEntry<int> _maxLoverCount = null!;
     private static ConfigEntry<float> _debatePlayerDamageTakenMultiplier = null!;
     private static ConfigEntry<float> _debateEnemyDamageTakenMultiplier = null!;
     private static ConfigEntry<bool> _craftRandomPickUpgradeEnabled = null!;
@@ -202,6 +205,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _teamAutoFavorEnabled = Config.Bind("Relationship", "TeamAutoFavorEnabled", true, "When true, current player teammates automatically gain favor each elapsed in-game day.");
         _teamAutoFavorPerDay = Config.Bind("Relationship", "TeamAutoFavorPerDay", 5f, "Favor granted to each current player teammate per elapsed in-game day.");
         _teamStayDurationMultiplier = Config.Bind("Relationship", "TeamStayDurationMultiplier", 3f, "Multiplies how long temporary recruited teammates stay before asking to leave. Vanilla is about 30 days, so 3 means about 90 days.");
+        _maxLoverCount = Config.Bind("Relationship", "MaxLoverCount", 8, "Overrides the maximum number of lovers/couples the player can have at the same time. Vanilla appears to be 4.");
         _debatePlayerDamageTakenMultiplier = Config.Bind("Debate", "PlayerDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the player side when a round is lost.");
         _debateEnemyDamageTakenMultiplier = Config.Bind("Debate", "EnemyDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the enemy side when a round is won.");
         _craftRandomPickUpgradeEnabled = Config.Bind("Craft", "RandomPickUpgrade", true, "Uses the picked craft result as the base item, then regenerates it toward the next major tier.");
@@ -249,6 +253,15 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(PlotController), nameof(PlotController.NewAskJoinResult), new[] { typeof(string) }, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.AskHeroJoinTeamTemp), Type.EmptyTypes, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.SureHeroJoinTeamTemp), Type.EmptyTypes, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.LoverInteractWithNPC), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.AskHeroToLover), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.StartAskHeroToLoverPlot), new[] { typeof(string) }, nameof(MaxLoverCountSyncPrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.SureHeroToLover), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.FinishHeroToLover), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.CheckChoiceMeetRequire), new[] { typeof(Il2CppSystem.Collections.Generic.List<PlotChoiceRequirement>), typeof(bool) }, nameof(MaxLoverCountSyncPrefix), nameof(CheckChoiceMeetRequirePostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.CheckMeetRequire), new[] { typeof(ChoiceRequirementType), typeof(float), typeof(bool) }, nameof(MaxLoverCountSyncPrefix), null);
+        PatchMethod(typeof(GlobalData), "get_MaxLoverNum", Type.EmptyTypes, null, nameof(GlobalDataMaxLoverNumPostfix));
+        PatchMethod(typeof(GameController), nameof(GameController.MeetLoverResultRequire), Type.EmptyTypes, null, nameof(MeetLoverResultRequirePostfix));
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.Update), Type.EmptyTypes, null, nameof(DialogChoiceRowPostfix));
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.OnClick), Type.EmptyTypes, nameof(DialogChoiceClickPrefix), null);
         PatchMethod(typeof(BuildChoiceButtonController), nameof(BuildChoiceButtonController.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
@@ -309,6 +322,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo($"Extra relationship gain chance starts at {ClampPercent(_extraRelationshipGainChancePercent.Value)}%.");
         Log.LogInfo($"Team auto favor starts {(_teamAutoFavorEnabled.Value ? "ON" : "OFF")} at +{FormatConfigFloat(Math.Max(0f, _teamAutoFavorPerDay.Value))}/day.");
         Log.LogInfo($"Temporary teammate stay multiplier starts at x{FormatConfigFloat(Math.Max(0.01f, _teamStayDurationMultiplier.Value))}.");
+        Log.LogInfo($"Max lover count override starts at {Math.Max(1, _maxLoverCount.Value)}.");
         Log.LogInfo($"Debate player damage taken multiplier starts at x{FormatConfigFloat(_debatePlayerDamageTakenMultiplier.Value)}.");
         Log.LogInfo($"Debate enemy damage taken multiplier starts at x{FormatConfigFloat(_debateEnemyDamageTakenMultiplier.Value)}.");
         Log.LogInfo($"Craft picked-result major-tier upgrade starts {(_craftRandomPickUpgradeEnabled.Value ? "ON" : "OFF")}.");
@@ -1692,6 +1706,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
     private static void GameControllerUpdatePostfix()
     {
+        ApplyConfiguredMaxLoverCount("GameController.Update");
         EnsureDailySkillInsightBaseline();
         TryRunRealtimeSkillInsight();
         UpdateTreasureChestChoiceSession();
@@ -1720,6 +1735,74 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         CacheActiveDialogHero(__0);
     }
 
+    private static void GlobalDataMaxLoverNumPostfix(ref int __result)
+    {
+        ApplyConfiguredMaxLoverCount("GlobalData.get_MaxLoverNum");
+        var configured = Math.Max(1, _maxLoverCount.Value);
+        if (__result < configured)
+        {
+            __result = configured;
+        }
+    }
+
+    private static void MeetLoverResultRequirePostfix(ref bool __result)
+    {
+        ApplyConfiguredMaxLoverCount("GameController.MeetLoverResultRequire");
+        if (__result)
+        {
+            return;
+        }
+
+        var player = TryGetPlayerHero();
+        if (player == null)
+        {
+            return;
+        }
+
+        var configured = Math.Max(1, _maxLoverCount.Value);
+        var currentCount = GetPlayerLoverCount(player);
+        if (currentCount < configured)
+        {
+            __result = true;
+            LoggerInstance.LogInfo($"Lover limit override allowed romance result: current={currentCount}, configuredMax={configured}.");
+        }
+    }
+
+    private static void MaxLoverCountSyncPrefix()
+    {
+        ApplyConfiguredMaxLoverCount("lover-flow");
+    }
+
+    private static void CheckChoiceMeetRequirePostfix(ref bool __result)
+    {
+        ApplyConfiguredMaxLoverCount("PlotController.CheckChoiceMeetRequire");
+        if (__result)
+        {
+            return;
+        }
+
+        var choice = PlotController.Instance?.newChoice ?? PlotController.Instance?.nowChoice;
+        if (!IsLoverChoice(choice))
+        {
+            return;
+        }
+
+        var player = TryGetPlayerHero();
+        if (player == null)
+        {
+            return;
+        }
+
+        var configured = Math.Max(1, _maxLoverCount.Value);
+        var currentCount = GetPlayerLoverCount(player);
+        if (currentCount < configured)
+        {
+            __result = true;
+            TrySanitizeLoverChoiceDescribe(choice);
+            LoggerInstance.LogInfo($"Lover choice meet requirement override allowed romance choice: current={currentCount}, configuredMax={configured}.");
+        }
+    }
+
     private static void TeamStayJoinFlowPrefix(out TeamStayJoinState __state)
     {
         var hero = ResolveTrackedDialogHero();
@@ -1746,6 +1829,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         ApplyDialogMonthlyQuota(__instance, __instance.choiceData, consume: false);
+        TryOverrideLoverChoiceAvailability(__instance, __instance.choiceData, sanitizeDescribe: true);
     }
 
     private static bool DialogChoiceClickPrefix(PlotInteractController __instance)
@@ -1756,6 +1840,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         ApplyDialogMonthlyQuota(__instance, __instance.choiceData, consume: true);
+        TryOverrideLoverChoiceAvailability(__instance, __instance.choiceData, sanitizeDescribe: true);
         if (TryHandleTreasureChestChoiceClick(__instance.choiceData))
         {
             return false;
@@ -1958,6 +2043,84 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
         SyncVanillaDialogMonthlyUsage(choice, timeNeedValue, Math.Max(0, limit - used));
         controller.meetCost = allowed;
+    }
+
+    private static void TryOverrideLoverChoiceAvailability(PlotInteractController controller, SinglePlotChoiceData choice, bool sanitizeDescribe)
+    {
+        if (!IsLoverChoice(choice))
+        {
+            return;
+        }
+
+        var player = TryGetPlayerHero();
+        if (player == null)
+        {
+            return;
+        }
+
+        var configured = Math.Max(1, _maxLoverCount.Value);
+        var currentCount = GetPlayerLoverCount(player);
+        if (currentCount >= configured)
+        {
+            return;
+        }
+
+        controller.meetRequire = true;
+        if (sanitizeDescribe)
+        {
+            TrySanitizeLoverChoiceDescribe(choice);
+        }
+    }
+
+    private static bool IsLoverChoice(SinglePlotChoiceData? choice)
+    {
+        if (choice == null)
+        {
+            return false;
+        }
+
+        var choiceText = TryReadStringMember(choice, new[] { "choiceText" });
+        if (!string.IsNullOrWhiteSpace(choiceText) &&
+            choiceText.Contains(LoverChoiceTextKeyword, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var callFuc = TryReadStringMember(choice, new[] { "callFuc" });
+        if (!string.IsNullOrWhiteSpace(callFuc) &&
+            callFuc.IndexOf("Lover", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        var callParam = TryReadStringMember(choice, new[] { "callParam" });
+        if (!string.IsNullOrWhiteSpace(callParam) &&
+            callParam.IndexOf("Lover", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        var describe = TryReadStringMember(choice, new[] { "describe" });
+        return !string.IsNullOrWhiteSpace(describe) &&
+               describe.Contains(LoverLimitReachedText, StringComparison.Ordinal);
+    }
+
+    private static void TrySanitizeLoverChoiceDescribe(SinglePlotChoiceData choice)
+    {
+        var describe = TryReadStringMember(choice, new[] { "describe" });
+        if (string.IsNullOrWhiteSpace(describe) ||
+            !describe.Contains(LoverLimitReachedText, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var sanitized = describe.Replace(LoverLimitReachedText + "!", string.Empty, StringComparison.Ordinal)
+                                .Replace(LoverLimitReachedText, string.Empty, StringComparison.Ordinal)
+                                .Replace("，，", "，", StringComparison.Ordinal)
+                                .Trim();
+
+        sanitized = sanitized.TrimEnd('，', ',', ' ', '\t');
+        TrySetMemberValue(choice, "describe", sanitized);
     }
 
     private static int GetDialogMonthlyLimit(int heroId, string timeNeed)
@@ -3127,6 +3290,84 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         return player != null && hero != null && player == hero;
     }
 
+    private static void ApplyConfiguredMaxLoverCount(string source)
+    {
+        var configured = Math.Max(1, _maxLoverCount.Value);
+        if (TrySetStaticMemberValue(typeof(GlobalData), "MaxLoverNum", configured))
+        {
+            return;
+        }
+
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogWarning($"Max lover count override could not sync GlobalData.MaxLoverNum from {source}.");
+        }
+    }
+
+    private static int GetPlayerLoverCount(HeroData player)
+    {
+        var loverIds = new HashSet<int>();
+
+        try
+        {
+            if (player.Lover > 0)
+            {
+                loverIds.Add(player.Lover);
+            }
+        }
+        catch
+        {
+            var loverId = TryConvertToInt(SafeProperty(player, "Lover") ?? SafeField(player, "Lover") ?? SafeProperty(player, "lover") ?? SafeField(player, "lover"));
+            if (loverId.GetValueOrDefault() > 0)
+            {
+                loverIds.Add(loverId.Value);
+            }
+        }
+
+        try
+        {
+            var preLovers = player.PreLovers;
+            if (preLovers != null)
+            {
+                for (var i = 0; i < preLovers.Count; i++)
+                {
+                    if (preLovers[i] > 0)
+                    {
+                        loverIds.Add(preLovers[i]);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            var preLovers = SafeProperty(player, "PreLovers") ?? SafeField(player, "PreLovers");
+            if (preLovers != null)
+            {
+                try
+                {
+                    var count = TryConvertToInt(SafeProperty(preLovers, "Count") ?? SafeField(preLovers, "_size"));
+                    if (count.HasValue)
+                    {
+                        for (var i = 0; i < count.Value; i++)
+                        {
+                            var entry = TryGetIndexedValue(preLovers, i);
+                            var loverId = TryConvertToInt(entry);
+                            if (loverId.GetValueOrDefault() > 0)
+                            {
+                                loverIds.Add(loverId.Value);
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        return loverIds.Count;
+    }
+
     private static HorseData? TryGetPlayerHorse()
     {
         var player = TryGetPlayerHero();
@@ -3687,6 +3928,39 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         return false;
     }
 
+    private static bool TrySetStaticMemberValue(Type targetType, string name, object value)
+    {
+        const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+
+        try
+        {
+            var property = targetType.GetProperty(name, Flags);
+            if (property != null && property.CanWrite && TryConvertMemberValue(property.PropertyType, value, out var convertedPropertyValue))
+            {
+                property.SetValue(null, convertedPropertyValue);
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var field = targetType.GetField(name, Flags);
+            if (field != null && TryConvertMemberValue(field.FieldType, value, out var convertedFieldValue))
+            {
+                field.SetValue(null, convertedFieldValue);
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
     private static bool TrySetIndexedValue(object list, int index, object value)
     {
         try
@@ -3716,6 +3990,35 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         return false;
+    }
+
+    private static object? TryGetIndexedValue(object list, int index)
+    {
+        try
+        {
+            var property = list.GetType().GetProperty("Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (property != null && property.CanRead)
+            {
+                return property.GetValue(list, new object[] { index });
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var method = list.GetType().GetMethod("get_Item", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (method != null)
+            {
+                return method.Invoke(list, new object[] { index });
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
     }
 
     private static void ApplyMerchantCarryCash(TradeUIType targetType, ItemListData? merchantItemList, string source)

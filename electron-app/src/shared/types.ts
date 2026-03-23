@@ -22,6 +22,7 @@ export interface VisibleSettings {
   teamAutoFavorEnabled: boolean;
   teamAutoFavorPerDay: number;
   teamStayDurationMultiplier: number;
+  maxLoverCount: number;
   debatePlayerDamageTakenMultiplier: number;
   debateEnemyDamageTakenMultiplier: number;
   craftRandomPickUpgrade: boolean;

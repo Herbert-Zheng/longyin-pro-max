@@ -61,6 +61,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   teamAutoFavorEnabled: true,
   teamAutoFavorPerDay: 5,
   teamStayDurationMultiplier: 3,
+  maxLoverCount: 8,
   debatePlayerDamageTakenMultiplier: 1,
   debateEnemyDamageTakenMultiplier: 1,
   craftRandomPickUpgrade: true,
@@ -372,6 +373,7 @@ ExtraRelationshipGainChancePercent = ${settings.extraRelationshipGainChancePerce
 TeamAutoFavorEnabled = ${boolText(settings.teamAutoFavorEnabled)}
 TeamAutoFavorPerDay = ${formatFloat(settings.teamAutoFavorPerDay)}
 TeamStayDurationMultiplier = ${formatFloat(settings.teamStayDurationMultiplier)}
+MaxLoverCount = ${settings.maxLoverCount}
 
 [Debate]
 PlayerDamageTakenMultiplier = ${formatFloat(settings.debatePlayerDamageTakenMultiplier)}
@@ -529,6 +531,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     teamAutoFavorEnabled: input.teamAutoFavorEnabled,
     teamAutoFavorPerDay: clamp(input.teamAutoFavorPerDay, 0, 999),
     teamStayDurationMultiplier: clamp(input.teamStayDurationMultiplier, 0.1, 999),
+    maxLoverCount: Math.round(clamp(input.maxLoverCount, 1, 999)),
     debatePlayerDamageTakenMultiplier: clamp(input.debatePlayerDamageTakenMultiplier, 0, 999),
     debateEnemyDamageTakenMultiplier: clamp(input.debateEnemyDamageTakenMultiplier, 0, 999),
     craftRandomPickUpgrade: input.craftRandomPickUpgrade,
@@ -599,6 +602,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       relationshipSection ?? text,
       'TeamStayDurationMultiplier',
       DEFAULT_VISIBLE_SETTINGS.teamStayDurationMultiplier
+    ),
+    maxLoverCount: readInt(
+      relationshipSection ?? text,
+      'MaxLoverCount',
+      DEFAULT_VISIBLE_SETTINGS.maxLoverCount
     ),
     debatePlayerDamageTakenMultiplier: readFloat(
       text,
@@ -891,6 +899,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'Relationship',
     'TeamStayDurationMultiplier',
     formatFloat(normalized.teamStayDurationMultiplier)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Relationship',
+    'MaxLoverCount',
+    String(normalized.maxLoverCount)
   );
   nextMain = removeIniSectionValue(nextMain, 'Commerce', 'ExtraRelationshipGainChancePercent');
   nextMain = upsertIniValue(

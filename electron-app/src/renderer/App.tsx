@@ -885,6 +885,15 @@ export function App() {
                   step={0.25}
                   hint="临时入队 NPC 的停留时间按这个倍率缩放。3 倍约等于 90 天。"
                 />
+                <NumberField
+                  label="伴侣上限"
+                  value={settings.maxLoverCount}
+                  onChange={(value) => updateSetting('maxLoverCount', value)}
+                  min={1}
+                  max={999}
+                  step={1}
+                  hint="提高玩家可同时拥有的伴侣/夫妻数量。默认改为 8。"
+                />
                 <CheckboxField
                   label="选定结果 +1 大阶重掷"
                   value={settings.craftRandomPickUpgrade}

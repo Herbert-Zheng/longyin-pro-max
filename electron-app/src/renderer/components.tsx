@@ -50,6 +50,7 @@ export function defaultSettings(): VisibleSettings {
     teamAutoFavorEnabled: true,
     teamAutoFavorPerDay: 5,
     teamStayDurationMultiplier: 3,
+    maxLoverCount: 8,
     debatePlayerDamageTakenMultiplier: 1,
     debateEnemyDamageTakenMultiplier: 1,
     craftRandomPickUpgrade: true,

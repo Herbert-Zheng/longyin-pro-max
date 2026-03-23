@@ -57,6 +57,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   carryWeightCap: 100000,
   ignoreCarryWeight: false,
   merchantCarryCash: 100000,
+  treasureAutoTradeEnabled: true,
   luckyHitChancePercent: 0,
   extraRelationshipGainChancePercent: 0,
   teamAutoFavorEnabled: true,
@@ -366,6 +367,7 @@ IgnoreCarryWeight = ${boolText(settings.ignoreCarryWeight)}
 
 [Commerce]
 MerchantCarryCash = ${settings.merchantCarryCash}
+TreasureAutoTradeEnabled = ${boolText(settings.treasureAutoTradeEnabled)}
 
 [MoneyLuck]
 LuckyHitChancePercent = ${settings.luckyHitChancePercent}
@@ -529,6 +531,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     carryWeightCap: clamp(input.carryWeightCap, 0, 999999999),
     ignoreCarryWeight: input.ignoreCarryWeight,
     merchantCarryCash: Math.round(clamp(input.merchantCarryCash, 0, 999999999)),
+    treasureAutoTradeEnabled: input.treasureAutoTradeEnabled,
     luckyHitChancePercent: Math.round(clamp(input.luckyHitChancePercent, 0, 100)),
     extraRelationshipGainChancePercent: Math.round(clamp(input.extraRelationshipGainChancePercent, 0, 100)),
     teamAutoFavorEnabled: input.teamAutoFavorEnabled,
@@ -591,6 +594,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
     carryWeightCap: readFloat(text, 'CarryWeightCap', DEFAULT_VISIBLE_SETTINGS.carryWeightCap),
     ignoreCarryWeight: readBool(text, 'IgnoreCarryWeight', DEFAULT_VISIBLE_SETTINGS.ignoreCarryWeight),
     merchantCarryCash: readInt(text, 'MerchantCarryCash', DEFAULT_VISIBLE_SETTINGS.merchantCarryCash),
+    treasureAutoTradeEnabled: readBool(
+      text,
+      'TreasureAutoTradeEnabled',
+      DEFAULT_VISIBLE_SETTINGS.treasureAutoTradeEnabled
+    ),
     luckyHitChancePercent: readInt(text, 'LuckyHitChancePercent', DEFAULT_VISIBLE_SETTINGS.luckyHitChancePercent),
     extraRelationshipGainChancePercent: readInt(
       relationshipSection ?? text,
@@ -884,6 +892,7 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   nextMain = upsertIniValue(nextMain, 'CarryWeightCap', formatFloat(normalized.carryWeightCap));
   nextMain = upsertIniValue(nextMain, 'IgnoreCarryWeight', boolText(normalized.ignoreCarryWeight));
   nextMain = upsertIniValue(nextMain, 'MerchantCarryCash', String(normalized.merchantCarryCash));
+  nextMain = upsertIniValue(nextMain, 'TreasureAutoTradeEnabled', boolText(normalized.treasureAutoTradeEnabled));
   nextMain = upsertIniSectionValue(nextMain, 'MoneyLuck', 'LuckyHitChancePercent', String(normalized.luckyHitChancePercent));
   nextMain = removeIniSectionValue(nextMain, 'Commerce', 'LuckyHitChancePercent');
   nextMain = upsertIniSectionValue(

@@ -18,6 +18,7 @@ export interface VisibleSettings {
   carryWeightCap: number;
   ignoreCarryWeight: boolean;
   merchantCarryCash: number;
+  treasureAutoTradeEnabled: boolean;
   luckyHitChancePercent: number;
   extraRelationshipGainChancePercent: number;
   teamAutoFavorEnabled: boolean;

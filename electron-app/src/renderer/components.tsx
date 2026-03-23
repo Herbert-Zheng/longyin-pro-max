@@ -46,6 +46,7 @@ export function defaultSettings(): VisibleSettings {
     carryWeightCap: 100000,
     ignoreCarryWeight: false,
     merchantCarryCash: 100000,
+    treasureAutoTradeEnabled: true,
     luckyHitChancePercent: 0,
     extraRelationshipGainChancePercent: 0,
     teamAutoFavorEnabled: true,

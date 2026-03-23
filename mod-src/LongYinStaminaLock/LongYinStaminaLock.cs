@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Configuration;
@@ -8,8 +9,9 @@ using BepInEx.Unity.IL2CPP;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.27.18")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.28.5")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -57,6 +59,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<float> _carryWeightCap = null!;
     private static ConfigEntry<bool> _ignoreCarryWeight = null!;
     private static ConfigEntry<int> _merchantCarryCash = null!;
+    private static ConfigEntry<bool> _treasureTradeHelperEnabled = null!;
+    private static ConfigEntry<bool> _treasureAutoTradeEnabled = null!;
     private static ConfigEntry<int> _luckyMoneyHitChancePercent = null!;
     private static ConfigEntry<int> _extraRelationshipGainChancePercent = null!;
     private static ConfigEntry<bool> _teamAutoFavorEnabled = null!;
@@ -93,6 +97,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static bool _applyingLuckyMoneyRefund;
     private static bool _applyingDailySkillInsightExp;
     private static bool _applyingTeamAutoFavor;
+    private static bool _grantingCraftBonusItems;
     private static bool _exploreFullRevealConsumed;
     private static bool _grantingTreasureChestChoiceReward;
     private static bool _grantingTreasureChestBonusItems;
@@ -178,7 +183,47 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         public int PendingAutoPickFrames { get; set; }
     }
 
+    private sealed class TreasureTradeOpportunity
+    {
+        public ItemData Item { get; init; } = null!;
+        public ItemIconController Icon { get; init; } = null!;
+        public TradeIconType IconType { get; init; }
+        public int BuyPrice { get; init; }
+        public int CurrentSellPrice { get; init; }
+        public int IdentifiedSellPrice { get; init; }
+        public int IdentifyCost { get; init; }
+        public int RealValue { get; init; }
+        public float SkillBuyFactor { get; init; }
+        public float SkillSellFactor { get; init; }
+        public int NetProfit => IdentifiedSellPrice - BuyPrice - IdentifyCost;
+        public int IdentifyGain => IdentifiedSellPrice - CurrentSellPrice - IdentifyCost;
+    }
+
+    private sealed class CraftRewardSelection
+    {
+        public int ResultItemId { get; init; }
+        public int ResultItemLv { get; init; }
+        public int ResultRareLv { get; init; }
+        public string ResultName { get; init; } = string.Empty;
+    }
+
+    private sealed class CraftRewardBonusState
+    {
+        public string MaterialName { get; init; } = string.Empty;
+        public int MaterialMajorTier { get; init; }
+        public int ExtraItemCount { get; init; }
+        public bool Consumed { get; set; }
+    }
+
     private static TreasureChestChoiceSession? _activeTreasureChestChoiceSession;
+    private static CraftRewardSelection? _pendingCraftSelection;
+    private static CraftRewardBonusState? _activeCraftRewardBonus;
+    private static ItemIconController? _selectedTreasureTradeIcon;
+    private static Text? _treasureTradeOverlayLabel;
+    private static float _treasureTradeShopOpenedAtRealtime = -1f;
+    private static bool _treasureTradeAutoProcessed;
+    private static bool _treasureTradeBusy;
+    private static readonly HashSet<string> _treasureTradeLoggedSignatures = new(StringComparer.Ordinal);
 
     public override void Load()
     {
@@ -203,6 +248,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _carryWeightCap = Config.Bind("Inventory", "CarryWeightCap", 100000f, "Minimum carry-weight cap applied to the player inventory. Set to 0 to disable.");
         _ignoreCarryWeight = Config.Bind("Inventory", "IgnoreCarryWeight", false, "When true, forces the player inventory's current carried weight to 0.");
         _merchantCarryCash = Config.Bind("Commerce", "MerchantCarryCash", 100000, "Minimum cash carried by NPC shop merchants while a Shop trade window is open. Set to 0 to disable.");
+        _treasureTradeHelperEnabled = Config.Bind("Commerce", "TreasureTradeHelperEnabled", true, "Shows current treasure resale estimates and skill factors inside trade shops that list treasure items.");
+        _treasureAutoTradeEnabled = Config.Bind("Commerce", "TreasureAutoTradeEnabled", true, "Automatically adds profitable unidentified treasure items from the shop sell list into the trade cart when a trade shop opens.");
         _luckyMoneyHitChancePercent = Config.Bind("MoneyLuck", "LuckyHitChancePercent", 0, "Chance from 0 to 100 that a player money transaction triggers a lucky bonus.");
         _extraRelationshipGainChancePercent = Config.Bind("Relationship", "ExtraRelationshipGainChancePercent", 0, "Chance from 0 to 100 that positive relationship gain becomes double.");
         _teamAutoFavorEnabled = Config.Bind("Relationship", "TeamAutoFavorEnabled", true, "When true, current player teammates automatically gain favor each elapsed in-game day.");
@@ -211,7 +258,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _maxLoverCount = Config.Bind("Relationship", "MaxLoverCount", 8, "Overrides the maximum number of lovers/couples the player can have at the same time. Vanilla appears to be 4.");
         _debatePlayerDamageTakenMultiplier = Config.Bind("Debate", "PlayerDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the player side when a round is lost.");
         _debateEnemyDamageTakenMultiplier = Config.Bind("Debate", "EnemyDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the enemy side when a round is won.");
-        _craftRandomPickUpgradeEnabled = Config.Bind("Craft", "RandomPickUpgrade", true, "Uses the picked craft result as the base item, then regenerates it toward the next major tier.");
+        _craftRandomPickUpgradeEnabled = Config.Bind("Craft", "RandomPickUpgrade", true, "Adds extra crafted items based on the added crafting material's major tier. Trash grants +0, top tier grants +4.");
         _drinkPlayerPowerCostMultiplier = Config.Bind("Drink", "PlayerPowerCostMultiplier", 1f, "Multiplies Qi cost paid by the player side during the drinking minigame.");
         _drinkEnemyPowerCostMultiplier = Config.Bind("Drink", "EnemyPowerCostMultiplier", 1f, "Multiplies Qi cost paid by the enemy side during the drinking minigame.");
         _dailySkillInsightHitChancePercent = Config.Bind("DailySkillInsight", "HitChancePercent", 0, "Chance from 0 to 100 that each elapsed in-game day grants bonus skill EXP to one eligible martial skill.");
@@ -287,8 +334,13 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListType), typeof(ItemListData), typeof(ItemListData) }, null, nameof(ShowTradeUiTypedPostfix));
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListData), typeof(ItemListData), typeof(int), typeof(int) }, null, nameof(ShowTradeUiLevelRangePostfix));
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListType), typeof(ItemListData), typeof(ItemListData), typeof(int), typeof(int), typeof(bool), typeof(bool), typeof(float), typeof(float) }, null, nameof(ShowTradeUiFullPostfix));
+        PatchMethod(typeof(TradeUIController), nameof(TradeUIController.HideTradeUI), Type.EmptyTypes, null, nameof(HideTradeUiPostfix));
+        PatchMethod(typeof(ItemIconController), nameof(ItemIconController.OnClick), Type.EmptyTypes, null, nameof(ItemIconOnClickPostfix));
         PatchMethod(typeof(DebateUIController), nameof(DebateUIController.ChangePatient), new[] { typeof(bool), typeof(float) }, nameof(DebateChangePatientPrefix), null);
+        PatchMethod(typeof(CraftUIController), nameof(CraftUIController.OpenCraftUI), new[] { typeof(CraftType), typeof(AreaBuildingData), typeof(bool) }, null, nameof(OpenCraftUiPostfix));
+        PatchMethod(typeof(CraftUIController), nameof(CraftUIController.HideCraftUI), Type.EmptyTypes, null, nameof(HideCraftUiPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.CraftResultChoosen), new[] { typeof(ItemData) }, nameof(CraftResultChoosenPrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.FinishCraft), Type.EmptyTypes, nameof(FinishCraftPrefix), nameof(FinishCraftPostfix));
         PatchMethod(typeof(DrinkUIController), nameof(DrinkUIController.ShowDrinkUI), new[] { typeof(DrinkType), typeof(HeroData), typeof(ItemData), typeof(string) }, null, nameof(DrinkShowUiPostfix));
         PatchMethod(typeof(DrinkUIController), nameof(DrinkUIController.GetDrinkCost), new[] { typeof(float) }, null, nameof(DrinkGetCostPostfix));
         PatchMethod(typeof(DrinkUIController), nameof(DrinkUIController.HideDrinkUI), Type.EmptyTypes, null, nameof(DrinkHideUiPostfix));
@@ -324,6 +376,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo($"Carry-weight cap starts at {Math.Max(0f, _carryWeightCap.Value):0.###}.");
         Log.LogInfo($"Ignore carry weight starts {(_ignoreCarryWeight.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Merchant cash floor starts at {Math.Max(0, _merchantCarryCash.Value)}.");
+        Log.LogInfo($"Treasure trade helper starts {(_treasureTradeHelperEnabled.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Treasure auto cart starts {(_treasureAutoTradeEnabled.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
         Log.LogInfo($"Extra relationship gain chance starts at {ClampPercent(_extraRelationshipGainChancePercent.Value)}%.");
         Log.LogInfo($"Team auto favor starts {(_teamAutoFavorEnabled.Value ? "ON" : "OFF")} at +{FormatConfigFloat(Math.Max(0f, _teamAutoFavorPerDay.Value))}/day.");
@@ -331,7 +385,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo($"Max lover count override starts at {Math.Max(1, _maxLoverCount.Value)}.");
         Log.LogInfo($"Debate player damage taken multiplier starts at x{FormatConfigFloat(_debatePlayerDamageTakenMultiplier.Value)}.");
         Log.LogInfo($"Debate enemy damage taken multiplier starts at x{FormatConfigFloat(_debateEnemyDamageTakenMultiplier.Value)}.");
-        Log.LogInfo($"Craft picked-result major-tier upgrade starts {(_craftRandomPickUpgradeEnabled.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Craft added-material quantity bonus starts {(_craftRandomPickUpgradeEnabled.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Drink player Qi cost multiplier starts at x{FormatConfigFloat(_drinkPlayerPowerCostMultiplier.Value)}.");
         Log.LogInfo($"Drink enemy Qi cost multiplier starts at x{FormatConfigFloat(_drinkEnemyPowerCostMultiplier.Value)}.");
         Log.LogInfo(
@@ -437,12 +491,12 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             treasureChestClickTime,
             skipManageItemPoison,
             $"showPopInfo={showPopInfo}, showSpeGetItem={showSpeGetItem}, choiceEnabled={_treasureChestChoiceEnabled.Value}");
-        if (_treasureChestChoiceEnabled.Value)
+        if (!_treasureChestChoiceEnabled.Value)
         {
-            return;
+            TryGrantTreasureChestBonusItems(__instance, itemData, treasureChestClickTime, skipManageItemPoison);
         }
 
-        TryGrantTreasureChestBonusItems(__instance, itemData, treasureChestClickTime, skipManageItemPoison);
+        TryGrantCraftBonusItems(__instance, itemData, treasureChestClickTime, skipManageItemPoison);
     }
 
     private static bool TreasureChestChoicePlotCallbackPrefix(object[] __args)
@@ -1175,30 +1229,817 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     {
         ApplyPlayerCarryWeightOverride("BuildingUI.ShowBuildingShop");
         ApplyMerchantCarryCash(TradeUIType.Shop, __instance?.targetBuildingData?.shopItemList, "BuildingUI.ShowBuildingShop");
+        HandleTreasureTradeUiShown(TradeUIType.Shop, "BuildingUI.ShowBuildingShop");
     }
 
     private static void ShowTradeUiBasicPostfix(TradeUIType targetType, ItemListData leftItemList, ItemListData rightItemList, bool _useAreaItemPrice)
     {
         ApplyPlayerCarryWeightOverride("TradeUI.ShowTradeUI/basic");
         ApplyMerchantCarryCash(targetType, rightItemList, "TradeUI.ShowTradeUI/basic");
+        HandleTreasureTradeUiShown(targetType, "TradeUI.ShowTradeUI/basic");
     }
 
     private static void ShowTradeUiTypedPostfix(TradeUIType targetType, ItemListType targetItemListType, ItemListData leftItemList, ItemListData rightItemList)
     {
         ApplyPlayerCarryWeightOverride("TradeUI.ShowTradeUI/typed");
         ApplyMerchantCarryCash(targetType, rightItemList, "TradeUI.ShowTradeUI/typed");
+        HandleTreasureTradeUiShown(targetType, "TradeUI.ShowTradeUI/typed");
     }
 
     private static void ShowTradeUiLevelRangePostfix(TradeUIType targetType, ItemListData leftItemList, ItemListData rightItemList, int _minItemLv, int _maxItemLv)
     {
         ApplyPlayerCarryWeightOverride("TradeUI.ShowTradeUI/level-range");
         ApplyMerchantCarryCash(targetType, rightItemList, "TradeUI.ShowTradeUI/level-range");
+        HandleTreasureTradeUiShown(targetType, "TradeUI.ShowTradeUI/level-range");
     }
 
     private static void ShowTradeUiFullPostfix(TradeUIType targetType, ItemListType targetItemListType, ItemListData leftItemList, ItemListData rightItemList, int _minItemLv, int _maxItemLv, bool _useAreaItemPrice, bool _noSell, float _speSellValueRate, float _speBuyValueRate)
     {
         ApplyPlayerCarryWeightOverride("TradeUI.ShowTradeUI/full");
         ApplyMerchantCarryCash(targetType, rightItemList, "TradeUI.ShowTradeUI/full");
+        HandleTreasureTradeUiShown(targetType, "TradeUI.ShowTradeUI/full");
+    }
+
+    private static void HideTradeUiPostfix()
+    {
+        ResetTreasureTradeUiState("TradeUI.HideTradeUI");
+    }
+
+    private static void ItemIconOnClickPostfix(ItemIconController __instance)
+    {
+        CaptureTreasureTradeSelection(__instance);
+    }
+
+    private static void HandleTreasureTradeUiShown(TradeUIType targetType, string source)
+    {
+        if (targetType != TradeUIType.Shop)
+        {
+            ResetTreasureTradeUiState(source + "/non-shop");
+            return;
+        }
+
+        _treasureTradeShopOpenedAtRealtime = Time.realtimeSinceStartup;
+        _treasureTradeAutoProcessed = false;
+        _treasureTradeBusy = false;
+        _selectedTreasureTradeIcon = null;
+        _treasureTradeLoggedSignatures.Clear();
+    }
+
+    private static void ResetTreasureTradeUiState(string source)
+    {
+        _selectedTreasureTradeIcon = null;
+        _treasureTradeShopOpenedAtRealtime = -1f;
+        _treasureTradeAutoProcessed = false;
+        _treasureTradeBusy = false;
+        _treasureTradeLoggedSignatures.Clear();
+        HideTreasureTradeOverlay();
+    }
+
+    private static void CaptureTreasureTradeSelection(ItemIconController? icon)
+    {
+        if (icon == null || !TryGetActiveShopTradeUi(out _))
+        {
+            return;
+        }
+
+        switch (icon.tradeIconType)
+        {
+            case TradeIconType.TradeLeft:
+            case TradeIconType.TradeRight:
+            case TradeIconType.TradeLeftOut:
+            case TradeIconType.TradeRightOut:
+                var changed = _selectedTreasureTradeIcon != icon;
+                _selectedTreasureTradeIcon = icon;
+                break;
+        }
+    }
+
+    private static void UpdateTreasureTradeUiState()
+    {
+        if (!_treasureTradeHelperEnabled.Value && !_treasureAutoTradeEnabled.Value)
+        {
+            HideTreasureTradeOverlay();
+            return;
+        }
+
+        if (!TryGetActiveShopTradeUi(out var tradeUi) ||
+            !TryGetTreasureTradeShopContext(tradeUi, out _, out var identifyCost))
+        {
+            HideTreasureTradeOverlay();
+            return;
+        }
+
+        if (_treasureTradeHelperEnabled.Value)
+        {
+            UpdateTreasureTradeOverlay(tradeUi, identifyCost);
+        }
+        else
+        {
+            HideTreasureTradeOverlay();
+        }
+
+        TryRunTreasureAutoTrade(tradeUi, identifyCost);
+    }
+
+    private static bool TryGetActiveShopTradeUi(out TradeUIController tradeUi)
+    {
+        tradeUi = TradeUIController.Instance;
+        if (tradeUi == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (tradeUi.tradeUIType != TradeUIType.Shop)
+            {
+                return false;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        try
+        {
+            return tradeUi.tradeUI != null && tradeUi.tradeUI.activeInHierarchy;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryGetTreasureTradeShopContext(TradeUIController tradeUi, out AreaBuildingData? building, out int identifyCost)
+    {
+        building = BuildingUIController.Instance?.targetBuildingData;
+        identifyCost = 0;
+        if (tradeUi == null)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static void OpenCraftUiPostfix()
+    {
+        ResetCraftRewardTracking("CraftUI.OpenCraftUI");
+    }
+
+    private static void HideCraftUiPostfix()
+    {
+        ResetCraftRewardTracking("CraftUI.HideCraftUI");
+    }
+
+    private static void UpdateTreasureTradeOverlay(TradeUIController tradeUi, int identifyCost)
+    {
+        var opportunity = TryResolveTreasureTradeOpportunity(tradeUi, identifyCost);
+        if (opportunity == null)
+        {
+            EnsureTreasureTradeOverlay(tradeUi);
+            if (_treasureTradeOverlayLabel != null)
+            {
+                _treasureTradeOverlayLabel.text = identifyCost > 0
+                    ? $"珍宝倒宝助手\n当前无未鉴定珍宝\n鉴定费: {identifyCost}"
+                    : "珍宝倒宝助手\n当前无未鉴定珍宝";
+                _treasureTradeOverlayLabel.gameObject.SetActive(true);
+            }
+
+            return;
+        }
+
+        EnsureTreasureTradeOverlay(tradeUi);
+        if (_treasureTradeOverlayLabel == null)
+        {
+            return;
+        }
+
+        _treasureTradeOverlayLabel.text = BuildTreasureTradeOverlayText(opportunity);
+        _treasureTradeOverlayLabel.gameObject.SetActive(true);
+    }
+
+    private static TreasureTradeOpportunity? TryResolveTreasureTradeOpportunity(TradeUIController tradeUi, int identifyCost)
+    {
+        if (tradeUi == null)
+        {
+            return null;
+        }
+
+        if (TryAnalyzeTreasureTradeIcon(_selectedTreasureTradeIcon, identifyCost, out var selectedOpportunity))
+        {
+            return selectedOpportunity;
+        }
+
+        foreach (var icon in EnumerateTradeIcons(tradeUi.rightList))
+        {
+            if (TryAnalyzeTreasureTradeIcon(icon, identifyCost, out var rightOpportunity))
+            {
+                return rightOpportunity;
+            }
+        }
+
+        foreach (var icon in EnumerateTradeIcons(tradeUi.leftList))
+        {
+            if (TryAnalyzeTreasureTradeIcon(icon, identifyCost, out var leftOpportunity))
+            {
+                return leftOpportunity;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryAnalyzeTreasureTradeIcon(ItemIconController? icon, int identifyCost, out TreasureTradeOpportunity? opportunity)
+    {
+        opportunity = null;
+        if (icon == null)
+        {
+            return false;
+        }
+
+        var item = icon.itemData;
+        if (!IsUnidentifiedTreasure(item))
+        {
+            return false;
+        }
+
+        var buyPrice = Math.Max(0, TryGetTradePriceForItem(icon, item, buy: true, fallback: 0));
+        var currentSellPrice = Math.Max(0, TryGetTradePriceForItem(icon, item, buy: false, fallback: 0));
+        if (buyPrice <= 0 && currentSellPrice <= 0)
+        {
+            return false;
+        }
+
+        var realValue = TryGetTreasureRealValue(item);
+        if (realValue <= 0)
+        {
+            var identifiedClone = TryCloneAndIdentifyItem(item);
+            if (identifiedClone != null)
+            {
+                realValue = TryGetTreasureRealValue(identifiedClone);
+            }
+        }
+
+        if (realValue <= 0)
+        {
+            return false;
+        }
+
+        var identifiedSellPrice = EstimateTreasureSellPriceFromRealValue(item, currentSellPrice, realValue);
+
+        opportunity = new TreasureTradeOpportunity
+        {
+            Item = item,
+            Icon = icon,
+            IconType = icon.tradeIconType,
+            BuyPrice = buyPrice,
+            CurrentSellPrice = currentSellPrice,
+            IdentifiedSellPrice = identifiedSellPrice,
+            IdentifyCost = Math.Max(0, identifyCost),
+            RealValue = Math.Max(0, realValue),
+            SkillBuyFactor = GetSkillTradeFactor(buy: true),
+            SkillSellFactor = GetSkillTradeFactor(buy: false)
+        };
+
+        return true;
+    }
+
+    private static int EstimateTreasureSellPriceFromRealValue(ItemData item, int currentSellPrice, int realValue)
+    {
+        if (realValue <= 0)
+        {
+            return Math.Max(0, currentSellPrice);
+        }
+
+        var baseValue = Math.Max(1, item.value);
+        if (currentSellPrice <= 0)
+        {
+            return Math.Max(realValue, 0);
+        }
+
+        var sellRatio = Math.Max(0d, (double)currentSellPrice / baseValue);
+        var estimated = (int)Math.Round(realValue * sellRatio, MidpointRounding.AwayFromZero);
+        return Math.Max(currentSellPrice, estimated);
+    }
+
+    private static string BuildTreasureTradeOverlayText(TreasureTradeOpportunity opportunity)
+    {
+        var name = TryGetItemDisplayName(opportunity.Item);
+        var priceLine = opportunity.IconType == TradeIconType.TradeRight || opportunity.IconType == TradeIconType.TradeRightOut
+            ? $"卖价/买价: {opportunity.CurrentSellPrice} / {opportunity.BuyPrice}"
+            : $"当前卖价: {opportunity.CurrentSellPrice}";
+        var profitLine = opportunity.IconType == TradeIconType.TradeRight || opportunity.IconType == TradeIconType.TradeRightOut
+            ? $"鉴定费/净利: {opportunity.IdentifyCost} / {FormatSignedInt(opportunity.NetProfit)}"
+            : $"鉴定费/净增: {opportunity.IdentifyCost} / {FormatSignedInt(opportunity.IdentifyGain)}";
+
+        return
+            $"珍宝倒宝助手\n" +
+            $"{name}\n" +
+            $"{priceLine}\n" +
+            $"技能买/卖系数: x{opportunity.SkillBuyFactor:0.###} / x{opportunity.SkillSellFactor:0.###}\n" +
+            $"鉴后卖价: {opportunity.IdentifiedSellPrice}\n" +
+            $"{profitLine}";
+    }
+
+    private static void EnsureTreasureTradeOverlay(TradeUIController tradeUi)
+    {
+        if (tradeUi == null)
+        {
+            return;
+        }
+
+        if (_treasureTradeOverlayLabel != null)
+        {
+            return;
+        }
+
+        var template = tradeUi.deltaResourceLabel ?? tradeUi.leftResourceLabel ?? tradeUi.rightResourceLabel;
+        if (template == null)
+        {
+            return;
+        }
+
+        try
+        {
+            var overlayObject = UnityEngine.Object.Instantiate(template.gameObject, template.transform.parent);
+            overlayObject.name = "CodexTreasureTradeOverlay";
+            var overlayLabel = overlayObject.GetComponent<Text>();
+            if (overlayLabel == null)
+            {
+                UnityEngine.Object.Destroy(overlayObject);
+                return;
+            }
+
+            overlayLabel.fontSize = Math.Max(16, template.fontSize - 2);
+            overlayLabel.resizeTextForBestFit = false;
+            overlayLabel.raycastTarget = false;
+            overlayLabel.supportRichText = true;
+            overlayLabel.color = new Color(1f, 0.95f, 0.78f, 1f);
+
+            var templateRect = template.GetComponent<RectTransform>();
+            var overlayRect = overlayLabel.GetComponent<RectTransform>();
+            if (templateRect != null && overlayRect != null)
+            {
+                overlayRect.anchorMin = templateRect.anchorMin;
+                overlayRect.anchorMax = templateRect.anchorMax;
+                overlayRect.pivot = templateRect.pivot;
+                overlayRect.anchoredPosition = templateRect.anchoredPosition + new Vector2(0f, -120f);
+                overlayRect.sizeDelta = new Vector2(Mathf.Max(templateRect.sizeDelta.x, 380f), Mathf.Max(140f, templateRect.sizeDelta.y * 4f));
+            }
+
+            _treasureTradeOverlayLabel = overlayLabel;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Could not create treasure trade overlay: {ex.Message}");
+        }
+    }
+
+    private static void HideTreasureTradeOverlay()
+    {
+        if (_treasureTradeOverlayLabel != null)
+        {
+            try
+            {
+                _treasureTradeOverlayLabel.gameObject.SetActive(false);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private static void TryRunTreasureAutoTrade(TradeUIController tradeUi, int identifyCost)
+    {
+        if (!_treasureAutoTradeEnabled.Value || _treasureTradeBusy || _treasureTradeAutoProcessed)
+        {
+            return;
+        }
+
+        if (_treasureTradeShopOpenedAtRealtime >= 0f &&
+            Time.realtimeSinceStartup < _treasureTradeShopOpenedAtRealtime + 0.35f)
+        {
+            return;
+        }
+
+        var shopTargetCount = CountItemListItems(tradeUi.rightList?.targetItemList);
+        var shopIconCount = EnumerateTradeIcons(tradeUi.rightList).Count();
+        if (shopTargetCount <= 0 && shopIconCount <= 0)
+        {
+            return;
+        }
+
+        if (shopTargetCount > 0 && shopIconCount <= 0)
+        {
+            return;
+        }
+
+        var opportunities = new List<TreasureTradeOpportunity>();
+        foreach (var icon in EnumerateTradeIcons(tradeUi.rightList))
+        {
+            if (!TryAnalyzeTreasureTradeIcon(icon, identifyCost, out var opportunity) || opportunity == null)
+            {
+                continue;
+            }
+
+            if (opportunity.NetProfit > 0)
+            {
+                opportunities.Add(opportunity);
+            }
+        }
+
+        if (opportunities.Count <= 0)
+        {
+            _treasureTradeAutoProcessed = true;
+            return;
+        }
+
+        _treasureTradeAutoProcessed = true;
+        QueueTreasureTradeCartItems(tradeUi, opportunities);
+    }
+
+    private static void QueueTreasureTradeCartItems(TradeUIController tradeUi, List<TreasureTradeOpportunity> opportunities)
+    {
+        if (tradeUi == null || opportunities.Count == 0)
+        {
+            return;
+        }
+
+        _treasureTradeBusy = true;
+        var queuedCount = 0;
+
+        try
+        {
+            foreach (var opportunity in opportunities.OrderByDescending(static entry => entry.NetProfit))
+            {
+                if (opportunity.Icon == null || opportunity.Icon.gameObject == null)
+                {
+                    continue;
+                }
+
+                tradeUi.TradeIconClicked(opportunity.Icon.gameObject);
+                queuedCount++;
+                LoggerInstance.LogInfo(
+                    $"Treasure trade cart add item={TryGetItemDisplayName(opportunity.Item)}, buy={opportunity.BuyPrice}, " +
+                    $"sellIdentified={opportunity.IdentifiedSellPrice}, net={opportunity.NetProfit}.");
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Treasure cart auto-queue failed: {ex.Message}");
+        }
+        finally
+        {
+            _treasureTradeBusy = false;
+            RefreshTradeUi(tradeUi);
+        }
+
+        if (queuedCount > 0)
+        {
+            PushPlayerLog($"【珍宝购物车】：已加入 {queuedCount} 件可盈利珍宝");
+            LoggerInstance.LogInfo(
+                $"Treasure cart auto-queue finished: count={queuedCount}.");
+        }
+    }
+
+    private static void RefreshTradeUi(TradeUIController? tradeUi)
+    {
+        if (tradeUi == null)
+        {
+            return;
+        }
+
+        try
+        {
+            tradeUi.leftList?.RefreshItemList(resetPos: false);
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            tradeUi.rightList?.RefreshItemList(resetPos: false);
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            tradeUi.leftOutList?.RefreshItemList(resetPos: false);
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            tradeUi.rightOutList?.RefreshItemList(resetPos: false);
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            tradeUi.FreshResourceLabel();
+        }
+        catch
+        {
+        }
+    }
+
+    private static IEnumerable<ItemIconController> EnumerateTradeIcons(ItemListController? listController)
+    {
+        if (listController?.itemGrid == null)
+        {
+            yield break;
+        }
+
+        ItemIconController[]? icons;
+        try
+        {
+            icons = listController.itemGrid.GetComponentsInChildren<ItemIconController>(includeInactive: true);
+        }
+        catch
+        {
+            yield break;
+        }
+
+        if (icons == null)
+        {
+            yield break;
+        }
+
+        foreach (var icon in icons)
+        {
+            if (icon != null && icon.itemData != null)
+            {
+                yield return icon;
+            }
+        }
+    }
+
+    private static int TryGetTradePriceForItem(ItemIconController? probeIcon, ItemData? item, bool buy, int fallback)
+    {
+        if (probeIcon == null || item == null)
+        {
+            return fallback;
+        }
+
+        ItemData? originalItem = null;
+        try
+        {
+            originalItem = probeIcon.itemData;
+            probeIcon.itemData = item;
+            return Math.Max(0, probeIcon.GetItemPrice(buy));
+        }
+        catch
+        {
+            return fallback;
+        }
+        finally
+        {
+            try
+            {
+                if (originalItem != null)
+                {
+                    probeIcon.itemData = originalItem;
+                }
+
+                probeIcon.needRefreshPriceIcon = true;
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private static ItemData? TryCloneAndIdentifyItem(ItemData? item)
+    {
+        if (item == null)
+        {
+            return null;
+        }
+
+        ItemData? clone;
+        try
+        {
+            clone = item.Clone() as ItemData;
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (clone == null)
+        {
+            return null;
+        }
+
+        return TryFullIdentifyTreasure(clone) ? clone : null;
+    }
+
+    private static bool TryFullIdentifyTreasure(ItemData? item)
+    {
+        if (item == null || !IsTreasureItem(item))
+        {
+            return false;
+        }
+
+        try
+        {
+            item.FullIdentify();
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Treasure full identify failed for {TryGetItemDisplayName(item)}: {ex.Message}");
+            return false;
+        }
+
+        try
+        {
+            item.RecountRareLv();
+        }
+        catch
+        {
+        }
+
+        return IsTreasureFullyIdentified(item);
+    }
+
+    private static bool IsUnidentifiedTreasure(ItemData? item)
+    {
+        return IsTreasureItem(item) && !IsTreasureFullyIdentified(item);
+    }
+
+    private static bool IsTreasureItem(ItemData? item)
+    {
+        if (item == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return item.type == ItemType.Treasure;
+        }
+        catch
+        {
+            return string.Equals(TryGetItemTypeName(item), nameof(ItemType.Treasure), StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static bool IsTreasureFullyIdentified(ItemData? item)
+    {
+        var treasureData = item?.treasureData;
+        if (treasureData == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (treasureData.fullIdentified)
+            {
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        var identifiedList = treasureData.identified;
+        var count = TryGetCollectionCount(identifiedList);
+        if (count <= 0)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            if (!(TryConvertToBool(TryGetIndexedValue(identifiedList, i)) ?? false))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static int TryGetTreasureRealValue(ItemData? item)
+    {
+        if (item == null)
+        {
+            return 0;
+        }
+
+        try
+        {
+            return Math.Max(0, item.GetTreasureRealValue());
+        }
+        catch
+        {
+            return Math.Max(0, item.value);
+        }
+    }
+
+    private static float GetSkillTradeFactor(bool buy)
+    {
+        var player = TryGetPlayerHero();
+        if (player == null)
+        {
+            return 1f;
+        }
+
+        try
+        {
+            return Math.Max(0.01f, player.GetTradeValueRate(buy, true));
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            return Math.Max(0.01f, player.GetTradeValueRate(buy));
+        }
+        catch
+        {
+            return 1f;
+        }
+    }
+
+    private static int CountItemListItems(ItemListData? itemList)
+    {
+        return itemList?.allItem == null ? 0 : Math.Max(0, TryGetCollectionCount(itemList.allItem));
+    }
+
+    private static bool ItemListContainsItem(ItemListData? itemList, ItemData? targetItem)
+    {
+        if (itemList == null || targetItem == null)
+        {
+            return false;
+        }
+
+        var allItems = itemList.allItem;
+        var count = TryGetCollectionCount(allItems);
+        if (count <= 0)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            if (ReferenceEquals(TryGetIndexedValue(allItems, i), targetItem))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void AdjustItemListMoney(ItemListData? itemList, int delta)
+    {
+        if (itemList == null || delta == 0)
+        {
+            return;
+        }
+
+        var currentMoney = TryGetItemListMoney(itemList) ?? 0;
+        var targetMoney = Math.Max(0, currentMoney + delta);
+        TrySetMemberValue(itemList, "money", targetMoney);
+    }
+
+    private static string TryGetItemDisplayName(ItemData? item)
+    {
+        if (item == null)
+        {
+            return "未知珍宝";
+        }
+
+        try
+        {
+            var name = item.Name(false);
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                return name;
+            }
+        }
+        catch
+        {
+        }
+
+        return string.IsNullOrWhiteSpace(item.name) ? $"珍宝{item.itemID}" : item.name;
+    }
+
+    private static string FormatSignedInt(int value)
+    {
+        return value > 0 ? $"+{value}" : value.ToString();
     }
 
     private static void AddSkillBookExpPrefix(HeroData __instance, ref float num)
@@ -1511,28 +2352,27 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     {
         if (!_craftRandomPickUpgradeEnabled.Value)
         {
+            ResetCraftRewardTracking("PlotController.CraftResultChoosen disabled");
             return;
         }
 
-        var replacement = ResolveCraftReplacement(craftResult);
-        if (replacement == null)
+        RememberCraftSelection(craftResult);
+    }
+
+    private static void FinishCraftPrefix()
+    {
+        ActivateCraftRewardBonus("PlotController.FinishCraft");
+    }
+
+    private static void FinishCraftPostfix()
+    {
+        if (_activeCraftRewardBonus != null && _traceMode.Value)
         {
-            return;
+            LoggerInstance.LogInfo("Craft quantity bonus window closed before any matching item grant consumed it.");
         }
 
-        var original = craftResult;
-        craftResult = replacement;
-
-        if (original != replacement)
-        {
-            PushPlayerLog($"【巧手偏锋】：改为【{replacement.name}】");
-        }
-
-        if (_traceMode.Value)
-        {
-            LoggerInstance.LogInfo(
-                $"Craft result rerolled: original={DescribeItemSummary(original)}, replacement={DescribeItemSummary(replacement)}.");
-        }
+        _activeCraftRewardBonus = null;
+        _pendingCraftSelection = null;
     }
 
     private static void DrinkShowUiPostfix(DrinkUIController __instance)
@@ -1745,6 +2585,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         UpdateDialogFastForwardAssist();
         KeepPlayerHorseTurboReady("Update");
         ApplyPlayerCarryWeightOverride("Update");
+        UpdateTreasureTradeUiState();
 
         if (Input.GetKeyDown(_dialogFastForwardAssistHotkey.Value))
         {
@@ -2470,135 +3311,86 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         return Mathf.Clamp(value, 0, 100);
     }
 
-    private static ItemData? ResolveCraftReplacement(ItemData? original)
+    private static void RememberCraftSelection(ItemData? craftResult)
     {
-        if (original == null)
+        if (craftResult == null)
         {
-            return original;
+            _pendingCraftSelection = null;
+            return;
         }
 
-        var targetMajorTier = GetCraftMajorTier(original) + 1;
-        if (targetMajorTier <= GetCraftMajorTier(original))
+        _pendingCraftSelection = new CraftRewardSelection
         {
-            return original;
-        }
+            ResultItemId = craftResult.itemID,
+            ResultItemLv = craftResult.itemLv,
+            ResultRareLv = craftResult.rareLv,
+            ResultName = craftResult.name ?? $"id={craftResult.itemID}"
+        };
 
         if (_traceMode.Value)
         {
-            LoggerInstance.LogInfo(
-                $"Craft reroll start: base={DescribeItemSummary(original)}, targetMajorTier={targetMajorTier}.");
+            LoggerInstance.LogInfo($"Craft result selected: {DescribeItemSummary(craftResult)}.");
+        }
+    }
+
+    private static void ActivateCraftRewardBonus(string source)
+    {
+        _activeCraftRewardBonus = null;
+
+        if (!_craftRandomPickUpgradeEnabled.Value)
+        {
+            return;
         }
 
-        var generated = TryGenerateCraftUpgrade(original, targetMajorTier);
-        if (generated != null)
+        var selection = _pendingCraftSelection;
+        if (selection == null)
         {
             if (_traceMode.Value)
             {
-                LoggerInstance.LogInfo(
-                    $"Craft reroll success: base={DescribeItemSummary(original)}, generated={DescribeItemSummary(generated)}.");
+                LoggerInstance.LogInfo($"Craft quantity bonus skipped from {source}: no selected result is pending.");
             }
 
-            return generated;
-        }
-
-        if (_traceMode.Value)
-        {
-            LoggerInstance.LogInfo(
-                $"Craft reroll kept original: base={DescribeItemSummary(original)}, targetMajorTier={targetMajorTier}.");
-        }
-
-        return original;
-    }
-
-    private static ItemData? TryGenerateCraftUpgrade(ItemData original, int targetMajorTier)
-    {
-        var gameController = GameController.Instance;
-        if (gameController == null)
-        {
-            return null;
+            return;
         }
 
         var controller = CraftUIController.Instance;
-        var player = TryGetPlayerHero();
-        var targetItemType = (int)original.type;
-        var subType = original.subType;
-        var littleType = original.equipmentData?.littleType ?? 0;
-        var weaponType = controller?.targetWeaponType ?? 0;
-        var bossLv = Mathf.Max(1f, controller?.targetBuilding?.lv ?? Math.Max(1, original.itemLv + 1));
-        var baseValue = Math.Max(1, original.value);
-
-        if (_traceMode.Value)
+        var addedMaterial = ResolveCraftAddedMaterial(controller);
+        if (addedMaterial == null)
         {
-            LoggerInstance.LogInfo(
-                $"Craft reroll inputs: type={(int)original.type}, subType={subType}, littleType={littleType}, weaponType={weaponType}, bossLv={bossLv:0.###}, baseValue={baseValue}, targetMajorTier={targetMajorTier}.");
+            if (_traceMode.Value)
+            {
+                LoggerInstance.LogInfo($"Craft quantity bonus skipped from {source}: no added crafting material was found.");
+            }
+
+            return;
         }
 
-        ItemData? bestCandidate = null;
-        var valueMultipliers = new[] { 1.15f, 1.3f, 1.5f, 1.75f, 2.1f, 2.6f, 3.2f, 4f, 5f };
-        foreach (var multiplier in valueMultipliers)
+        var materialMajorTier = GetCraftMajorTier(addedMaterial);
+        var extraItemCount = GetCraftExtraItemCountFromMaterial(addedMaterial);
+        if (extraItemCount <= 0)
         {
-            var targetValue = Mathf.Max(baseValue + 1, Mathf.RoundToInt(baseValue * multiplier));
-            ItemData? candidate = null;
-
-            try
-            {
-                candidate = gameController.GenerateRandomItemValue(
-                    targetValue,
-                    targetItemType,
-                    bossLv,
-                    subType,
-                    littleType,
-                    player,
-                    weaponType);
-            }
-            catch (Exception ex)
-            {
-                if (_traceMode.Value)
-                {
-                    LoggerInstance.LogWarning($"Craft regenerate failed at value {targetValue}: {ex.Message}");
-                }
-
-                continue;
-            }
-
-            if (candidate == null)
-            {
-                if (_traceMode.Value)
-                {
-                    LoggerInstance.LogInfo(
-                        $"Craft reroll try x{multiplier:0.###} targetValue={targetValue} returned null.");
-                }
-
-                continue;
-            }
-
-            var candidateMajorTier = GetCraftMajorTier(candidate);
             if (_traceMode.Value)
             {
                 LoggerInstance.LogInfo(
-                    $"Craft reroll try x{multiplier:0.###} targetValue={targetValue} -> {DescribeItemSummary(candidate)}.");
+                    $"Craft quantity bonus skipped from {source}: added material {DescribeItemSummary(addedMaterial)} maps to no extra items.");
             }
 
-            if (candidateMajorTier > GetCraftMajorTier(bestCandidate))
-            {
-                bestCandidate = candidate;
-            }
-
-            if (candidateMajorTier >= targetMajorTier)
-            {
-                return candidate;
-            }
+            return;
         }
+
+        _activeCraftRewardBonus = new CraftRewardBonusState
+        {
+            Selection = selection,
+            MaterialName = addedMaterial.name ?? $"id={addedMaterial.itemID}",
+            MaterialMajorTier = materialMajorTier,
+            ExtraItemCount = extraItemCount
+        };
 
         if (_traceMode.Value)
         {
             LoggerInstance.LogInfo(
-                $"Craft reroll best candidate after all tries: {DescribeItemSummary(bestCandidate)}.");
+                $"Craft quantity bonus armed from {source}: material={DescribeItemSummary(addedMaterial)}, majorTier={materialMajorTier}, extraItems={extraItemCount}, result={selection.ResultName}/{selection.ResultItemId}.");
         }
-
-        return bestCandidate != null && GetCraftMajorTier(bestCandidate) > GetCraftMajorTier(original)
-            ? bestCandidate
-            : null;
     }
 
     private static string DescribeItemSummary(ItemData? item)
@@ -2609,6 +3401,124 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         return $"{item.name} (id={item.itemID}, itemLv={item.itemLv}, rare={item.rareLv}, value={item.value}, type={SafeFormatValue(TryGetItemTypeName(item))})";
+    }
+
+    private static ItemData? ResolveCraftAddedMaterial(CraftUIController? controller)
+    {
+        if (controller == null)
+        {
+            return null;
+        }
+
+        // The game only exposes one optional added-material slot for the extra craft effect.
+        return controller.craftMaterialDataSub;
+    }
+
+    private static int GetCraftExtraItemCountFromMaterial(ItemData? material)
+    {
+        return Mathf.Clamp(GetCraftMajorTier(material) - 1, 0, 4);
+    }
+
+    private static void TryGrantCraftBonusItems(HeroData? targetHero, ItemData? itemData, int treasureChestClickTime, bool skipManageItemPoison)
+    {
+        if (_grantingCraftBonusItems || treasureChestClickTime > 0 || targetHero == null || itemData == null)
+        {
+            return;
+        }
+
+        var bonusState = _activeCraftRewardBonus;
+        if (bonusState == null || bonusState.ExtraItemCount <= 0)
+        {
+            return;
+        }
+
+        var player = TryGetPlayerHero();
+        if (player == null || TryGetHeroId(targetHero) != TryGetHeroId(player))
+        {
+            return;
+        }
+
+        if (!DoesItemMatchCraftSelection(itemData, bonusState.Selection))
+        {
+            return;
+        }
+
+        var grantedCount = 0;
+        _grantingCraftBonusItems = true;
+
+        try
+        {
+            for (var i = 0; i < bonusState.ExtraItemCount; i++)
+            {
+                var bonusItem = TryCloneItem(itemData);
+                if (bonusItem == null)
+                {
+                    continue;
+                }
+
+                player.GetItem(bonusItem, false, false, 0, skipManageItemPoison);
+                grantedCount++;
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to grant craft quantity bonus items: {ex.Message}");
+        }
+        finally
+        {
+            _grantingCraftBonusItems = false;
+            _activeCraftRewardBonus = null;
+            _pendingCraftSelection = null;
+        }
+
+        if (grantedCount <= 0)
+        {
+            return;
+        }
+
+        PushPlayerLog($"【巧手增产】：加入【{bonusState.MaterialName}】后，额外获得 {grantedCount} 个【{bonusState.Selection.ResultName}】");
+        LoggerInstance.LogInfo(
+            $"Craft quantity bonus granted: result={bonusState.Selection.ResultName}/{bonusState.Selection.ResultItemId}, material={bonusState.MaterialName}, materialMajorTier={bonusState.MaterialMajorTier}, extraItems={grantedCount}.");
+    }
+
+    private static bool DoesItemMatchCraftSelection(ItemData? item, CraftRewardSelection selection)
+    {
+        if (item == null)
+        {
+            return false;
+        }
+
+        return item.itemID == selection.ResultItemId
+               && item.itemLv == selection.ResultItemLv
+               && item.rareLv == selection.ResultRareLv;
+    }
+
+    private static ItemData? TryCloneItem(ItemData? item)
+    {
+        if (item == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return item.Clone() as ItemData;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void ResetCraftRewardTracking(string source)
+    {
+        if (_traceMode.Value && (_pendingCraftSelection != null || _activeCraftRewardBonus != null))
+        {
+            LoggerInstance.LogInfo($"Craft reward tracking reset from {source}.");
+        }
+
+        _pendingCraftSelection = null;
+        _activeCraftRewardBonus = null;
     }
 
     private static string DescribeItemSummaries(IEnumerable<ItemData> items)

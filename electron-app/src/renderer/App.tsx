@@ -904,10 +904,10 @@ export function App() {
                   hint="提高玩家可同时拥有的伴侣/夫妻数量。默认改为 8。"
                 />
                 <CheckboxField
-                  label="选定结果 +1 大阶重掷"
+                  label="追加材料按大阶增产"
                   value={settings.craftRandomPickUpgrade}
                   onChange={(value) => updateSetting('craftRandomPickUpgrade', value)}
-                  hint="若没有更高阶结果，则保留已选结果。"
+                  hint="按追加材料的大阶给成品加数量：凡品 +0、二阶 +1、三阶 +2、四阶 +3、绝世 +4。"
                 />
                 <NumberField
                   label="商人现金下限"
@@ -916,6 +916,12 @@ export function App() {
                   min={0}
                   max={999999999}
                   step={1000}
+                />
+                <CheckboxField
+                  label="珍宝自动加入购物车"
+                  value={settings.treasureAutoTradeEnabled}
+                  onChange={(value) => updateSetting('treasureAutoTradeEnabled', value)}
+                  hint="进入珍宝铺时，自动把预估有利润的未鉴定珍宝加入购物车；不会替你结账。"
                 />
                 <CheckboxField
                   label="忽略负重"

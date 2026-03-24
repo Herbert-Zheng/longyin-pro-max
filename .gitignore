@@ -15,6 +15,8 @@ mod-src/*/bin/
 mod-src/*/artifacts/
 updater-app/**/bin/
 updater-app/**/obj/
+overlay-app/**/bin/
+overlay-app/**/obj/
 
 # Local tool state
 mod-prototype/LongYinModControl/*.json

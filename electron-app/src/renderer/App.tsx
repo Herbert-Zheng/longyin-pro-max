@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import {
+  BASE_ATTRI_TYPE_NAMES,
+  HERO_SPE_ADD_DATA_TYPE_NAMES
+} from '../shared/types';
 import type {
+  BaseAttriTypeName,
+  CustomTalentDefinition,
+  CustomTalentPack,
+  HeroSpeAddDataTypeName,
   GameSnapshot,
   ReleaseHistoryItem,
   UpdateCheckResult,
@@ -14,16 +22,29 @@ import {
   NumberField,
   SelectField,
   StatusPill,
+  TextField,
   clampText,
   defaultSettings,
   mergeSettings
 } from './components';
+import {
+  cloneCustomTalentPack,
+  createCustomTalent,
+  createCustomTalentCondition,
+  createCustomTalentEffect,
+  createEmptyCustomTalentPack,
+  duplicateCustomTalent,
+  formatBaseAttriType,
+  formatHeroSpeAddDataType,
+  validateCustomTalentPack
+} from './customTalents';
 
 type NavKey =
   | 'home'
   | 'updates'
   | 'systems'
   | 'expTalent'
+  | 'customTalent'
   | 'worldExplore'
   | 'tradeCraft'
   | 'socialTeam'
@@ -129,6 +150,10 @@ function LogPreview(props: { title: string; body: string }) {
   );
 }
 
+function summarizeCustomTalent(talent: CustomTalentDefinition): string {
+  return `${talent.conditions.length} 条条件 · ${talent.effects.length} 条效果 · ${talent.durationDays} 天`;
+}
+
 export function App() {
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
   const [settings, setSettings] = useState<VisibleSettings>(defaultSettings());
@@ -144,6 +169,10 @@ export function App() {
   const [logsBusy, setLogsBusy] = useState(false);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [updateProgressEvents, setUpdateProgressEvents] = useState<UpdateProgressEvent[]>([]);
+  const [customTalentPack, setCustomTalentPack] = useState<CustomTalentPack>(() => createEmptyCustomTalentPack());
+  const [savedCustomTalentPackText, setSavedCustomTalentPackText] = useState(() => JSON.stringify(createEmptyCustomTalentPack()));
+  const [selectedCustomTalentId, setSelectedCustomTalentId] = useState<string | null>(null);
+  const [customTalentLoadError, setCustomTalentLoadError] = useState<string | null>(null);
 
   const navItems = useMemo<NavItem[]>(
     () => [
@@ -151,6 +180,7 @@ export function App() {
       { key: 'updates', label: '更新记录', eyebrow: 'OTA', title: '更新记录', description: '查看当前版本、GitHub Release 说明与 OTA 运行日志。' },
       { key: 'systems', label: '系统更改', eyebrow: 'Runtime', title: '系统更改', description: '整理全局运行控制、时间冻结与环境自检。' },
       { key: 'expTalent', label: '经验值，天赋相关', eyebrow: 'Growth', title: '经验值，天赋相关', description: '把经验成长、心悟机制与突破天赋放在同一页。' },
+      { key: 'customTalent', label: '自定义天赋', eyebrow: 'Creator', title: '自定义天赋', description: '创建、编辑和管理多个自定义天赋，保存后下次启动游戏生效。' },
       { key: 'worldExplore', label: '大地图，探索类', eyebrow: 'Explore', title: '大地图，探索类', description: '专注探索体力、世界地图坐骑与移动体验。' },
       { key: 'tradeCraft', label: '交易，制造类', eyebrow: 'Commerce', title: '交易，制造类', description: '交易、背包与制造增产统一归档。' },
       { key: 'socialTeam', label: '聊天，关系，组队', eyebrow: 'Social', title: '聊天，关系，组队', description: '把聊天配额、关系提升与组队辅助集中展示。' },
@@ -165,6 +195,21 @@ export function App() {
     setSettings((current) => mergeSettings(current, { [key]: value } as Partial<VisibleSettings>));
   };
 
+  const replaceCustomTalentPack = (nextPack: CustomTalentPack) => {
+    setCustomTalentPack(cloneCustomTalentPack(nextPack));
+  };
+
+  const updateSelectedTalent = (updater: (talent: CustomTalentDefinition) => CustomTalentDefinition) => {
+    if (!selectedCustomTalentId) {
+      return;
+    }
+
+    setCustomTalentPack((current) => ({
+      version: current.version,
+      talents: current.talents.map((talent) => (talent.id === selectedCustomTalentId ? updater(talent) : talent))
+    }));
+  };
+
   const showError = (nextError: string) => {
     setError(nextError);
     setErrorTime(new Date().toISOString());
@@ -173,6 +218,33 @@ export function App() {
   const clearError = () => {
     setError(null);
     setErrorTime(null);
+  };
+
+  const refreshCustomTalents = async (targetGameRoot?: string) => {
+    if (!targetGameRoot) {
+      const emptyPack = createEmptyCustomTalentPack();
+      replaceCustomTalentPack(emptyPack);
+      setSavedCustomTalentPackText(JSON.stringify(emptyPack));
+      setSelectedCustomTalentId(null);
+      setCustomTalentLoadError(null);
+      return emptyPack;
+    }
+
+    try {
+      const nextPack = await window.longyin.getCustomTalents();
+      replaceCustomTalentPack(nextPack);
+      setSavedCustomTalentPackText(JSON.stringify(nextPack));
+      setCustomTalentLoadError(null);
+      return nextPack;
+    }
+    catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const emptyPack = createEmptyCustomTalentPack();
+      replaceCustomTalentPack(emptyPack);
+      setSavedCustomTalentPackText(JSON.stringify(emptyPack));
+      setCustomTalentLoadError(message);
+      return emptyPack;
+    }
   };
 
   const refresh = async (nextMessage?: string, preserveMessage = false, syncSettings = true) => {
@@ -258,6 +330,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    void refreshCustomTalents(snapshot?.gameRoot ?? '').catch(() => undefined);
+  }, [snapshot?.gameRoot]);
+
+  useEffect(() => {
     if (!snapshot) {
       return undefined;
     }
@@ -308,6 +384,19 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [working, updateProgressEvents]);
 
+  useEffect(() => {
+    if (customTalentPack.talents.length === 0) {
+      if (selectedCustomTalentId !== null) {
+        setSelectedCustomTalentId(null);
+      }
+      return;
+    }
+
+    if (!selectedCustomTalentId || !customTalentPack.talents.some((talent) => talent.id === selectedCustomTalentId)) {
+      setSelectedCustomTalentId(customTalentPack.talents[0].id);
+    }
+  }, [customTalentPack, selectedCustomTalentId]);
+
   const gameRoot = snapshot?.gameRoot ?? '';
   const gameInstalled = snapshot?.gameInstalled ?? false;
   const health =
@@ -325,6 +414,10 @@ export function App() {
     (latestProgress !== null && ['checking', 'downloading', 'preparing', 'applying'].includes(latestProgress.stage));
   const healthPreview = health.checks.slice(0, 8).map((check) => `${check.ok ? '已通过' : '需处理'} · ${check.label} · ${check.detail}`);
   const releasePreview = releaseBodyLines(update?.releaseBody ?? latestRelease?.body).slice(0, 8);
+  const selectedCustomTalent =
+    customTalentPack.talents.find((talent) => talent.id === selectedCustomTalentId) ?? customTalentPack.talents[0] ?? null;
+  const customTalentValidationErrors = validateCustomTalentPack(customTalentPack);
+  const customTalentDirty = JSON.stringify(customTalentPack) !== savedCustomTalentPackText;
 
   const save = async () => {
     setWorking('保存中');
@@ -342,6 +435,98 @@ export function App() {
     finally {
       setWorking(null);
     }
+  };
+
+  const saveCustomTalents = async () => {
+    setWorking('应用自定义天赋');
+    clearError();
+    try {
+      const result = await window.longyin.saveCustomTalents(customTalentPack);
+      replaceCustomTalentPack(result.pack);
+      setSavedCustomTalentPackText(JSON.stringify(result.pack));
+      setCustomTalentLoadError(null);
+      setMessage(result.message);
+    }
+    catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setCustomTalentLoadError(message);
+      showError(message);
+      setMessage('无法保存自定义天赋。');
+    }
+    finally {
+      setWorking(null);
+    }
+  };
+
+  const createTalent = () => {
+    const nextTalent = createCustomTalent(`新天赋 ${customTalentPack.talents.length + 1}`);
+    setCustomTalentPack((current) => ({
+      version: current.version,
+      talents: [...current.talents, nextTalent]
+    }));
+    setSelectedCustomTalentId(nextTalent.id);
+  };
+
+  const duplicateSelectedTalent = () => {
+    if (!selectedCustomTalent) {
+      return;
+    }
+
+    const duplicated = duplicateCustomTalent(selectedCustomTalent);
+    setCustomTalentPack((current) => {
+      const currentIndex = current.talents.findIndex((talent) => talent.id === selectedCustomTalent.id);
+      const nextTalents = [...current.talents];
+      nextTalents.splice(currentIndex + 1, 0, duplicated);
+      return {
+        version: current.version,
+        talents: nextTalents
+      };
+    });
+    setSelectedCustomTalentId(duplicated.id);
+  };
+
+  const deleteSelectedTalent = () => {
+    if (!selectedCustomTalent) {
+      return;
+    }
+
+    setCustomTalentPack((current) => ({
+      version: current.version,
+      talents: current.talents.filter((talent) => talent.id !== selectedCustomTalent.id)
+    }));
+  };
+
+  const moveSelectedTalent = (direction: -1 | 1) => {
+    if (!selectedCustomTalent) {
+      return;
+    }
+
+    setCustomTalentPack((current) => {
+      const currentIndex = current.talents.findIndex((talent) => talent.id === selectedCustomTalent.id);
+      const targetIndex = currentIndex + direction;
+      if (currentIndex < 0 || targetIndex < 0 || targetIndex >= current.talents.length) {
+        return current;
+      }
+
+      const nextTalents = [...current.talents];
+      const [moved] = nextTalents.splice(currentIndex, 1);
+      nextTalents.splice(targetIndex, 0, moved);
+      return {
+        version: current.version,
+        talents: nextTalents
+      };
+    });
+  };
+
+  const toggleSelectedTalentEnabled = () => {
+    if (!selectedCustomTalent) {
+      return;
+    }
+
+    updateSelectedTalent((talent) => ({
+      ...talent,
+      enabled: !talent.enabled
+    }));
   };
 
   const saveAndLaunch = async () => {
@@ -989,6 +1174,327 @@ export function App() {
                     />
                   </div>
                 </Card>
+              </div>
+            ) : null}
+
+            {activePage === 'customTalent' ? (
+              <div className="custom-talents-layout">
+                <Card title="自定义天赋列表" eyebrow="Creator">
+                  <div className="stack">
+                    <div className="note-box">
+                      保存后写入配置文件，下次启动游戏生效。
+                    </div>
+                    {!gameRoot ? (
+                      <div className="empty-state">请先在“系统更改”里选择游戏目录，然后再创建自定义天赋。</div>
+                    ) : null}
+                    {customTalentLoadError ? (
+                      <div className="validation-box validation-box--warn">
+                        <strong>当前自定义天赋 JSON 读取失败</strong>
+                        <div>{customTalentLoadError}</div>
+                        <div>你仍然可以继续编辑并点击“应用到游戏配置”覆盖这个损坏文件。</div>
+                      </div>
+                    ) : null}
+                    <div className="inline-actions">
+                      <button className="btn btn--small" onClick={createTalent} disabled={working !== null || !gameRoot}>
+                        新建
+                      </button>
+                      <button className="btn btn--small" onClick={duplicateSelectedTalent} disabled={working !== null || !selectedCustomTalent}>
+                        复制
+                      </button>
+                      <button className="btn btn--small" onClick={deleteSelectedTalent} disabled={working !== null || !selectedCustomTalent}>
+                        删除
+                      </button>
+                      <button className="btn btn--small" onClick={() => moveSelectedTalent(-1)} disabled={working !== null || !selectedCustomTalent}>
+                        上移
+                      </button>
+                      <button className="btn btn--small" onClick={() => moveSelectedTalent(1)} disabled={working !== null || !selectedCustomTalent}>
+                        下移
+                      </button>
+                      <button className="btn btn--small" onClick={toggleSelectedTalentEnabled} disabled={working !== null || !selectedCustomTalent}>
+                        {selectedCustomTalent?.enabled ? '禁用' : '启用'}
+                      </button>
+                    </div>
+                    <div className="custom-talent-list">
+                      {customTalentPack.talents.length > 0 ? (
+                        customTalentPack.talents.map((talent) => (
+                          <button
+                            key={talent.id}
+                            className={`custom-talent-item ${selectedCustomTalent?.id === talent.id ? 'custom-talent-item--active' : ''}`}
+                            onClick={() => setSelectedCustomTalentId(talent.id)}
+                          >
+                            <div className="custom-talent-item__head">
+                              <strong>{talent.name.trim() || '未命名天赋'}</strong>
+                              <span className={`release-badge ${talent.enabled ? '' : 'release-badge--muted'}`}>
+                                {talent.enabled ? '启用' : '禁用'}
+                              </span>
+                            </div>
+                            <div className="custom-talent-item__meta">{summarizeCustomTalent(talent)}</div>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="empty-state">还没有自定义天赋。点“新建”先做第一个。</div>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+
+                <div className="stack">
+                  <Card title="天赋编辑" eyebrow="Editor">
+                    {selectedCustomTalent ? (
+                      <div className="stack">
+                        <div className="inline-actions">
+                          <button
+                            className="btn btn--primary"
+                            onClick={saveCustomTalents}
+                            disabled={working !== null || !gameRoot || customTalentValidationErrors.length > 0 || !customTalentDirty}
+                          >
+                            应用到游戏配置
+                          </button>
+                          <button
+                            className="btn btn--ghost"
+                            onClick={() => replaceCustomTalentPack(JSON.parse(savedCustomTalentPackText) as CustomTalentPack)}
+                            disabled={working !== null || !customTalentDirty}
+                          >
+                            放弃未保存修改
+                          </button>
+                        </div>
+                        <div className="field-grid">
+                          <TextField
+                            label="名称"
+                            value={selectedCustomTalent.name}
+                            onChange={(value) =>
+                              updateSelectedTalent((talent) => ({
+                                ...talent,
+                                name: value
+                              }))
+                            }
+                          />
+                          <NumberField
+                            label="持续天数"
+                            value={selectedCustomTalent.durationDays}
+                            onChange={(value) =>
+                              updateSelectedTalent((talent) => ({
+                                ...talent,
+                                durationDays: Math.max(1, Math.round(value))
+                              }))
+                            }
+                            min={1}
+                            max={999999}
+                            step={1}
+                            hint="999 是推荐的长效测试值。"
+                          />
+                          <CheckboxField
+                            label="启用这个天赋"
+                            value={selectedCustomTalent.enabled}
+                            onChange={(value) =>
+                              updateSelectedTalent((talent) => ({
+                                ...talent,
+                                enabled: value
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="empty-state">左侧选中一个天赋后，这里会显示完整编辑表单。</div>
+                    )}
+                  </Card>
+
+                  <Card title="条件列表" eyebrow="Conditions">
+                    {selectedCustomTalent ? (
+                      <div className="stack">
+                        <div className="body-copy">v1 条件固定为多条属性门槛，全部满足后才会生效。</div>
+                        <div className="stack">
+                          {selectedCustomTalent.conditions.map((condition, conditionIndex) => (
+                            <div key={`${selectedCustomTalent.id}-condition-${conditionIndex}`} className="array-row">
+                              <div className="array-row__grid array-row__grid--conditions">
+                                <TextField label="类型" value="stat_min" onChange={() => undefined} hint="v1 固定为 stat_min" />
+                                <SelectField
+                                  label="属性"
+                                  value={condition.stat}
+                                  onChange={(value) =>
+                                    updateSelectedTalent((talent) => ({
+                                      ...talent,
+                                      conditions: talent.conditions.map((entry, index) =>
+                                        index === conditionIndex
+                                          ? {
+                                              ...entry,
+                                              stat: value as BaseAttriTypeName
+                                            }
+                                          : entry
+                                      )
+                                    }))
+                                  }
+                                  options={[...BASE_ATTRI_TYPE_NAMES]}
+                                  hint={formatBaseAttriType(condition.stat)}
+                                />
+                                <NumberField
+                                  label="最低值"
+                                  value={condition.min}
+                                  onChange={(value) =>
+                                    updateSelectedTalent((talent) => ({
+                                      ...talent,
+                                      conditions: talent.conditions.map((entry, index) =>
+                                        index === conditionIndex
+                                          ? {
+                                              ...entry,
+                                              min: value
+                                            }
+                                          : entry
+                                      )
+                                    }))
+                                  }
+                                  min={-999999}
+                                  max={999999}
+                                  step={1}
+                                />
+                              </div>
+                              <div className="inline-actions">
+                                <button
+                                  className="btn btn--small"
+                                  onClick={() =>
+                                    updateSelectedTalent((talent) => ({
+                                      ...talent,
+                                      conditions: talent.conditions.filter((_, index) => index !== conditionIndex)
+                                    }))
+                                  }
+                                  disabled={selectedCustomTalent.conditions.length <= 1}
+                                >
+                                  删除条件
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="inline-actions">
+                          <button
+                            className="btn btn--small"
+                            onClick={() =>
+                              updateSelectedTalent((talent) => ({
+                                ...talent,
+                                conditions: [...talent.conditions, createCustomTalentCondition()]
+                              }))
+                            }
+                          >
+                            添加条件
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="empty-state">先选中一个天赋，再设置它的触发条件。</div>
+                    )}
+                  </Card>
+
+                  <Card title="效果列表" eyebrow="Effects">
+                    {selectedCustomTalent ? (
+                      <div className="stack">
+                        <div className="body-copy">每个自定义天赋可以叠加多条效果，保存后会合并成一个游戏内天赋定义。</div>
+                        <div className="stack">
+                          {selectedCustomTalent.effects.map((effect, effectIndex) => (
+                            <div key={`${selectedCustomTalent.id}-effect-${effectIndex}`} className="array-row">
+                              <div className="array-row__grid array-row__grid--effects">
+                                <SelectField
+                                  label="效果类型"
+                                  value={effect.effectType}
+                                  onChange={(value) =>
+                                    updateSelectedTalent((talent) => ({
+                                      ...talent,
+                                      effects: talent.effects.map((entry, index) =>
+                                        index === effectIndex
+                                          ? {
+                                              ...entry,
+                                              effectType: value as HeroSpeAddDataTypeName
+                                            }
+                                          : entry
+                                      )
+                                    }))
+                                  }
+                                  options={[...HERO_SPE_ADD_DATA_TYPE_NAMES]}
+                                  hint={formatHeroSpeAddDataType(effect.effectType)}
+                                />
+                                <NumberField
+                                  label="数值"
+                                  value={effect.value}
+                                  onChange={(value) =>
+                                    updateSelectedTalent((talent) => ({
+                                      ...talent,
+                                      effects: talent.effects.map((entry, index) =>
+                                        index === effectIndex
+                                          ? {
+                                              ...entry,
+                                              value
+                                            }
+                                          : entry
+                                      )
+                                    }))
+                                  }
+                                  min={-999999}
+                                  max={999999}
+                                  step={1}
+                                />
+                              </div>
+                              <div className="inline-actions">
+                                <button
+                                  className="btn btn--small"
+                                  onClick={() =>
+                                    updateSelectedTalent((talent) => ({
+                                      ...talent,
+                                      effects: talent.effects.filter((_, index) => index !== effectIndex)
+                                    }))
+                                  }
+                                  disabled={selectedCustomTalent.effects.length <= 1}
+                                >
+                                  删除效果
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="inline-actions">
+                          <button
+                            className="btn btn--small"
+                            onClick={() =>
+                              updateSelectedTalent((talent) => ({
+                                ...talent,
+                                effects: [...talent.effects, createCustomTalentEffect()]
+                              }))
+                            }
+                          >
+                            添加效果
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="empty-state">先选中一个天赋，再设置它的数值效果。</div>
+                    )}
+                  </Card>
+
+                  <Card title="保存检查" eyebrow="Validation">
+                    <div className="stack">
+                      <div className="note-box note-box--soft">
+                        这里的每一项都会写入 `BepInEx/config/codex.longyin.custom-talents.json`。当前版本只在下次启动游戏时读取。
+                      </div>
+                      {customTalentValidationErrors.length > 0 ? (
+                        <div className="validation-box">
+                          {customTalentValidationErrors.map((item) => (
+                            <div key={item}>{item}</div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="empty-state">当前草稿通过校验，可以安全应用。</div>
+                      )}
+                      <div className="inline-actions">
+                        <button
+                          className="btn btn--primary"
+                          onClick={saveCustomTalents}
+                          disabled={working !== null || !gameRoot || customTalentValidationErrors.length > 0 || !customTalentDirty}
+                        >
+                          应用到游戏配置
+                        </button>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
               </div>
             ) : null}
 

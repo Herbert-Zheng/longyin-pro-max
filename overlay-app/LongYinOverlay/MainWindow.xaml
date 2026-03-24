@@ -1,0 +1,105 @@
+<Window x:Class="LongYinOverlay.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="龙胤立志传 Pro Max Overlay"
+        Width="420"
+        Height="360"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        Background="#171310"
+        Topmost="False"
+        ShowInTaskbar="True"
+        WindowStartupLocation="Manual"
+        FontFamily="Microsoft YaHei UI">
+  <Border CornerRadius="10"
+          Padding="18"
+          Background="#171310"
+          BorderBrush="#CC9C7A45"
+          BorderThickness="1.2"
+          MouseLeftButtonDown="RootBorder_MouseLeftButtonDown">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <TextBlock Grid.Row="0"
+                 Text="龙胤立志传 Pro Max"
+                 Foreground="#FFF4E7CC"
+                 FontSize="18"
+                 FontWeight="SemiBold" />
+
+      <TextBlock Grid.Row="1"
+                 x:Name="ConnectionText"
+                 Margin="0,8,0,0"
+                 Text="等待游戏连接"
+                 Foreground="#FFD1B16A"
+                 FontSize="12" />
+
+      <TextBlock Grid.Row="2"
+                 x:Name="StatusText"
+                 Margin="0,8,0,0"
+                 Text="正在等待模组状态..."
+                 TextWrapping="Wrap"
+                 Foreground="#FFF5E7C9"
+                 FontSize="13" />
+
+      <Border Grid.Row="3"
+              Margin="0,14,0,0"
+              Padding="12"
+              Background="#331E1A16"
+              CornerRadius="12"
+              BorderBrush="#445A4B2F"
+              BorderThickness="1">
+        <StackPanel>
+          <TextBlock x:Name="DateText"
+                     Foreground="#FFEEE0C0"
+                     FontSize="13" />
+          <TextBlock x:Name="SaveSlotText"
+                     Margin="0,6,0,0"
+                     Foreground="#FFEEE0C0"
+                     FontSize="13" />
+          <TextBlock x:Name="MoneyText"
+                     Margin="0,6,0,0"
+                     Foreground="#FFEEE0C0"
+                     FontSize="13" />
+          <TextBlock x:Name="ShopText"
+                     Margin="0,6,0,0"
+                     Foreground="#FFEEE0C0"
+                     FontSize="13"
+                     TextWrapping="Wrap" />
+          <TextBlock x:Name="OwnershipText"
+                     Margin="0,6,0,0"
+                     Foreground="#FFEEE0C0"
+                     FontSize="13"
+                     TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
+      <TextBlock Grid.Row="4"
+                 x:Name="HintText"
+                 Margin="0,12,0,0"
+                 Text="进入店铺后即可在这里买下店铺。"
+                 TextWrapping="Wrap"
+                 Foreground="#FFCCB58A"
+                 FontSize="12" />
+
+      <Button Grid.Row="5"
+              x:Name="BuyButton"
+              Margin="0,14,0,0"
+              Height="42"
+              Click="BuyButton_Click"
+              FontSize="14"
+              FontWeight="SemiBold"
+              Content="进入店铺后可买断"
+              Background="#FF7A3C18"
+              Foreground="White"
+              BorderThickness="0"
+              Cursor="Hand" />
+    </Grid>
+  </Border>
+</Window>

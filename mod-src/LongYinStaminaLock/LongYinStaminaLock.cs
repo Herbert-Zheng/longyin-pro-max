@@ -1,13 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.Json;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
 using HarmonyLib;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
@@ -35,6 +38,20 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const string ThresholdTalentCategory = "Pro Max";
     private const string DefaultThresholdTalentName = "天人感应";
     private const float ThresholdTalentEvaluationIntervalSeconds = 0.5f;
+    private const string CustomTalentCategory = "Pro Max Custom";
+    private const string CustomTalentMarkerPrefix = "codex.custom-talent:";
+    private const string CustomTalentSource = "codex.custom-talent";
+    private const string CustomTalentConfigFileName = "codex.longyin.custom-talents.json";
+    private const float CustomTalentEvaluationIntervalSeconds = 0.5f;
+    private const int ShopOwnershipBuyPrice = 500;
+    private const int ShopOwnershipSaveVersion = 1;
+    private const string ShopOwnershipSaveFolderName = "codex.longyin.shop-ownership";
+    private const string ShopOwnershipOverlayPanelName = "CodexShopOwnershipOverlay";
+    private const string ShopOwnershipBuyButtonName = "CodexShopOwnershipBuyButton";
+    private const int ExternalOverlayProtocolVersion = 1;
+    private const string ExternalOverlayStateFileName = "codex.longyin.overlay-state.json";
+    private const string ExternalOverlayCommandFileName = "codex.longyin.overlay-command.json";
+    private const float ExternalOverlaySyncIntervalSeconds = 0.25f;
     private static readonly string[] RelationshipBonusMessages =
     {
         "你今天比较帅，好感有多加 {0}",
@@ -49,6 +66,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<int> _moveRevealRadius = null!;
     private static ConfigEntry<bool> _revealAllOnStepTile = null!;
     private static ConfigEntry<bool> _treasureChestChoiceEnabled = null!;
+    private static ConfigEntry<bool> _treasureChestAutoPickMostValuable = null!;
     private static ConfigEntry<int> _treasureChestChoiceOptions = null!;
     private static ConfigEntry<int> _treasureChestTotalItems = null!;
     private static ConfigEntry<int> _bookExpMultiplier = null!;
@@ -65,6 +83,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<int> _merchantCarryCash = null!;
     private static ConfigEntry<bool> _treasureTradeHelperEnabled = null!;
     private static ConfigEntry<bool> _treasureAutoTradeEnabled = null!;
+    private static ConfigEntry<bool> _treasureIdentifyHighlightCorrect = null!;
+    private static ConfigEntry<bool> _treasureIdentifyForceCorrectSelection = null!;
     private static ConfigEntry<int> _luckyMoneyHitChancePercent = null!;
     private static ConfigEntry<int> _extraRelationshipGainChancePercent = null!;
     private static ConfigEntry<bool> _teamAutoFavorEnabled = null!;
@@ -137,9 +157,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static int _activeHeroDetailHeroId = -1;
     private static bool _dialogFastForwardAssistOwnsSkip;
     private static readonly List<KungfuSkillLvData> _dailySkillInsightCandidateBuffer = new();
+    private static readonly List<RegisteredCustomTalent> _customTalents = new();
     private static int _thresholdTalentTagId = -1;
     private static string _thresholdTalentTagName = DefaultThresholdTalentName;
     private static float _nextThresholdTalentEvaluationAt = -1f;
+    private static float _nextCustomTalentEvaluationAt = -1f;
     private static bool _thresholdTalentRegistrationWarned;
     private Harmony? _harmony;
 
@@ -186,6 +208,118 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         public bool IsHealingTile { get; init; }
     }
 
+    private sealed class CustomTalentPackFile
+    {
+        public int version { get; set; }
+        public List<CustomTalentDefinitionFile>? talents { get; set; }
+    }
+
+    private sealed class CustomTalentDefinitionFile
+    {
+        public string? id { get; set; }
+        public bool enabled { get; set; }
+        public string? name { get; set; }
+        public int durationDays { get; set; }
+        public List<CustomTalentConditionFile>? conditions { get; set; }
+        public List<CustomTalentEffectFile>? effects { get; set; }
+    }
+
+    private sealed class CustomTalentConditionFile
+    {
+        public string? type { get; set; }
+        public string? stat { get; set; }
+        public float min { get; set; }
+    }
+
+    private sealed class CustomTalentEffectFile
+    {
+        public string? effectType { get; set; }
+        public float value { get; set; }
+    }
+
+    private sealed class RegisteredCustomTalentCondition
+    {
+        public BaseAttriType Stat { get; init; }
+        public float Minimum { get; init; }
+    }
+
+    private sealed class RegisteredCustomTalent
+    {
+        public string Id { get; init; } = string.Empty;
+        public bool Enabled { get; init; }
+        public string Name { get; init; } = string.Empty;
+        public int DurationDays { get; init; }
+        public string Marker { get; init; } = string.Empty;
+        public HeroSpeAddData BuffData { get; init; } = null!;
+        public List<RegisteredCustomTalentCondition> Conditions { get; init; } = new();
+        public int RuntimeTagId { get; set; } = -1;
+    }
+
+    private sealed class ShopOwnershipSaveFile
+    {
+        public int version { get; set; }
+        public List<ShopOwnershipSaveEntry>? shops { get; set; }
+    }
+
+    private sealed class ShopOwnershipSaveEntry
+    {
+        public string? shopKey { get; set; }
+        public string? shopName { get; set; }
+        public int areaId { get; set; }
+        public int buildingId { get; set; }
+        public int buyPrice { get; set; }
+        public string? purchasedOn { get; set; }
+    }
+
+    private sealed class OwnedShopRecord
+    {
+        public string ShopKey { get; init; } = string.Empty;
+        public string ShopName { get; init; } = string.Empty;
+        public int AreaId { get; init; }
+        public int BuildingId { get; init; }
+        public int BuyPrice { get; init; }
+        public string PurchasedOn { get; init; } = string.Empty;
+    }
+
+    private sealed class ShopOwnershipContext
+    {
+        public TradeUIController TradeUi { get; init; } = null!;
+        public AreaBuildingData Building { get; init; } = null!;
+        public HeroData? Player { get; init; }
+        public string ShopKey { get; init; } = string.Empty;
+        public string ShopName { get; init; } = string.Empty;
+        public int AreaId { get; init; }
+        public int BuildingId { get; init; }
+    }
+
+    private sealed class ExternalOverlayStateFile
+    {
+        public int version { get; set; }
+        public string updatedAtUtc { get; set; } = string.Empty;
+        public string statusMessage { get; set; } = string.Empty;
+        public string statusChangedAtUtc { get; set; } = string.Empty;
+        public string worldDate { get; set; } = string.Empty;
+        public int saveSlotId { get; set; }
+        public int ownedShopCount { get; set; }
+        public int? playerMoney { get; set; }
+        public bool inShop { get; set; }
+        public string? shopKey { get; set; }
+        public string? shopName { get; set; }
+        public bool shopOwned { get; set; }
+        public bool canBuyShop { get; set; }
+        public int buyPrice { get; set; }
+        public string? purchasedOn { get; set; }
+        public string? lastProcessedRequestId { get; set; }
+    }
+
+    private sealed class ExternalOverlayCommandFile
+    {
+        public int version { get; set; }
+        public string? requestId { get; set; }
+        public string? action { get; set; }
+        public string? shopKey { get; set; }
+    }
+
     private sealed class TreasureChestChoiceSession
     {
         public HeroData? Player { get; init; }
@@ -196,6 +330,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         public string? LastObservedChoiceParam { get; set; }
         public bool PendingClickConfirm { get; set; }
         public int PendingClickConfirmFrames { get; set; }
+        public bool PendingAutoPick { get; set; }
+        public int PendingAutoPickFrames { get; set; }
     }
 
     private sealed class TreasureTradeOpportunity
@@ -241,19 +377,34 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static CraftRewardBonusState? _activeCraftRewardBonus;
     private static ItemIconController? _selectedTreasureTradeIcon;
     private static Text? _treasureTradeOverlayLabel;
+    private static GameObject? _shopOwnershipOverlayRoot;
+    private static Text? _shopOwnershipOverlayLabel;
+    private static Button? _shopOwnershipBuyButton;
+    private static Text? _shopOwnershipBuyButtonLabel;
     private static float _treasureTradeShopOpenedAtRealtime = -1f;
     private static bool _treasureTradeAutoProcessed;
     private static bool _treasureTradeBusy;
     private static readonly HashSet<string> _treasureTradeLoggedSignatures = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, OwnedShopRecord> _ownedShops = new(StringComparer.Ordinal);
+    private static int _currentShopOwnershipSaveSlotId = -1;
+    private static int _loadedShopOwnershipSourceSlotId = -1;
+    private static int _pendingShopOwnershipSaveSlotId = -1;
+    private static float _lastExternalOverlaySyncRealtime = -1f;
+    private static string _lastExternalOverlayRequestId = string.Empty;
+    private static string _externalOverlayStatusMessage = "模组已启动，等待存档载入。";
+    private static string _externalOverlayStatusChangedAtUtc = DateTime.UtcNow.ToString("O");
 
     public override void Load()
     {
         LoggerInstance = Log;
+        LoggerInstance.LogInfo($"External overlay state path: {GetExternalOverlayStatePath()}");
+        LoggerInstance.LogInfo($"External overlay command path: {GetExternalOverlayCommandPath()}");
         _lockExploreStamina = Config.Bind("Exploration", "LockStamina", true, "Prevents exploration stamina from decreasing.");
         _revealExtraFogOnMove = Config.Bind("Exploration", "RevealExtraFogOnMove", false, "Legacy compatibility toggle for the old per-move reveal experiment. No longer used.");
         _moveRevealRadius = Config.Bind("Exploration", "MoveRevealRadius", 2, "Legacy compatibility value for the old per-move reveal experiment. No longer used.");
         _revealAllOnStepTile = Config.Bind("Exploration", "RevealAllOnStepTile", true, "Reveal the whole exploration map once, after the first completed move in each exploration run.");
         _treasureChestChoiceEnabled = Config.Bind("Exploration", "TreasureChestChoiceEnabled", true, "When true, exploration treasure chests show several reward items and let you choose 1.");
+        _treasureChestAutoPickMostValuable = Config.Bind("Exploration", "TreasureChestAutoPickMostValuable", true, "When true, treasure chest choice mode automatically takes the highest-value option.");
         _treasureChestChoiceOptions = Config.Bind("Exploration", "TreasureChestChoiceOptions", 3, "How many reward options each exploration treasure chest should show when choice mode is enabled.");
         _treasureChestTotalItems = Config.Bind("Exploration", "TreasureChestTotalItems", 2, "Total item rewards to grant from exploration treasure chests. Set to 1 for vanilla behavior.");
         _bookExpMultiplier = Config.Bind("ReadBook", "ExpMultiplier", 1, "Multiplies EXP gained from reading books.");
@@ -270,6 +421,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _merchantCarryCash = Config.Bind("Commerce", "MerchantCarryCash", 100000, "Minimum cash carried by NPC shop merchants while a Shop trade window is open. Set to 0 to disable.");
         _treasureTradeHelperEnabled = Config.Bind("Commerce", "TreasureTradeHelperEnabled", true, "Shows current treasure resale estimates and skill factors inside trade shops that list treasure items.");
         _treasureAutoTradeEnabled = Config.Bind("Commerce", "TreasureAutoTradeEnabled", true, "Automatically adds profitable unidentified treasure items from the shop sell list into the trade cart when a trade shop opens.");
+        _treasureIdentifyHighlightCorrect = Config.Bind("TreasureIdentify", "HighlightCorrectTreasure", false, "Auto-selects the correct treasure in the identify mini-game without pressing confirm.");
+        _treasureIdentifyForceCorrectSelection = Config.Bind("TreasureIdentify", "ForceCorrectTreasureSelection", true, "Replaces any clicked treasure with the correct one before the game processes the choice.");
         _luckyMoneyHitChancePercent = Config.Bind("MoneyLuck", "LuckyHitChancePercent", 0, "Chance from 0 to 100 that a player money transaction triggers a lucky bonus.");
         _extraRelationshipGainChancePercent = Config.Bind("Relationship", "ExtraRelationshipGainChancePercent", 0, "Chance from 0 to 100 that positive relationship gain becomes double.");
         _teamAutoFavorEnabled = Config.Bind("Relationship", "TeamAutoFavorEnabled", true, "When true, current player teammates automatically gain favor each elapsed in-game day.");
@@ -376,6 +529,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListType), typeof(ItemListData), typeof(ItemListData), typeof(int), typeof(int), typeof(bool), typeof(bool), typeof(float), typeof(float) }, null, nameof(ShowTradeUiFullPostfix));
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.HideTradeUI), Type.EmptyTypes, null, nameof(HideTradeUiPostfix));
         PatchMethod(typeof(ItemIconController), nameof(ItemIconController.OnClick), Type.EmptyTypes, null, nameof(ItemIconOnClickPostfix));
+        PatchMethod(typeof(IdentifyMatchController), "set_correctTreasure", new[] { typeof(Il2CppSystem.Collections.Generic.List<GameObject>) }, null, nameof(IdentifyCorrectTreasurePostfix));
+        PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.SetNowChooseTreasure), new[] { typeof(GameObject) }, nameof(IdentifySetNowChooseTreasurePrefix), null);
+        PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.SureButtonClicked), Type.EmptyTypes, nameof(IdentifySureButtonClickedPrefix), null);
         PatchMethod(typeof(DebateUIController), nameof(DebateUIController.ChangePatient), new[] { typeof(bool), typeof(float) }, nameof(DebateChangePatientPrefix), null);
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.OpenCraftUI), new[] { typeof(CraftType), typeof(AreaBuildingData), typeof(bool) }, null, nameof(OpenCraftUiPostfix));
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.HideCraftUI), Type.EmptyTypes, null, nameof(HideCraftUiPostfix));
@@ -393,6 +549,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(DrinkUIController), nameof(DrinkUIController.HideDrinkUI), Type.EmptyTypes, null, nameof(DrinkHideUiPostfix));
         PatchMethod(typeof(StartMenuController), nameof(StartMenuController.SetAttriPreset), new[] { typeof(int) }, null, nameof(SetAttriPresetPostfix));
         PatchMethod(typeof(StartMenuController), nameof(StartMenuController.ResetPlayerAttri), Type.EmptyTypes, null, nameof(ResetPlayerAttriPostfix));
+        PatchMethod(typeof(StartMenuController), nameof(StartMenuController.ShowStartMenu), Type.EmptyTypes, null, nameof(ShowStartMenuPostfix));
+        PatchMethod(typeof(GameTitleController), nameof(GameTitleController.ShowMainMenu), Type.EmptyTypes, null, nameof(ShowMainMenuPostfix));
+        PatchMethod(typeof(SaveLoadMenuController), nameof(SaveLoadMenuController.SaveSlotButtonClicked), new[] { typeof(int) }, nameof(SaveSlotButtonClickedPrefix), null);
+        PatchMethod(typeof(SaveLoadMenuController), nameof(SaveLoadMenuController.SureSave), new[] { typeof(string) }, null, nameof(SureSavePostfix));
+        PatchMethod(typeof(SaveLoadMenuController), nameof(SaveLoadMenuController.LoadRecentGame), Type.EmptyTypes, nameof(LoadRecentGamePrefix), null);
+        PatchMethod(typeof(SaveLoadMenuController), nameof(SaveLoadMenuController.LoadGame), new[] { typeof(int) }, nameof(LoadGamePrefix), null);
         PatchMethod(typeof(GameDataController), nameof(GameDataController.LoadAllGameData), Type.EmptyTypes, null, nameof(LoadAllGameDataPostfix));
         PatchMethod(typeof(GameController), "Update", Type.EmptyTypes, null, nameof(GameControllerUpdatePostfix));
         PatchMethod(typeof(GameController), nameof(GameController.ChangeDay), Type.EmptyTypes, nameof(CalendarChangePrefix), nameof(CalendarChangePostfix));
@@ -409,7 +571,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo($"Exploration stamina lock starts {(_lockExploreStamina.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Exploration first-move full reveal starts {(_revealAllOnStepTile.Value ? "ON" : "OFF")}.");
         Log.LogInfo(
-            $"Exploration treasure chest choice mode starts {(_treasureChestChoiceEnabled.Value ? "ON" : "OFF")} with a 3-5 option chest-only picker.");
+            $"Exploration treasure chest choice mode starts {(_treasureChestChoiceEnabled.Value ? "ON" : "OFF")} with a 3-5 option chest-only picker " +
+            $"and highest-value auto-pick {(_treasureChestAutoPickMostValuable.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Exploration treasure chest rewards start at x{Math.Max(1, _treasureChestTotalItems.Value)} total items when choice mode is OFF.");
         Log.LogInfo($"Read-book EXP multiplier starts at x{Mathf.Max(1, _bookExpMultiplier.Value)}.");
         Log.LogInfo(
@@ -429,6 +592,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo($"Merchant cash floor starts at {Math.Max(0, _merchantCarryCash.Value)}.");
         Log.LogInfo($"Treasure trade helper starts {(_treasureTradeHelperEnabled.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Treasure auto cart starts {(_treasureAutoTradeEnabled.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Treasure identify highlight starts {(_treasureIdentifyHighlightCorrect.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Treasure identify force-correct starts {(_treasureIdentifyForceCorrectSelection.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
         Log.LogInfo($"Extra relationship gain chance starts at {ClampPercent(_extraRelationshipGainChancePercent.Value)}%.");
         Log.LogInfo($"Team auto favor starts {(_teamAutoFavorEnabled.Value ? "ON" : "OFF")} at +{FormatConfigFloat(Math.Max(0f, _teamAutoFavorPerDay.Value))}/day.");
@@ -839,7 +1004,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             Player = player,
             Options = options,
             SkipManageItemPoison = skipManageItemPoison,
-            OpenedAtRealtime = Time.realtimeSinceStartup
+            OpenedAtRealtime = Time.realtimeSinceStartup,
+            PendingAutoPick = _treasureChestAutoPickMostValuable.Value,
+            PendingAutoPickFrames = _treasureChestAutoPickMostValuable.Value ? 2 : 0
         };
 
         try
@@ -1126,6 +1293,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
+        if (TryRunPendingTreasureChestAutoPick(session, plotController))
+        {
+            return;
+        }
+
         var currentParam = TryGetTreasureChestCurrentChoiceParam(plotController);
         if (!string.IsNullOrWhiteSpace(currentParam))
         {
@@ -1160,6 +1332,221 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         session.PendingClickConfirm = false;
         plotController.AutoPlotButtonClicked();
+    }
+
+    private static bool TryRunPendingTreasureChestAutoPick(TreasureChestChoiceSession session, PlotController plotController)
+    {
+        if (!session.PendingAutoPick)
+        {
+            return false;
+        }
+
+        if (session.PendingAutoPickFrames > 0)
+        {
+            session.PendingAutoPickFrames--;
+            return true;
+        }
+
+        session.PendingAutoPick = false;
+        var bestIndex = FindBestTreasureChestChoiceIndex(session.Options);
+        if (bestIndex < 0 || bestIndex >= session.Options.Count)
+        {
+            return false;
+        }
+
+        var chosenItem = session.Options[bestIndex];
+        TraceTreasureChestEvent(
+            "TryRunPendingTreasureChestAutoPick resolved",
+            session.Player,
+            chosenItem,
+            1,
+            session.SkipManageItemPoison,
+            $"index={bestIndex}, options={DescribeItemSummaries(session.Options)}");
+        GrantTreasureChestChoiceReward(session, chosenItem, $"auto:value:{bestIndex}");
+        TryCloseTreasureChestChoicePlot(plotController);
+        return true;
+    }
+
+    private static int FindBestTreasureChestChoiceIndex(IReadOnlyList<ItemData> options)
+    {
+        if (options == null || options.Count <= 0)
+        {
+            return -1;
+        }
+
+        var bestIndex = 0;
+        for (var i = 1; i < options.Count; i++)
+        {
+            if (CompareTreasureChestChoicePriority(options[i], options[bestIndex]) > 0)
+            {
+                bestIndex = i;
+            }
+        }
+
+        return bestIndex;
+    }
+
+    private static int CompareTreasureChestChoicePriority(ItemData? left, ItemData? right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return 0;
+        }
+
+        if (left == null)
+        {
+            return -1;
+        }
+
+        if (right == null)
+        {
+            return 1;
+        }
+
+        var valueComparison = left.value.CompareTo(right.value);
+        if (valueComparison != 0)
+        {
+            return valueComparison;
+        }
+
+        var rarityComparison = left.rareLv.CompareTo(right.rareLv);
+        if (rarityComparison != 0)
+        {
+            return rarityComparison;
+        }
+
+        return left.itemLv.CompareTo(right.itemLv);
+    }
+
+    private static void IdentifyCorrectTreasurePostfix(IdentifyMatchController __instance)
+    {
+        if (!_treasureIdentifyHighlightCorrect.Value)
+        {
+            return;
+        }
+
+        TrySelectCorrectIdentifyTreasure(__instance, "correctTreasure");
+    }
+
+    private static void IdentifySetNowChooseTreasurePrefix(IdentifyMatchController __instance, ref GameObject targetTreasure)
+    {
+        if (!_treasureIdentifyForceCorrectSelection.Value)
+        {
+            return;
+        }
+
+        var correctTreasure = TryGetCorrectIdentifyTreasure(__instance);
+        if (correctTreasure == null || ReferenceEquals(correctTreasure, targetTreasure))
+        {
+            return;
+        }
+
+        targetTreasure = correctTreasure;
+        LoggerInstance.LogInfo($"Treasure identify forced correct treasure on click: {DescribeIdentifyTreasure(correctTreasure)}");
+    }
+
+    private static void IdentifySureButtonClickedPrefix(IdentifyMatchController __instance)
+    {
+        if (!_treasureIdentifyForceCorrectSelection.Value)
+        {
+            return;
+        }
+
+        TrySelectCorrectIdentifyTreasure(__instance, "submit");
+    }
+
+    private static bool TrySelectCorrectIdentifyTreasure(IdentifyMatchController? controller, string source)
+    {
+        var correctTreasure = TryGetCorrectIdentifyTreasure(controller);
+        if (controller == null || correctTreasure == null)
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(TryGetCurrentIdentifyTreasure(controller), correctTreasure))
+        {
+            return true;
+        }
+
+        try
+        {
+            controller.SetNowChooseTreasure(correctTreasure);
+            LoggerInstance.LogInfo($"Treasure identify selected correct treasure from {source}: {DescribeIdentifyTreasure(correctTreasure)}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to auto-select correct identify treasure from {source}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static GameObject? TryGetCorrectIdentifyTreasure(IdentifyMatchController? controller)
+    {
+        if (controller == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var correctTreasure = controller.correctTreasure;
+            if (correctTreasure != null && correctTreasure.Count > 0)
+            {
+                return correctTreasure[0];
+            }
+        }
+        catch
+        {
+        }
+
+        var value = SafeProperty(controller, "correctTreasure") ?? SafeField(controller, "correctTreasure");
+        var count = TryGetCollectionCount(value);
+        if (count <= 0)
+        {
+            return null;
+        }
+
+        return TryGetIndexedValue(value!, 0) as GameObject;
+    }
+
+    private static GameObject? TryGetCurrentIdentifyTreasure(IdentifyMatchController? controller)
+    {
+        if (controller == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return controller.nowChooseTreasure;
+        }
+        catch
+        {
+            return (SafeProperty(controller, "nowChooseTreasure") ?? SafeField(controller, "nowChooseTreasure")) as GameObject;
+        }
+    }
+
+    private static string DescribeIdentifyTreasure(GameObject? treasure)
+    {
+        if (treasure == null)
+        {
+            return "<null>";
+        }
+
+        try
+        {
+            var icon = treasure.GetComponent<ItemIconController>();
+            if (icon?.itemData != null)
+            {
+                return $"{treasure.name} => {DescribeItemSummary(icon.itemData)}";
+            }
+        }
+        catch
+        {
+        }
+
+        return treasure.name ?? "<unnamed-treasure>";
     }
 
     private static void TryGrantTreasureChestBonusItems(HeroData? targetHero, ItemData? itemData, int treasureChestClickTime, bool skipManageItemPoison)
@@ -1257,6 +1644,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static void HideTradeUiPostfix()
     {
         ResetTreasureTradeUiState("TradeUI.HideTradeUI");
+        ResetShopOwnershipUiState("TradeUI.HideTradeUI");
     }
 
     private static void ItemIconOnClickPostfix(ItemIconController __instance)
@@ -1269,6 +1657,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         if (targetType != TradeUIType.Shop)
         {
             ResetTreasureTradeUiState(source + "/non-shop");
+            ResetShopOwnershipUiState(source + "/non-shop");
             return;
         }
 
@@ -1482,15 +1871,17 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void UpdateTreasureTradeOverlay(TradeUIController tradeUi, int identifyCost)
     {
+        TryResolveCurrentShopOwnershipContext(out var shopContext);
         var opportunity = TryResolveTreasureTradeOpportunity(tradeUi, identifyCost);
         if (opportunity == null)
         {
             EnsureTreasureTradeOverlay(tradeUi);
             if (_treasureTradeOverlayLabel != null)
             {
-                _treasureTradeOverlayLabel.text = identifyCost > 0
+                var baseText = identifyCost > 0
                     ? $"珍宝倒宝助手\n当前无未鉴定珍宝\n鉴定费: {identifyCost}"
                     : "珍宝倒宝助手\n当前无未鉴定珍宝";
+                _treasureTradeOverlayLabel.text = AppendShopOwnershipOverlayText(baseText, shopContext);
                 _treasureTradeOverlayLabel.gameObject.SetActive(true);
             }
 
@@ -1503,8 +1894,38 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
-        _treasureTradeOverlayLabel.text = BuildTreasureTradeOverlayText(opportunity);
+        _treasureTradeOverlayLabel.text = AppendShopOwnershipOverlayText(BuildTreasureTradeOverlayText(opportunity), shopContext);
         _treasureTradeOverlayLabel.gameObject.SetActive(true);
+    }
+
+    private static string AppendShopOwnershipOverlayText(string baseText, ShopOwnershipContext? context)
+    {
+        if (context == null)
+        {
+            return baseText;
+        }
+
+        var isOwned = _ownedShops.TryGetValue(context.ShopKey, out var ownedRecord);
+        var currentMoney = TryGetHeroMoney(context.Player) ?? 0;
+        var saveSlotText = _currentShopOwnershipSaveSlotId >= 0
+            ? $"存档槽: {_currentShopOwnershipSaveSlotId}"
+            : _loadedShopOwnershipSourceSlotId >= 0
+                ? $"存档槽: 未绑定（当前读取自 {_loadedShopOwnershipSourceSlotId}）"
+                : "存档槽: 未绑定";
+        var buyText = isOwned
+            ? "状态: 你已买下此店"
+            : $"状态: 未买下 | 价格: {ShopOwnershipBuyPrice} | 金钱: {currentMoney}";
+        var purchasedText = ownedRecord == null || string.IsNullOrWhiteSpace(ownedRecord.PurchasedOn)
+            ? string.Empty
+            : $"\n买断记录: {ownedRecord.PurchasedOn}";
+
+        return
+            $"{baseText}\n\n" +
+            $"店铺产业试验\n" +
+            $"店铺: {context.ShopName}\n" +
+            $"{buyText}\n" +
+            $"{saveSlotText}" +
+            purchasedText;
     }
 
     private static TreasureTradeOpportunity? TryResolveTreasureTradeOpportunity(TradeUIController tradeUi, int identifyCost)
@@ -1696,6 +2117,389 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             {
             }
         }
+    }
+
+    private static void ResetShopOwnershipUiState(string source)
+    {
+        HideShopOwnershipOverlay();
+    }
+
+    private static void HideShopOwnershipOverlay()
+    {
+        if (_shopOwnershipOverlayRoot != null)
+        {
+            try
+            {
+                _shopOwnershipOverlayRoot.SetActive(false);
+            }
+            catch
+            {
+            }
+        }
+
+        if (_shopOwnershipBuyButton != null)
+        {
+            try
+            {
+                _shopOwnershipBuyButton.gameObject.SetActive(false);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private static void UpdateShopOwnershipUiState()
+    {
+        if (!TryResolveCurrentShopOwnershipContext(out var context))
+        {
+            HideShopOwnershipOverlay();
+            return;
+        }
+
+        EnsureShopOwnershipOverlay(context.TradeUi);
+        if (_shopOwnershipOverlayRoot == null ||
+            _shopOwnershipOverlayLabel == null ||
+            _shopOwnershipBuyButton == null ||
+            _shopOwnershipBuyButtonLabel == null)
+        {
+            return;
+        }
+
+        _shopOwnershipOverlayRoot.SetActive(true);
+        _shopOwnershipBuyButton.gameObject.SetActive(true);
+
+        var isOwned = _ownedShops.TryGetValue(context.ShopKey, out var ownedRecord);
+        var currentMoney = TryGetHeroMoney(context.Player) ?? 0;
+        var canBuy = !isOwned && context.Player != null && currentMoney >= ShopOwnershipBuyPrice;
+
+        _shopOwnershipOverlayLabel.text = BuildShopOwnershipOverlayText(context, ownedRecord);
+        _shopOwnershipBuyButton.interactable = canBuy;
+        _shopOwnershipBuyButtonLabel.text = isOwned
+            ? "已买下此店"
+            : canBuy
+                ? $"花费 {ShopOwnershipBuyPrice} 文钱买下此店"
+                : $"银钱不足 ({currentMoney}/{ShopOwnershipBuyPrice})";
+
+        var buttonImage = _shopOwnershipBuyButton.GetComponent<Image>();
+        if (buttonImage != null)
+        {
+            buttonImage.color = isOwned
+                ? new Color(0.28f, 0.32f, 0.22f, 0.95f)
+                : canBuy
+                    ? new Color(0.62f, 0.33f, 0.12f, 0.95f)
+                    : new Color(0.26f, 0.26f, 0.26f, 0.95f);
+        }
+
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo(
+                $"Shop ownership UI refreshed: shop={context.ShopKey}, owned={isOwned}, money={currentMoney}, slot={_currentShopOwnershipSaveSlotId}.");
+        }
+    }
+
+    private static bool TryResolveCurrentShopOwnershipContext(out ShopOwnershipContext context)
+    {
+        context = null!;
+        if (!TryGetActiveShopTradeUi(out var tradeUi))
+        {
+            return false;
+        }
+
+        var building = BuildingUIController.Instance?.targetBuildingData;
+        if (building == null)
+        {
+            return false;
+        }
+
+        var areaId = Math.Max(0, building.areaID);
+        var buildingId = Math.Max(0, building.buildingID);
+        var shopName = TryGetShopDisplayName(building);
+        var shopKey = $"area-{areaId}-building-{buildingId}";
+
+        context = new ShopOwnershipContext
+        {
+            TradeUi = tradeUi,
+            Building = building,
+            Player = TryGetPlayerHero(),
+            ShopKey = shopKey,
+            ShopName = shopName,
+            AreaId = areaId,
+            BuildingId = buildingId
+        };
+        return true;
+    }
+
+    private static string TryGetShopDisplayName(AreaBuildingData? building)
+    {
+        if (building == null)
+        {
+            return "未知店铺";
+        }
+
+        try
+        {
+            var name = building.Name(false);
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                return name;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var detail = building.GetBuildingText(true, false, false);
+            if (!string.IsNullOrWhiteSpace(detail))
+            {
+                return detail;
+            }
+        }
+        catch
+        {
+        }
+
+        return $"店铺 area={building.areaID} building={building.buildingID}";
+    }
+
+    private static string BuildShopOwnershipOverlayText(ShopOwnershipContext context, OwnedShopRecord? ownedRecord)
+    {
+        var ownershipText = ownedRecord == null ? "未买下" : "你已买下此店";
+        var purchasedText = ownedRecord == null
+            ? "买断价格: 500 文钱"
+            : string.IsNullOrWhiteSpace(ownedRecord.PurchasedOn)
+                ? $"买断价格: {ownedRecord.BuyPrice} 文钱"
+                : $"买断记录: {ownedRecord.PurchasedOn} / {ownedRecord.BuyPrice} 文钱";
+        var saveSlotText = _currentShopOwnershipSaveSlotId >= 0
+            ? $"当前绑定存档槽: {_currentShopOwnershipSaveSlotId}"
+            : _loadedShopOwnershipSourceSlotId >= 0
+                ? $"当前未绑定存档槽: 当前读取自 {_loadedShopOwnershipSourceSlotId}，买下后请记得保存"
+                : "当前未绑定存档槽: 买下后请记得保存";
+
+        return
+            $"店铺产业试验\n" +
+            $"店铺: {context.ShopName}\n" +
+            $"产权状态: {ownershipText}\n" +
+            $"{purchasedText}\n" +
+            $"{saveSlotText}";
+    }
+
+    private static void EnsureShopOwnershipOverlay(TradeUIController tradeUi)
+    {
+        if (tradeUi == null)
+        {
+            return;
+        }
+
+        if (_shopOwnershipOverlayRoot != null &&
+            _shopOwnershipOverlayLabel != null &&
+            _shopOwnershipBuyButton != null &&
+            _shopOwnershipBuyButtonLabel != null)
+        {
+            return;
+        }
+
+        var template = tradeUi.deltaResourceLabel ?? tradeUi.leftResourceLabel ?? tradeUi.rightResourceLabel;
+        if (template == null)
+        {
+            return;
+        }
+
+        try
+        {
+            var templateRect = template.GetComponent<RectTransform>();
+            if (templateRect == null)
+            {
+                return;
+            }
+
+            var labelObject = UnityEngine.Object.Instantiate(template.gameObject, template.transform.parent);
+            labelObject.name = ShopOwnershipOverlayPanelName;
+            labelObject.SetActive(false);
+
+            var label = labelObject.GetComponent<Text>();
+            var labelRect = labelObject.GetComponent<RectTransform>();
+            if (label == null || labelRect == null)
+            {
+                UnityEngine.Object.Destroy(labelObject);
+                return;
+            }
+
+            label.fontSize = Math.Max(16, template.fontSize - 1);
+            label.resizeTextForBestFit = false;
+            label.supportRichText = true;
+            label.color = new Color(1f, 0.95f, 0.8f, 1f);
+            label.raycastTarget = false;
+            labelRect.anchorMin = templateRect.anchorMin;
+            labelRect.anchorMax = templateRect.anchorMax;
+            labelRect.pivot = templateRect.pivot;
+            labelRect.anchoredPosition = templateRect.anchoredPosition + new Vector2(0f, -140f);
+            labelRect.sizeDelta = new Vector2(Mathf.Max(templateRect.sizeDelta.x, 420f), Mathf.Max(120f, templateRect.sizeDelta.y * 3.5f));
+
+            var buttonObject = UnityEngine.Object.Instantiate(template.gameObject, template.transform.parent);
+            buttonObject.name = ShopOwnershipBuyButtonName;
+            buttonObject.SetActive(false);
+
+            var button = buttonObject.GetComponent<Button>();
+            var buttonImage = buttonObject.GetComponent<Image>();
+            var buttonRect = buttonObject.GetComponent<RectTransform>();
+            var buttonLabel = buttonObject.GetComponent<Text>();
+            if (button == null)
+            {
+                button = buttonObject.AddComponent<Button>();
+            }
+
+            if (buttonImage == null)
+            {
+                buttonImage = buttonObject.AddComponent<Image>();
+            }
+
+            if (button == null || buttonImage == null || buttonRect == null)
+            {
+                UnityEngine.Object.Destroy(labelObject);
+                UnityEngine.Object.Destroy(buttonObject);
+                return;
+            }
+
+            buttonImage.color = new Color(0.62f, 0.33f, 0.12f, 0.95f);
+            button.targetGraphic = buttonImage;
+            button.onClick.RemoveAllListeners();
+            button.onClick.AddListener((UnityAction)OnShopOwnershipBuyButtonClicked);
+            buttonRect.anchorMin = templateRect.anchorMin;
+            buttonRect.anchorMax = templateRect.anchorMax;
+            buttonRect.pivot = templateRect.pivot;
+            buttonRect.anchoredPosition = templateRect.anchoredPosition + new Vector2(0f, -240f);
+            buttonRect.sizeDelta = new Vector2(Mathf.Max(templateRect.sizeDelta.x, 420f), 42f);
+            if (buttonLabel == null)
+            {
+                UnityEngine.Object.Destroy(labelObject);
+                UnityEngine.Object.Destroy(buttonObject);
+                return;
+            }
+
+            buttonLabel.fontSize = Math.Max(15, template.fontSize);
+            buttonLabel.resizeTextForBestFit = false;
+            buttonLabel.color = Color.white;
+            buttonLabel.raycastTarget = false;
+
+            _shopOwnershipOverlayRoot = labelObject;
+            _shopOwnershipOverlayLabel = label;
+            _shopOwnershipBuyButton = button;
+            _shopOwnershipBuyButtonLabel = buttonLabel;
+
+            if (_traceMode.Value)
+            {
+                LoggerInstance.LogInfo("Shop ownership overlay widgets created.");
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Could not create shop ownership overlay: {ex.Message}");
+        }
+    }
+
+    private static void OnShopOwnershipBuyButtonClicked()
+    {
+        var bought = TryBuyCurrentShop(expectedShopKey: null, out var message, out var tradeUi);
+        PushPlayerLog(message);
+
+        if (tradeUi != null)
+        {
+            RefreshTradeUi(tradeUi);
+        }
+
+        if (!bought)
+        {
+            UpdateShopOwnershipUiState();
+            return;
+        }
+
+        UpdateShopOwnershipUiState();
+    }
+
+    private static bool TryBuyCurrentShop(string? expectedShopKey, out string message, out TradeUIController? tradeUi)
+    {
+        tradeUi = null;
+        if (!TryResolveCurrentShopOwnershipContext(out var context))
+        {
+            message = "产业试验：当前无法识别店铺，买断失败。";
+            SetExternalOverlayStatusMessage(message);
+            return false;
+        }
+
+        tradeUi = context.TradeUi;
+
+        if (!string.IsNullOrWhiteSpace(expectedShopKey) &&
+            !string.Equals(expectedShopKey, context.ShopKey, StringComparison.Ordinal))
+        {
+            message = $"产业试验：当前店铺已切换为【{context.ShopName}】，请在目标店铺重新尝试。";
+            SetExternalOverlayStatusMessage(message);
+            return false;
+        }
+
+        return TryBuyShop(context, out message);
+    }
+
+    private static bool TryBuyShop(ShopOwnershipContext context, out string message)
+    {
+        if (_ownedShops.ContainsKey(context.ShopKey))
+        {
+            message = $"产业试验：你已经买下了【{context.ShopName}】。";
+            SetExternalOverlayStatusMessage(message);
+            return false;
+        }
+
+        var player = context.Player;
+        if (player == null)
+        {
+            message = "产业试验：当前无法识别玩家角色，买断失败。";
+            SetExternalOverlayStatusMessage(message);
+            return false;
+        }
+
+        var currentMoney = TryGetHeroMoney(player) ?? 0;
+        if (currentMoney < ShopOwnershipBuyPrice)
+        {
+            message = $"产业试验：买下【{context.ShopName}】需要 {ShopOwnershipBuyPrice} 文钱。";
+            SetExternalOverlayStatusMessage(message);
+            return false;
+        }
+
+        try
+        {
+            player.ChangeMoney(-ShopOwnershipBuyPrice, true);
+        }
+        catch (Exception ex)
+        {
+            message = $"产业试验：扣除买断费用失败，原因：{ex.Message}";
+            SetExternalOverlayStatusMessage(message);
+            return false;
+        }
+
+        _ownedShops[context.ShopKey] = new OwnedShopRecord
+        {
+            ShopKey = context.ShopKey,
+            ShopName = context.ShopName,
+            AreaId = context.AreaId,
+            BuildingId = context.BuildingId,
+            BuyPrice = ShopOwnershipBuyPrice,
+            PurchasedOn = FormatDate(TryGetWorldDateSnapshot())
+        };
+
+        if (_currentShopOwnershipSaveSlotId >= 0)
+        {
+            SaveOwnedShopsForSlot(_currentShopOwnershipSaveSlotId, "ShopBuyout");
+            message = $"产业试验：你已花费 {ShopOwnershipBuyPrice} 文钱买下【{context.ShopName}】。";
+        }
+        else
+        {
+            message = $"产业试验：你已花费 {ShopOwnershipBuyPrice} 文钱买下【{context.ShopName}】。当前尚未绑定存档槽，保存游戏后会写入模组存档。";
+        }
+
+        SetExternalOverlayStatusMessage(message);
+        return true;
     }
 
     private static void TryRunTreasureAutoTrade(TradeUIController tradeUi, int identifyCost)
@@ -2769,17 +3573,440 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
     }
 
+    private static void ShowStartMenuPostfix()
+    {
+        ClearShopOwnershipRuntimeState("StartMenu.ShowStartMenu");
+    }
+
+    private static void ShowMainMenuPostfix()
+    {
+        ClearShopOwnershipRuntimeState("GameTitle.ShowMainMenu");
+    }
+
+    private static void SaveSlotButtonClickedPrefix(int saveID)
+    {
+        _pendingShopOwnershipSaveSlotId = saveID;
+    }
+
+    private static void SureSavePostfix(string param)
+    {
+        var saveSlotId = TryResolveSaveSlotId(param) ?? (_pendingShopOwnershipSaveSlotId >= 0 ? _pendingShopOwnershipSaveSlotId : null);
+        _pendingShopOwnershipSaveSlotId = -1;
+        if (!saveSlotId.HasValue)
+        {
+            LoggerInstance.LogWarning("Shop ownership save sync skipped because the confirmed save slot could not be resolved.");
+            SetExternalOverlayStatusMessage("模组档案同步失败：无法识别当前存档槽。");
+            return;
+        }
+
+        _currentShopOwnershipSaveSlotId = saveSlotId.Value;
+        _loadedShopOwnershipSourceSlotId = saveSlotId.Value;
+        SaveOwnedShopsForSlot(saveSlotId.Value, "SaveLoadMenu.SureSave");
+        SetExternalOverlayStatusMessage($"模组档案已同步到存档槽 {saveSlotId.Value}。");
+    }
+
+    private static void LoadRecentGamePrefix(SaveLoadMenuController __instance)
+    {
+        int? saveSlotId = null;
+        try
+        {
+            saveSlotId = __instance?.GetRecentSaveSlotID();
+        }
+        catch
+        {
+        }
+
+        if (!saveSlotId.HasValue || saveSlotId.Value < 0)
+        {
+            LoggerInstance.LogWarning("Shop ownership load sync skipped because the recent save slot could not be resolved.");
+            SetExternalOverlayStatusMessage("读取最近存档失败：无法识别存档槽。");
+            return;
+        }
+
+        LoadOwnedShopsForSlot(saveSlotId.Value, "SaveLoadMenu.LoadRecentGame");
+    }
+
+    private static void LoadGamePrefix(int saveID)
+    {
+        if (saveID < 0)
+        {
+            LoggerInstance.LogWarning($"Shop ownership load sync skipped because load slot {saveID} is invalid.");
+            SetExternalOverlayStatusMessage("读取存档失败：存档槽编号无效。");
+            return;
+        }
+
+        LoadOwnedShopsForSlot(saveID, "SaveLoadMenu.LoadGame");
+    }
+
+    private static void ClearShopOwnershipRuntimeState(string source)
+    {
+        _currentShopOwnershipSaveSlotId = -1;
+        _loadedShopOwnershipSourceSlotId = -1;
+        _pendingShopOwnershipSaveSlotId = -1;
+        _ownedShops.Clear();
+        _lastExternalOverlayRequestId = string.Empty;
+        HideShopOwnershipOverlay();
+        SetExternalOverlayStatusMessage("已回到标题界面，等待新的存档载入。");
+
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo($"Shop ownership runtime state cleared from {source}.");
+        }
+    }
+
+    private static string GetOwnedShopSavePath(int saveSlotId)
+    {
+        var folder = Path.Combine(Paths.ConfigPath, ShopOwnershipSaveFolderName);
+        return Path.Combine(folder, $"slot-{saveSlotId}.json");
+    }
+
+    private static void LoadOwnedShopsForSlot(int saveSlotId, string source)
+    {
+        _loadedShopOwnershipSourceSlotId = saveSlotId;
+        _currentShopOwnershipSaveSlotId = -1;
+        _pendingShopOwnershipSaveSlotId = -1;
+        _ownedShops.Clear();
+
+        var path = GetOwnedShopSavePath(saveSlotId);
+        if (!File.Exists(path))
+        {
+            SetExternalOverlayStatusMessage($"已从存档槽 {saveSlotId} 读取，当前没有店铺产业记录。下次保存时才会绑定新的写入存档槽。");
+            if (_traceMode.Value)
+            {
+                LoggerInstance.LogInfo($"Shop ownership load found no sidecar for slot {saveSlotId} at {path} from {source}.");
+            }
+
+            return;
+        }
+
+        try
+        {
+            var text = File.ReadAllText(path);
+            var payload = JsonSerializer.Deserialize<ShopOwnershipSaveFile>(
+                text,
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+            if (payload == null)
+            {
+                LoggerInstance.LogWarning($"Shop ownership sidecar at {path} was empty. Starting with no owned shops.");
+                return;
+            }
+
+            if (payload.version != ShopOwnershipSaveVersion)
+            {
+                LoggerInstance.LogWarning(
+                    $"Shop ownership sidecar at {path} has unsupported version {payload.version}. Expected {ShopOwnershipSaveVersion}.");
+                return;
+            }
+
+            if (payload.shops == null)
+            {
+                return;
+            }
+
+            foreach (var entry in payload.shops)
+            {
+                if (entry == null || string.IsNullOrWhiteSpace(entry.shopKey))
+                {
+                    continue;
+                }
+
+                _ownedShops[entry.shopKey] = new OwnedShopRecord
+                {
+                    ShopKey = entry.shopKey,
+                    ShopName = entry.shopName?.Trim() ?? entry.shopKey,
+                    AreaId = entry.areaId,
+                    BuildingId = entry.buildingId,
+                    BuyPrice = Math.Max(0, entry.buyPrice),
+                    PurchasedOn = entry.purchasedOn?.Trim() ?? string.Empty
+                };
+            }
+
+            LoggerInstance.LogInfo(
+                $"Shop ownership loaded {_ownedShops.Count} owned shop(s) for slot {saveSlotId} from {path} via {source}.");
+            SetExternalOverlayStatusMessage($"已从存档槽 {saveSlotId} 读取到 {_ownedShops.Count} 间已买下的店铺。下次保存时才会绑定新的写入存档槽。");
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to load shop ownership sidecar for slot {saveSlotId} from {path}: {ex.Message}");
+            SetExternalOverlayStatusMessage($"读取模组店铺档案失败：{ex.Message}");
+        }
+    }
+
+    private static void SaveOwnedShopsForSlot(int saveSlotId, string source)
+    {
+        if (saveSlotId < 0)
+        {
+            LoggerInstance.LogWarning($"Shop ownership save skipped from {source} because slot {saveSlotId} is invalid.");
+            return;
+        }
+
+        var path = GetOwnedShopSavePath(saveSlotId);
+        try
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            if (_ownedShops.Count == 0)
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+
+                if (_traceMode.Value)
+                {
+                    LoggerInstance.LogInfo($"Shop ownership save removed empty sidecar for slot {saveSlotId} via {source}.");
+                }
+
+                return;
+            }
+
+            var payload = new ShopOwnershipSaveFile
+            {
+                version = ShopOwnershipSaveVersion,
+                shops = _ownedShops.Values
+                    .OrderBy(static entry => entry.ShopKey, StringComparer.Ordinal)
+                    .Select(
+                        static entry => new ShopOwnershipSaveEntry
+                        {
+                            shopKey = entry.ShopKey,
+                            shopName = entry.ShopName,
+                            areaId = entry.AreaId,
+                            buildingId = entry.BuildingId,
+                            buyPrice = entry.BuyPrice,
+                            purchasedOn = entry.PurchasedOn
+                        })
+                    .ToList()
+            };
+
+            File.WriteAllText(
+                path,
+                JsonSerializer.Serialize(
+                    payload,
+                    new JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    }));
+            LoggerInstance.LogInfo(
+                $"Shop ownership saved {_ownedShops.Count} owned shop(s) for slot {saveSlotId} to {path} via {source}.");
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to save shop ownership sidecar for slot {saveSlotId} to {path}: {ex.Message}");
+        }
+    }
+
+    private static void TrySyncExternalOverlay()
+    {
+        var now = Time.realtimeSinceStartup;
+        if (_lastExternalOverlaySyncRealtime >= 0f &&
+            now < _lastExternalOverlaySyncRealtime + ExternalOverlaySyncIntervalSeconds)
+        {
+            return;
+        }
+
+        _lastExternalOverlaySyncRealtime = now;
+        TryProcessExternalOverlayCommand();
+        WriteExternalOverlayState();
+    }
+
+    private static void TryProcessExternalOverlayCommand()
+    {
+        var path = GetExternalOverlayCommandPath();
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        ExternalOverlayCommandFile? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<ExternalOverlayCommandFile>(
+                File.ReadAllText(path),
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to parse external overlay command from {path}: {ex.Message}");
+            SetExternalOverlayStatusMessage($"外部浮窗指令读取失败：{ex.Message}");
+            TryDeleteFile(path);
+            return;
+        }
+
+        if (payload == null ||
+            payload.version != ExternalOverlayProtocolVersion ||
+            string.IsNullOrWhiteSpace(payload.requestId) ||
+            string.IsNullOrWhiteSpace(payload.action))
+        {
+            SetExternalOverlayStatusMessage("外部浮窗指令格式无效，已忽略。");
+            TryDeleteFile(path);
+            return;
+        }
+
+        if (string.Equals(payload.requestId, _lastExternalOverlayRequestId, StringComparison.Ordinal))
+        {
+            TryDeleteFile(path);
+            return;
+        }
+
+        _lastExternalOverlayRequestId = payload.requestId;
+
+        switch (payload.action.Trim().ToLowerInvariant())
+        {
+            case "buy-shop":
+                TryBuyCurrentShop(payload.shopKey, out var message, out var tradeUi);
+                PushPlayerLog(message);
+                if (tradeUi != null)
+                {
+                    RefreshTradeUi(tradeUi);
+                }
+
+                UpdateShopOwnershipUiState();
+
+                break;
+            default:
+                SetExternalOverlayStatusMessage($"外部浮窗指令不受支持：{payload.action}");
+                break;
+        }
+
+        TryDeleteFile(path);
+    }
+
+    private static void WriteExternalOverlayState()
+    {
+        try
+        {
+            var player = TryGetPlayerHero();
+            var playerMoney = TryGetHeroMoney(player);
+            var inShop = TryResolveCurrentShopOwnershipContext(out var context);
+            OwnedShopRecord? ownedRecord = null;
+            var isOwned = inShop && _ownedShops.TryGetValue(context.ShopKey, out ownedRecord);
+            var canBuy = inShop && !isOwned && playerMoney.GetValueOrDefault() >= ShopOwnershipBuyPrice;
+
+            var payload = new ExternalOverlayStateFile
+            {
+                version = ExternalOverlayProtocolVersion,
+                updatedAtUtc = DateTime.UtcNow.ToString("O"),
+                statusMessage = _externalOverlayStatusMessage,
+                statusChangedAtUtc = _externalOverlayStatusChangedAtUtc,
+                worldDate = FormatDate(TryGetWorldDateSnapshot()),
+                saveSlotId = _currentShopOwnershipSaveSlotId >= 0
+                    ? _currentShopOwnershipSaveSlotId
+                    : _loadedShopOwnershipSourceSlotId,
+                ownedShopCount = _ownedShops.Count,
+                playerMoney = playerMoney,
+                inShop = inShop,
+                shopKey = inShop ? context.ShopKey : null,
+                shopName = inShop ? context.ShopName : null,
+                shopOwned = isOwned,
+                canBuyShop = canBuy,
+                buyPrice = ShopOwnershipBuyPrice,
+                purchasedOn = isOwned && ownedRecord != null ? ownedRecord.PurchasedOn : null,
+                lastProcessedRequestId = string.IsNullOrWhiteSpace(_lastExternalOverlayRequestId) ? null : _lastExternalOverlayRequestId
+            };
+
+            WriteJsonAtomically(GetExternalOverlayStatePath(), payload);
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to write external overlay state: {ex.Message}");
+        }
+    }
+
+    private static void SetExternalOverlayStatusMessage(string message)
+    {
+        _externalOverlayStatusMessage = string.IsNullOrWhiteSpace(message) ? "状态未知" : message.Trim();
+        _externalOverlayStatusChangedAtUtc = DateTime.UtcNow.ToString("O");
+    }
+
+    private static string GetExternalOverlayRootPath()
+    {
+        return Paths.ConfigPath;
+    }
+
+    private static string GetExternalOverlayStatePath()
+    {
+        return Path.Combine(GetExternalOverlayRootPath(), ExternalOverlayStateFileName);
+    }
+
+    private static string GetExternalOverlayCommandPath()
+    {
+        return Path.Combine(GetExternalOverlayRootPath(), ExternalOverlayCommandFileName);
+    }
+
+    private static void WriteJsonAtomically<TPayload>(string path, TPayload payload)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var tempPath = path + ".tmp";
+        File.WriteAllText(
+            tempPath,
+            JsonSerializer.Serialize(
+                payload,
+                new JsonSerializerOptions
+                {
+                    WriteIndented = true
+                }));
+        File.Move(tempPath, path, true);
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static int? TryResolveSaveSlotId(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var digits = new string(text.Where(char.IsDigit).ToArray());
+        if (digits.Length == 0 || !int.TryParse(digits, out var slotId))
+        {
+            return null;
+        }
+
+        return slotId;
+    }
+
     private static void GameControllerUpdatePostfix()
     {
         ApplyConfiguredMaxLoverCount("GameController.Update");
         EnsureDailySkillInsightBaseline();
         TryRunRealtimeSkillInsight();
+        TryEvaluateCustomTalents();
         TryEvaluateThresholdTalent();
         UpdateTreasureChestChoiceSession();
         UpdateDialogFastForwardAssist();
         KeepPlayerHorseTurboReady("Update");
         ApplyPlayerCarryWeightOverride("Update");
         UpdateTreasureTradeUiState();
+        TrySyncExternalOverlay();
 
         if (Input.GetKeyDown(_dialogFastForwardAssistHotkey.Value))
         {
@@ -2806,7 +4033,518 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void LoadAllGameDataPostfix()
     {
+        LoadCustomTalentPackFromDisk();
+        EnsureCustomTalentDefinitionsRegistered("LoadAllGameData");
         EnsureThresholdTalentRegistered("LoadAllGameData");
+    }
+
+    private static void LoadCustomTalentPackFromDisk()
+    {
+        _customTalents.Clear();
+
+        var configPath = GetCustomTalentConfigPath();
+        if (!File.Exists(configPath))
+        {
+            LoggerInstance.LogInfo($"Custom talent config not found at {configPath}. Starting with no JSON-driven custom talents.");
+            return;
+        }
+
+        try
+        {
+            var text = File.ReadAllText(configPath);
+            var pack = JsonSerializer.Deserialize<CustomTalentPackFile>(
+                text,
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+            if (pack == null)
+            {
+                LoggerInstance.LogWarning($"Custom talent config was empty at {configPath}.");
+                return;
+            }
+
+            if (pack.version != 1)
+            {
+                LoggerInstance.LogWarning($"Custom talent config version {pack.version} is unsupported. Expected version 1.");
+                return;
+            }
+
+            if (pack.talents == null || pack.talents.Count == 0)
+            {
+                LoggerInstance.LogInfo("Custom talent config loaded successfully with 0 talents.");
+                return;
+            }
+
+            var seenIds = new HashSet<string>(StringComparer.Ordinal);
+            for (var i = 0; i < pack.talents.Count; i++)
+            {
+                var talentFile = pack.talents[i];
+                if (!TryBuildRegisteredCustomTalent(talentFile, seenIds, out var registered, out var error))
+                {
+                    LoggerInstance.LogWarning($"Skipped custom talent entry #{i + 1}: {error}");
+                    continue;
+                }
+
+                _customTalents.Add(registered);
+            }
+
+            LoggerInstance.LogInfo($"Loaded {_customTalents.Count} JSON-driven custom talents from {configPath}.");
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to load custom talent config from {configPath}: {ex.Message}");
+        }
+    }
+
+    private static string GetCustomTalentConfigPath()
+    {
+        return Path.Combine(Paths.ConfigPath, CustomTalentConfigFileName);
+    }
+
+    private static bool TryBuildRegisteredCustomTalent(
+        CustomTalentDefinitionFile? talentFile,
+        HashSet<string> seenIds,
+        out RegisteredCustomTalent registered,
+        out string error)
+    {
+        registered = null!;
+        error = string.Empty;
+
+        if (talentFile == null)
+        {
+            error = "entry was null";
+            return false;
+        }
+
+        var id = talentFile.id?.Trim();
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            error = "missing id";
+            return false;
+        }
+
+        if (!seenIds.Add(id))
+        {
+            error = $"duplicate id '{id}'";
+            return false;
+        }
+
+        var name = talentFile.name?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            error = $"talent '{id}' is missing name";
+            return false;
+        }
+
+        if (talentFile.conditions == null || talentFile.conditions.Count == 0)
+        {
+            error = $"talent '{id}' has no conditions";
+            return false;
+        }
+
+        if (talentFile.effects == null || talentFile.effects.Count == 0)
+        {
+            error = $"talent '{id}' has no effects";
+            return false;
+        }
+
+        var conditions = new List<RegisteredCustomTalentCondition>();
+        for (var i = 0; i < talentFile.conditions.Count; i++)
+        {
+            var conditionFile = talentFile.conditions[i];
+            if (conditionFile == null)
+            {
+                error = $"talent '{id}' has null condition #{i + 1}";
+                return false;
+            }
+
+            if (!string.Equals(conditionFile.type, "stat_min", StringComparison.Ordinal))
+            {
+                error = $"talent '{id}' has unsupported condition type '{conditionFile.type}'";
+                return false;
+            }
+
+            if (!Enum.TryParse(conditionFile.stat, ignoreCase: false, out BaseAttriType stat))
+            {
+                error = $"talent '{id}' has invalid stat '{conditionFile.stat}'";
+                return false;
+            }
+
+            conditions.Add(
+                new RegisteredCustomTalentCondition
+                {
+                    Stat = stat,
+                    Minimum = conditionFile.min
+                });
+        }
+
+        var buffData = new HeroSpeAddData();
+        for (var i = 0; i < talentFile.effects.Count; i++)
+        {
+            var effectFile = talentFile.effects[i];
+            if (effectFile == null)
+            {
+                error = $"talent '{id}' has null effect #{i + 1}";
+                return false;
+            }
+
+            if (!Enum.TryParse(effectFile.effectType, ignoreCase: false, out HeroSpeAddDataType effectType))
+            {
+                error = $"talent '{id}' has invalid effect type '{effectFile.effectType}'";
+                return false;
+            }
+
+            buffData.Set(effectType, effectFile.value);
+        }
+
+        registered = new RegisteredCustomTalent
+        {
+            Id = id,
+            Enabled = talentFile.enabled,
+            Name = name,
+            DurationDays = Math.Max(1, talentFile.durationDays),
+            Marker = CustomTalentMarkerPrefix + id,
+            BuffData = buffData,
+            Conditions = conditions
+        };
+        return true;
+    }
+
+    private static bool EnsureCustomTalentDefinitionsRegistered(string source)
+    {
+        if (_customTalents.Count == 0)
+        {
+            return true;
+        }
+
+        var gameData = GameDataController.Instance;
+        var database = gameData?.heroTagDataBase;
+        if (gameData == null || database == null)
+        {
+            LoggerInstance.LogWarning($"Custom talent registration skipped from {source} because GameDataController or heroTagDataBase is unavailable.");
+            return false;
+        }
+
+        foreach (var talent in _customTalents)
+        {
+            try
+            {
+                var existingId = FindTagIdByMarker(database, talent.Marker);
+                if (existingId >= 0)
+                {
+                    talent.RuntimeTagId = existingId;
+                    var existing = database[existingId];
+                    if (existing != null)
+                    {
+                        ApplyCustomTalentDefinition(existing, talent, existingId);
+                    }
+                }
+                else
+                {
+                    var customTag = new HeroTagDataBase();
+                    var newId = database.Count;
+                    ApplyCustomTalentDefinition(customTag, talent, newId);
+                    database.Add(customTag);
+                    talent.RuntimeTagId = newId;
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.LogWarning($"Failed to register custom talent '{talent.Name}' ({talent.Id}) from {source}: {ex.Message}");
+            }
+        }
+
+        return true;
+    }
+
+    private static int FindTagIdByMarker(Il2CppSystem.Collections.Generic.List<HeroTagDataBase> database, string marker)
+    {
+        if (database == null || string.IsNullOrWhiteSpace(marker))
+        {
+            return -1;
+        }
+
+        for (var i = 0; i < database.Count; i++)
+        {
+            try
+            {
+                var entry = database[i];
+                if (entry != null &&
+                    string.Equals(entry.category, CustomTalentCategory, StringComparison.Ordinal) &&
+                    string.Equals(entry.sameMeaning, marker, StringComparison.Ordinal))
+                {
+                    return i;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return -1;
+    }
+
+    private static void ApplyCustomTalentDefinition(HeroTagDataBase tag, RegisteredCustomTalent talent, int order)
+    {
+        if (tag == null)
+        {
+            return;
+        }
+
+        tag.name = talent.Name;
+        tag.value = 0;
+        tag.effectTarget = SkillTargetType.Self;
+        tag.sameMeaning = talent.Marker;
+        tag.oppositeMeaning = string.Empty;
+        tag.canRandom = false;
+        tag.category = CustomTalentCategory;
+        tag.showRightLine = true;
+        tag.order = Math.Max(0, order);
+        tag.requirement = new Il2CppSystem.Collections.Generic.List<string>();
+        tag.replaceTag = new Il2CppSystem.Collections.Generic.List<string>();
+        tag.buffData = talent.BuffData;
+    }
+
+    private static void TryEvaluateCustomTalents()
+    {
+        if (Time.realtimeSinceStartup < _nextCustomTalentEvaluationAt)
+        {
+            return;
+        }
+
+        _nextCustomTalentEvaluationAt = Time.realtimeSinceStartup + CustomTalentEvaluationIntervalSeconds;
+
+        if (_customTalents.Count == 0)
+        {
+            return;
+        }
+
+        var player = TryGetPlayerHero();
+        if (player == null)
+        {
+            return;
+        }
+
+        foreach (var talent in _customTalents)
+        {
+            if (talent.RuntimeTagId < 0)
+            {
+                continue;
+            }
+
+            var alreadyHasTag = CountCustomTalentInstances(player, talent) > 0;
+            var shouldHaveTag = talent.Enabled && AreCustomTalentConditionsMet(player, talent);
+
+            if (shouldHaveTag == alreadyHasTag)
+            {
+                continue;
+            }
+
+            if (shouldHaveTag)
+            {
+                GrantCustomTalent(player, talent);
+            }
+            else
+            {
+                RemoveCustomTalent(player, talent, talent.Enabled ? "conditions-failed" : "disabled");
+            }
+        }
+    }
+
+    private static bool AreCustomTalentConditionsMet(HeroData hero, RegisteredCustomTalent talent)
+    {
+        if (talent.Conditions.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var condition in talent.Conditions)
+        {
+            var currentValue = TryReadHeroAttribute(hero, condition.Stat);
+            if (!currentValue.HasValue || currentValue.Value < condition.Minimum)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static void GrantCustomTalent(HeroData hero, RegisteredCustomTalent talent)
+    {
+        try
+        {
+            if (CountCustomTalentInstances(hero, talent) > 0)
+            {
+                return;
+            }
+
+            var definition = TryGetCustomTalentDefinition(talent);
+            if (definition == null)
+            {
+                LoggerInstance.LogWarning($"Could not grant custom talent {talent.Name} because its definition was unavailable.");
+                return;
+            }
+
+            hero.AddTempTag(definition, talent.DurationDays, false);
+
+            var appliedCount = CountCustomTalentInstances(hero, talent);
+            if (appliedCount <= 0 && talent.RuntimeTagId >= 0)
+            {
+                hero.AddTag(talent.RuntimeTagId, talent.DurationDays, CustomTalentSource, false, true);
+                appliedCount = CountCustomTalentInstances(hero, talent);
+            }
+
+            if (appliedCount <= 0)
+            {
+                LoggerInstance.LogWarning($"Custom talent {talent.Name} grant did not produce a visible hero tag entry for {TryGetHeroName(hero)}.");
+                return;
+            }
+
+            LoggerInstance.LogInfo($"Custom talent granted to {TryGetHeroName(hero)}: {talent.Name} ({talent.Id}).");
+            PushPlayerSideTabLog($"{talent.Name} 生效");
+            TryRefreshHeroDetail(hero);
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to grant custom talent {talent.Name} ({talent.Id}) to {TryGetHeroName(hero)}: {ex.Message}");
+        }
+    }
+
+    private static void RemoveCustomTalent(HeroData hero, RegisteredCustomTalent talent, string reason)
+    {
+        try
+        {
+            var removedAny = false;
+            for (var attempt = 0; attempt < 32; attempt++)
+            {
+                var tagId = TryGetFirstCustomTalentTagId(hero, talent);
+                if (!tagId.HasValue)
+                {
+                    break;
+                }
+
+                hero.RemoveTag(tagId.Value, false);
+                removedAny = true;
+            }
+
+            if (!removedAny)
+            {
+                return;
+            }
+
+            LoggerInstance.LogInfo($"Custom talent removed from {TryGetHeroName(hero)}: {talent.Name} ({talent.Id}), reason={reason}.");
+            PushPlayerSideTabLog($"{talent.Name} 失效");
+            TryRefreshHeroDetail(hero);
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to remove custom talent {talent.Name} ({talent.Id}) from {TryGetHeroName(hero)}: {ex.Message}");
+        }
+    }
+
+    private static HeroTagDataBase? TryGetCustomTalentDefinition(RegisteredCustomTalent talent)
+    {
+        try
+        {
+            var database = GameDataController.Instance?.heroTagDataBase;
+            if (database == null)
+            {
+                return null;
+            }
+
+            if (talent.RuntimeTagId >= 0 && talent.RuntimeTagId < database.Count)
+            {
+                return database[talent.RuntimeTagId];
+            }
+
+            var existingId = FindTagIdByMarker(database, talent.Marker);
+            if (existingId >= 0)
+            {
+                talent.RuntimeTagId = existingId;
+                return database[existingId];
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static int CountCustomTalentInstances(HeroData hero, RegisteredCustomTalent talent)
+    {
+        var count = 0;
+
+        try
+        {
+            var tagData = hero.heroTagData;
+            if (tagData == null)
+            {
+                return 0;
+            }
+
+            for (var i = 0; i < tagData.Count; i++)
+            {
+                if (MatchesCustomTalent(tagData[i], talent))
+                {
+                    count++;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return count;
+    }
+
+    private static int? TryGetFirstCustomTalentTagId(HeroData hero, RegisteredCustomTalent talent)
+    {
+        try
+        {
+            var tagData = hero.heroTagData;
+            if (tagData == null)
+            {
+                return null;
+            }
+
+            for (var i = 0; i < tagData.Count; i++)
+            {
+                var tag = tagData[i];
+                if (MatchesCustomTalent(tag, talent))
+                {
+                    return tag.tagID;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static bool MatchesCustomTalent(HeroTagData? tag, RegisteredCustomTalent talent)
+    {
+        if (tag == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var dataBase = tag.DataBase();
+            return dataBase != null &&
+                string.Equals(dataBase.category, CustomTalentCategory, StringComparison.Ordinal) &&
+                string.Equals(dataBase.sameMeaning, talent.Marker, StringComparison.Ordinal);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void TryEvaluateThresholdTalent()
@@ -5618,6 +7356,25 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             if (intValue.HasValue)
             {
                 return intValue.Value;
+            }
+        }
+
+        var inventoryMoney = TryGetItemListMoney(
+            SafeProperty(hero, "itemListData") as ItemListData
+            ?? SafeField(hero, "itemListData") as ItemListData
+            ?? SafeProperty(hero, "ItemListData") as ItemListData
+            ?? SafeField(hero, "ItemListData") as ItemListData);
+        if (inventoryMoney.HasValue)
+        {
+            return inventoryMoney.Value;
+        }
+
+        if (IsPlayerHero(hero))
+        {
+            var playerInventoryMoney = TryGetItemListMoney(TryGetPlayerHero()?.itemListData);
+            if (playerInventoryMoney.HasValue)
+            {
+                return playerInventoryMoney.Value;
             }
         }
 

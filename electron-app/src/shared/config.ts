@@ -1,6 +1,18 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { GAME_EXE_NAME, GameHealth, HealthCheckResult, STEAM_APP_ID, VisibleSettings } from './types';
+import {
+  BASE_ATTRI_TYPE_NAMES,
+  CUSTOM_TALENT_PACK_VERSION,
+  CustomTalentDefinition,
+  CustomTalentEffect,
+  CustomTalentPack,
+  GameHealth,
+  GAME_EXE_NAME,
+  HealthCheckResult,
+  HERO_SPE_ADD_DATA_TYPE_NAMES,
+  STEAM_APP_ID,
+  VisibleSettings
+} from './types';
 
 const MAIN_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.staminalock.cfg');
 const HORSE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.horsestamina.cfg');
@@ -8,6 +20,7 @@ const LEGACY_TRACE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.t
 const LEGACY_SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.skilltalenttracer.cfg');
 const SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.skilltalentgrant.cfg');
 const BATTLE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.battleturbo.cfg');
+const CUSTOM_TALENT_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.custom-talents.json');
 const DOORSTOP_NAME = 'doorstop_config.ini';
 const STEAM_APP_ID_NAME = 'steam_appid.txt';
 const REQUIRED_PLUGIN_NAMES = [
@@ -110,6 +123,11 @@ const DEFAULT_BATTLE_HIDDEN: BattleConfigHidden = {
   disableBattleVoices: true
 };
 
+const DEFAULT_CUSTOM_TALENT_PACK: CustomTalentPack = {
+  version: CUSTOM_TALENT_PACK_VERSION,
+  talents: []
+};
+
 function boolText(value: boolean): string {
   return value ? 'true' : 'false';
 }
@@ -151,6 +169,36 @@ async function readTextIfExists(filePath: string): Promise<string | undefined> {
 async function writeTextFile(filePath: string, text: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, normalizeNewlines(text), 'ascii');
+}
+
+async function writeUtf8File(filePath: string, text: string): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, normalizeNewlines(text), 'utf8');
+}
+
+function cloneCustomTalentPack(pack: CustomTalentPack): CustomTalentPack {
+  return {
+    version: CUSTOM_TALENT_PACK_VERSION,
+    talents: pack.talents.map((talent) => ({
+      id: talent.id,
+      enabled: talent.enabled,
+      name: talent.name,
+      durationDays: talent.durationDays,
+      conditions: talent.conditions.map((condition) => ({
+        type: condition.type,
+        stat: condition.stat,
+        min: condition.min
+      })),
+      effects: talent.effects.map((effect) => ({
+        effectType: effect.effectType,
+        value: effect.value
+      }))
+    }))
+  };
+}
+
+function buildDefaultCustomTalentPack(): CustomTalentPack {
+  return cloneCustomTalentPack(DEFAULT_CUSTOM_TALENT_PACK);
 }
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -204,6 +252,7 @@ export function getGamePaths(gameRoot: string) {
     horseConfigPath: path.join(gameRoot, HORSE_CONFIG_NAME),
     skillConfigPath: path.join(gameRoot, SKILL_CONFIG_NAME),
     battleConfigPath: path.join(gameRoot, BATTLE_CONFIG_NAME),
+    customTalentConfigPath: path.join(gameRoot, CUSTOM_TALENT_CONFIG_NAME),
     legacyTraceConfigPath: path.join(gameRoot, LEGACY_TRACE_CONFIG_NAME),
     legacySkillConfigPath: path.join(gameRoot, LEGACY_SKILL_CONFIG_NAME)
   };
@@ -263,6 +312,134 @@ function readString(text: string | undefined, key: string, fallback: string): st
 
   const match = text.match(new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*(.+?)\\s*$`, 'mi'));
   return match ? match[1].trim() : fallback;
+}
+
+function isBaseAttriTypeName(value: string): value is typeof BASE_ATTRI_TYPE_NAMES[number] {
+  return (BASE_ATTRI_TYPE_NAMES as readonly string[]).includes(value);
+}
+
+function isHeroSpeAddDataTypeName(value: string): value is typeof HERO_SPE_ADD_DATA_TYPE_NAMES[number] {
+  return (HERO_SPE_ADD_DATA_TYPE_NAMES as readonly string[]).includes(value);
+}
+
+function validateCustomTalentCondition(input: unknown, talentIndex: number, conditionIndex: number) {
+  if (!input || typeof input !== 'object') {
+    throw new Error(`第 ${talentIndex + 1} 个天赋的第 ${conditionIndex + 1} 个条件不是对象。`);
+  }
+
+  const candidate = input as Record<string, unknown>;
+  if (candidate.type !== 'stat_min') {
+    throw new Error(`第 ${talentIndex + 1} 个天赋的第 ${conditionIndex + 1} 个条件类型无效，只支持 stat_min。`);
+  }
+
+  if (typeof candidate.stat !== 'string' || !isBaseAttriTypeName(candidate.stat)) {
+    throw new Error(`第 ${talentIndex + 1} 个天赋的第 ${conditionIndex + 1} 个条件属性无效。`);
+  }
+
+  if (typeof candidate.min !== 'number' || !Number.isFinite(candidate.min)) {
+    throw new Error(`第 ${talentIndex + 1} 个天赋的第 ${conditionIndex + 1} 个条件最低值无效。`);
+  }
+
+  return {
+    type: 'stat_min' as const,
+    stat: candidate.stat,
+    min: candidate.min
+  };
+}
+
+function validateCustomTalentEffect(input: unknown, talentIndex: number, effectIndex: number): CustomTalentEffect {
+  if (!input || typeof input !== 'object') {
+    throw new Error(`第 ${talentIndex + 1} 个天赋的第 ${effectIndex + 1} 个效果不是对象。`);
+  }
+
+  const candidate = input as Record<string, unknown>;
+  if (typeof candidate.effectType !== 'string' || !isHeroSpeAddDataTypeName(candidate.effectType)) {
+    throw new Error(`第 ${talentIndex + 1} 个天赋的第 ${effectIndex + 1} 个效果类型无效。`);
+  }
+
+  if (typeof candidate.value !== 'number' || !Number.isFinite(candidate.value)) {
+    throw new Error(`第 ${talentIndex + 1} 个天赋的第 ${effectIndex + 1} 个效果数值无效。`);
+  }
+
+  return {
+    effectType: candidate.effectType,
+    value: candidate.value
+  };
+}
+
+function sanitizeCustomTalentDefinition(input: unknown, talentIndex: number): CustomTalentDefinition {
+  if (!input || typeof input !== 'object') {
+    throw new Error(`第 ${talentIndex + 1} 个天赋不是对象。`);
+  }
+
+  const candidate = input as Record<string, unknown>;
+  if (typeof candidate.id !== 'string' || candidate.id.trim().length === 0) {
+    throw new Error(`第 ${talentIndex + 1} 个天赋缺少有效 id。`);
+  }
+
+  if (typeof candidate.name !== 'string' || candidate.name.trim().length === 0) {
+    throw new Error(`第 ${talentIndex + 1} 个天赋名称不能为空。`);
+  }
+
+  if (!Array.isArray(candidate.conditions) || candidate.conditions.length === 0) {
+    throw new Error(`第 ${talentIndex + 1} 个天赋至少需要 1 条条件。`);
+  }
+
+  if (!Array.isArray(candidate.effects) || candidate.effects.length === 0) {
+    throw new Error(`第 ${talentIndex + 1} 个天赋至少需要 1 条效果。`);
+  }
+
+  if (typeof candidate.durationDays !== 'number' || !Number.isInteger(candidate.durationDays) || candidate.durationDays < 1) {
+    throw new Error(`第 ${talentIndex + 1} 个天赋的持续天数必须是大于等于 1 的整数。`);
+  }
+
+  return {
+    id: candidate.id.trim(),
+    enabled: Boolean(candidate.enabled),
+    name: candidate.name.trim(),
+    durationDays: candidate.durationDays,
+    conditions: candidate.conditions.map((condition, conditionIndex) =>
+      validateCustomTalentCondition(condition, talentIndex, conditionIndex)
+    ),
+    effects: candidate.effects.map((effect, effectIndex) => validateCustomTalentEffect(effect, talentIndex, effectIndex))
+  };
+}
+
+function sanitizeCustomTalentPack(input: unknown): CustomTalentPack {
+  if (!input || typeof input !== 'object') {
+    throw new Error('自定义天赋配置不是合法对象。');
+  }
+
+  const candidate = input as Record<string, unknown>;
+  if (candidate.version !== CUSTOM_TALENT_PACK_VERSION) {
+    throw new Error(`自定义天赋配置版本无效：当前只支持 version = ${CUSTOM_TALENT_PACK_VERSION}。`);
+  }
+
+  if (!Array.isArray(candidate.talents)) {
+    throw new Error('自定义天赋配置缺少 talents 数组。');
+  }
+
+  const talents = candidate.talents.map((talent, talentIndex) => sanitizeCustomTalentDefinition(talent, talentIndex));
+  const seenIds = new Set<string>();
+  const seenNames = new Set<string>();
+  for (const talent of talents) {
+    if (seenIds.has(talent.id)) {
+      throw new Error(`自定义天赋配置存在重复 id：${talent.id}`);
+    }
+
+    const normalizedName = talent.name.trim();
+    if (seenNames.has(normalizedName)) {
+      throw new Error(`自定义天赋配置存在重复名称：${normalizedName}`);
+    }
+
+    seenIds.add(talent.id);
+    seenNames.add(normalizedName);
+  }
+
+  return {
+    version: CUSTOM_TALENT_PACK_VERSION,
+    talents
+  };
 }
 
 function upsertIniValue(text: string, key: string, value: string): string {
@@ -466,6 +643,10 @@ StaminaMultiplier = ${formatFloat(settings.horseStaminaMultiplier, 2)}
 `).trimStart();
 }
 
+function buildCustomTalentTemplate(pack = DEFAULT_CUSTOM_TALENT_PACK): string {
+  return `${JSON.stringify(pack, null, 2)}\n`;
+}
+
 async function ensureConfigFile(filePath: string, template: string): Promise<string> {
   const existing = await readTextIfExists(filePath);
   if (existing !== undefined) {
@@ -473,6 +654,17 @@ async function ensureConfigFile(filePath: string, template: string): Promise<str
   }
 
   await writeTextFile(filePath, template);
+  return template;
+}
+
+async function ensureCustomTalentPackFile(filePath: string): Promise<string> {
+  const existing = await readTextIfExists(filePath);
+  if (existing !== undefined) {
+    return existing;
+  }
+
+  const template = buildCustomTalentTemplate();
+  await writeUtf8File(filePath, template);
   return template;
 }
 
@@ -775,14 +967,28 @@ export async function inspectGameHealth(gameRoot: string, payloadRoot?: string):
   const writableHorseConfig = await canWriteTarget(paths.horseConfigPath);
   const writableSkillConfig = await canWriteTarget(paths.skillConfigPath);
   const writableBattleConfig = await canWriteTarget(paths.battleConfigPath);
+  const writableCustomTalentConfig = await canWriteTarget(paths.customTalentConfigPath);
   checks.push(
     createHealthCheck(
       'config-writable',
       '配置文件可写',
-      writableMainConfig && writableHorseConfig && writableSkillConfig && writableBattleConfig,
-      writableMainConfig && writableHorseConfig && writableSkillConfig && writableBattleConfig
+      writableMainConfig && writableHorseConfig && writableSkillConfig && writableBattleConfig && writableCustomTalentConfig,
+      writableMainConfig && writableHorseConfig && writableSkillConfig && writableBattleConfig && writableCustomTalentConfig
         ? '主要配置文件路径可写。'
         : '至少有一个主要配置文件无法写入。'
+    )
+  );
+  const customTalentConfigExists = await fileExists(paths.customTalentConfigPath);
+  checks.push(
+    createHealthCheck(
+      'custom-talent-config',
+      '自定义天赋配置',
+      customTalentConfigExists || writableCustomTalentConfig,
+      customTalentConfigExists
+        ? '已检测到自定义天赋 JSON 配置。'
+        : writableCustomTalentConfig
+          ? '自定义天赋 JSON 尚未生成，但路径可创建。'
+          : '自定义天赋 JSON 路径不可写。'
     )
   );
 
@@ -850,6 +1056,7 @@ export async function ensureGameFiles(gameRoot: string): Promise<void> {
   await ensureConfigFile(paths.horseConfigPath, buildHorseTemplate());
   await ensureConfigFile(paths.skillConfigPath, buildSkillTemplate());
   await ensureConfigFile(paths.battleConfigPath, buildBattleTemplate());
+  await ensureCustomTalentPackFile(paths.customTalentConfigPath);
   await ensureSteamAppIdFile(paths.steamAppIdPath);
   await ensureDoorstopLoader(paths.doorstopConfigPath);
 }
@@ -1002,6 +1209,39 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   const mismatches = diffVisibleSettings(normalized, verified);
   if (mismatches.length > 0) {
     throw new Error(`设置写入后校验失败：${mismatches.join(', ')}`);
+  }
+
+  return verified;
+}
+
+export async function readCustomTalentPack(gameRoot: string): Promise<CustomTalentPack> {
+  const paths = getGamePaths(gameRoot);
+  await ensureGameFiles(gameRoot);
+  const text = await ensureCustomTalentPackFile(paths.customTalentConfigPath);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  }
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`自定义天赋配置 JSON 解析失败：${message}`);
+  }
+
+  return sanitizeCustomTalentPack(parsed);
+}
+
+export async function saveCustomTalentPack(gameRoot: string, pack: CustomTalentPack): Promise<CustomTalentPack> {
+  const paths = getGamePaths(gameRoot);
+  await ensureGameFiles(gameRoot);
+  const normalized = sanitizeCustomTalentPack(pack);
+  await writeUtf8File(paths.customTalentConfigPath, buildCustomTalentTemplate(normalized));
+
+  const verified = await readCustomTalentPack(gameRoot);
+  const expectedText = JSON.stringify(normalized);
+  const actualText = JSON.stringify(verified);
+  if (expectedText !== actualText) {
+    throw new Error('自定义天赋配置写入后校验失败。');
   }
 
   return verified;

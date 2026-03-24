@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  CustomTalentPack,
+  CustomTalentSaveResult,
   GameSnapshot,
   LogFileKind,
   OperationResult,
@@ -14,6 +16,8 @@ export interface LongYinApi {
   pickGameRoot: () => Promise<GameSnapshot>;
   setGameRoot: (gameRoot: string) => Promise<GameSnapshot>;
   saveSettings: (settings: VisibleSettings) => Promise<GameSnapshot>;
+  getCustomTalents: () => Promise<CustomTalentPack>;
+  saveCustomTalents: (pack: CustomTalentPack) => Promise<CustomTalentSaveResult>;
   install: () => Promise<OperationResult>;
   uninstall: () => Promise<OperationResult>;
   launch: () => Promise<OperationResult>;
@@ -32,6 +36,8 @@ const api: LongYinApi = {
   pickGameRoot: () => ipcRenderer.invoke('app:pick-game-root'),
   setGameRoot: (gameRoot: string) => ipcRenderer.invoke('app:set-game-root', gameRoot),
   saveSettings: (settings: VisibleSettings) => ipcRenderer.invoke('app:save-settings', settings),
+  getCustomTalents: () => ipcRenderer.invoke('app:get-custom-talents'),
+  saveCustomTalents: (pack: CustomTalentPack) => ipcRenderer.invoke('app:save-custom-talents', pack),
   install: () => ipcRenderer.invoke('app:install'),
   uninstall: () => ipcRenderer.invoke('app:uninstall'),
   launch: () => ipcRenderer.invoke('app:launch'),

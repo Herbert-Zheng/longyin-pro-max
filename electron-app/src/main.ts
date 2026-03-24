@@ -9,7 +9,9 @@ import {
   ensureSteamAppId,
   getGamePaths,
   inspectGameHealth,
+  readCustomTalentPack,
   readVisibleSettings,
+  saveCustomTalentPack,
   saveVisibleSettings
 } from './shared/config';
 import { detectSteamGameRoot, isValidGameRoot } from './shared/steam';
@@ -21,6 +23,8 @@ import {
 } from './shared/updates';
 import {
   APP_FOLDER_NAME,
+  CustomTalentPack,
+  CustomTalentSaveResult,
   GAME_EXE_NAME,
   GameHealth,
   GameSnapshot,
@@ -458,6 +462,31 @@ async function saveSettingsAndRefresh(settings: VisibleSettings): Promise<GameSn
   return buildSnapshot(repairResult.repaired ? '已自动修复载荷漂移，并保存设置。' : '设置已保存。');
 }
 
+async function getCustomTalents(): Promise<CustomTalentPack> {
+  const gameRoot = cachedGameRoot ?? (await loadGameRoot());
+  if (!gameRoot) {
+    throw new Error('请先选择游戏目录。');
+  }
+
+  cachedGameRoot = gameRoot;
+  return readCustomTalentPack(gameRoot);
+}
+
+async function saveCustomTalents(pack: CustomTalentPack): Promise<CustomTalentSaveResult> {
+  const gameRoot = cachedGameRoot ?? (await loadGameRoot());
+  if (!gameRoot) {
+    throw new Error('请先选择游戏目录。');
+  }
+
+  cachedGameRoot = gameRoot;
+  const verified = await saveCustomTalentPack(gameRoot, pack);
+  return {
+    ok: true,
+    message: '自定义天赋已写入配置文件，下次启动游戏生效。',
+    pack: verified
+  };
+}
+
 async function checkUpdates(): Promise<UpdateCheckResult> {
   await writeStartupLog('开始检查更新。');
   cachedUpdate = await checkGitHubRelease(app.getVersion()).catch((error: Error) => ({
@@ -544,6 +573,8 @@ function registerIpc(): void {
   });
   ipcMain.handle('app:set-game-root', async (_event, nextGameRoot: string) => setGameRoot(nextGameRoot));
   ipcMain.handle('app:save-settings', async (_event, settings: VisibleSettings) => saveSettingsAndRefresh(settings));
+  ipcMain.handle('app:get-custom-talents', async () => getCustomTalents());
+  ipcMain.handle('app:save-custom-talents', async (_event, pack: CustomTalentPack) => saveCustomTalents(pack));
   ipcMain.handle('app:install', async () => {
     const gameRoot = cachedGameRoot ?? (await loadGameRoot());
     if (!gameRoot) {

@@ -813,6 +813,115 @@ button {
   accent-color: var(--jade);
 }
 
+.release-badge--muted {
+  background: rgba(95, 101, 95, 0.12);
+  color: var(--muted);
+}
+
+.custom-talents-layout {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.custom-talent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.custom-talent-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.custom-talent-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(29, 111, 93, 0.26);
+}
+
+.custom-talent-item--active {
+  background: linear-gradient(180deg, rgba(29, 111, 93, 0.12), rgba(255, 255, 255, 0.84));
+  border-color: rgba(29, 111, 93, 0.34);
+}
+
+.custom-talent-item__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.custom-talent-item__meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.note-box,
+.validation-box,
+.array-row {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.note-box {
+  background: rgba(29, 111, 93, 0.08);
+  color: var(--jade);
+  font-weight: 700;
+}
+
+.note-box--soft {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.validation-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(159, 99, 35, 0.1);
+  color: #7f4a17;
+}
+
+.validation-box--warn {
+  background: rgba(154, 46, 31, 0.08);
+  color: #7f2b1f;
+}
+
+.array-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.array-row__grid {
+  display: grid;
+  gap: 12px;
+}
+
+.array-row__grid--conditions {
+  grid-template-columns: 160px minmax(0, 1fr) 180px;
+}
+
+.array-row__grid--effects {
+  grid-template-columns: minmax(0, 1fr) 180px;
+}
+
 @keyframes launchGradientShift {
   0% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
@@ -845,6 +954,9 @@ button {
   .workspace__hero,
   .command-center,
   .page-grid,
+  .custom-talents-layout,
+  .array-row__grid--conditions,
+  .array-row__grid--effects,
   .log-preview-grid {
     grid-template-columns: 1fr;
   }

@@ -78,9 +78,12 @@ $references = @(
     (Join-Path $runtimeDir "netstandard.dll")
     (Join-Path $runtimeDir "System.Console.dll")
     (Join-Path $runtimeDir "System.Collections.dll")
+    (Join-Path $runtimeDir "System.IO.FileSystem.dll")
     (Join-Path $runtimeDir "System.Linq.dll")
+    (Join-Path $runtimeDir "System.Memory.dll")
     (Join-Path $runtimeDir "System.Private.CoreLib.dll")
     (Join-Path $runtimeDir "System.Runtime.dll")
+    (Join-Path $runtimeDir "System.Text.Json.dll")
 )
 
 $referenceArgs = $references | ForEach-Object { "-r:$_" }

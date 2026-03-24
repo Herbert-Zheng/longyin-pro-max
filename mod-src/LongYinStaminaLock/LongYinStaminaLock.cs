@@ -743,7 +743,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
-        var bonusState = _activeCraftRewardBonus;
+        var bonusState = ResolveCraftRewardBonusState(__instance);
+        _activeCraftRewardBonus = bonusState;
         var craftResult = ResolveCraftResultByIndex(__instance, id);
         LogCraftEvent(
             $"CraftUIController.CraftResultChoosen observed id={id}, item={DescribeItemSummary(craftResult)}, activeBonus={(bonusState == null ? "none" : bonusState.ExtraItemCount.ToString())}, consumed={SafeFormatValue(bonusState?.Consumed)}");
@@ -3305,47 +3306,53 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
-        var bonusState = _activeCraftRewardBonus;
+        var bonusState = _activeCraftRewardBonus ?? ResolveCraftRewardBonusState();
         LogCraftEvent(
             $"PlotController.CraftResultChoosen observed item={DescribeItemSummary(craftResult)}, activeBonus={(bonusState == null ? "none" : bonusState.ExtraItemCount.ToString())}, consumed={SafeFormatValue(bonusState?.Consumed)}, replayingChoice={SafeFormatValue(_repeatingCraftChoiceReward)}");
 
-        if (bonusState == null || bonusState.ExtraItemCount <= 0 || bonusState.Consumed || craftResult == null)
+        if (bonusState == null || bonusState.ExtraItemCount <= 0 || craftResult == null)
         {
             return;
         }
 
-        bonusState.Consumed = true;
-        _activeCraftRewardBonus = null;
-        _pendingCraftSelection = null;
-        _repeatingCraftChoiceReward = true;
+        var player = TryGetPlayerHero();
+        if (player == null)
+        {
+            LogCraftEvent("PlotController.CraftResultChoosen direct grant skipped: player unavailable");
+            return;
+        }
 
-        var repeated = 0;
+        var grantedCount = 0;
+        _grantingCraftBonusItems = true;
+
         try
         {
             for (var i = 0; i < bonusState.ExtraItemCount; i++)
             {
-                __instance.CraftResultChoosen(craftResult);
-                repeated++;
+                player.GetItem(craftResult, false, false, 0, false);
+                grantedCount++;
             }
         }
         catch (Exception ex)
         {
-            LoggerInstance.LogWarning($"Failed to repeat PlotController.CraftResultChoosen for crafted reward: {ex.Message}");
+            LoggerInstance.LogWarning($"PlotController.CraftResultChoosen direct grant failed: {ex.Message}");
         }
         finally
         {
-            _repeatingCraftChoiceReward = false;
+            _grantingCraftBonusItems = false;
+            _activeCraftRewardBonus = null;
+            _pendingCraftSelection = null;
         }
 
-        if (repeated <= 0)
+        if (grantedCount <= 0)
         {
-            LogCraftEvent($"PlotController.CraftResultChoosen repeat failed for item={DescribeItemSummary(craftResult)}");
+            LogCraftEvent($"PlotController.CraftResultChoosen direct grant produced no extra items for {DescribeItemSummary(craftResult)}");
             return;
         }
 
-        PushPlayerLog($"【巧手增产】：加入【{bonusState.MaterialName}】后，额外获得 {repeated} 个【{craftResult.name ?? $"id={craftResult.itemID}"}】");
+        PushPlayerLog($"【巧手增产】：加入【{bonusState.MaterialName}】后，额外获得 {grantedCount} 个【{craftResult.name ?? $"id={craftResult.itemID}"}】");
         LogCraftEvent(
-            $"PlotController.CraftResultChoosen repeated {repeated}x item={DescribeItemSummary(craftResult)} using material={bonusState.MaterialName}, majorTier={bonusState.MaterialMajorTier}");
+            $"PlotController.CraftResultChoosen directly granted {grantedCount}x item={DescribeItemSummary(craftResult)} using material={bonusState.MaterialName}, majorTier={bonusState.MaterialMajorTier}");
     }
 
     private static void FinishCraftPrefix()
@@ -5962,40 +5969,50 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
+        var bonusState = ResolveCraftRewardBonusState();
+        if (bonusState == null)
+        {
+            if (_traceMode.Value)
+            {
+                LoggerInstance.LogInfo($"Craft quantity bonus skipped from {source}: no eligible added crafting material bonus was found.");
+            }
+
+            return;
+        }
+
+        _activeCraftRewardBonus = bonusState;
+
         var controller = CraftUIController.Instance;
+
+        LogCraftEvent(
+            $"armed from {source}: material={bonusState.MaterialName}, majorTier={bonusState.MaterialMajorTier}, extraItems={bonusState.ExtraItemCount}, primary={DescribeItemSummary(controller?.craftMaterialData)}, secondary={DescribeItemSummary(controller?.craftMaterialDataSub)}");
+    }
+
+    private static CraftRewardBonusState? ResolveCraftRewardBonusState()
+    {
+        return ResolveCraftRewardBonusState(CraftUIController.Instance);
+    }
+
+    private static CraftRewardBonusState? ResolveCraftRewardBonusState(CraftUIController? controller)
+    {
         var addedMaterial = ResolveCraftAddedMaterial(controller);
         if (addedMaterial == null)
         {
-            if (_traceMode.Value)
-            {
-                LoggerInstance.LogInfo($"Craft quantity bonus skipped from {source}: no added crafting material was found.");
-            }
-
-            return;
+            return null;
         }
 
-        var materialMajorTier = GetCraftMajorTier(addedMaterial);
         var extraItemCount = GetCraftExtraItemCountFromMaterial(addedMaterial);
         if (extraItemCount <= 0)
         {
-            if (_traceMode.Value)
-            {
-                LoggerInstance.LogInfo(
-                    $"Craft quantity bonus skipped from {source}: added material {DescribeItemSummary(addedMaterial)} maps to no extra items.");
-            }
-
-            return;
+            return null;
         }
 
-        _activeCraftRewardBonus = new CraftRewardBonusState
+        return new CraftRewardBonusState
         {
             MaterialName = addedMaterial.name ?? $"id={addedMaterial.itemID}",
-            MaterialMajorTier = materialMajorTier,
+            MaterialMajorTier = GetCraftMajorTier(addedMaterial),
             ExtraItemCount = extraItemCount
         };
-
-        LogCraftEvent(
-            $"armed from {source}: material={DescribeItemSummary(addedMaterial)}, majorTier={materialMajorTier}, extraItems={extraItemCount}, primary={DescribeItemSummary(controller?.craftMaterialData)}, secondary={DescribeItemSummary(controller?.craftMaterialDataSub)}");
     }
 
     private static string DescribeItemSummary(ItemData? item)
@@ -6094,49 +6111,55 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         LogCraftEvent(
             $"HeroData.GetItem observed item={DescribeItemSummary(itemData)}, chestClick={treasureChestClickTime}, activeBonus={bonusState.ExtraItemCount}, consumed={bonusState.Consumed}, hero={TryGetHeroName(targetHero)}");
-    }
 
-    private static int TryGrantCraftBonusViaHeroFallback(ItemData? item, int remainingCopies)
-    {
-        if (item == null || remainingCopies <= 0)
+        if (!_craftRandomPickUpgradeEnabled.Value || bonusState.Consumed || itemData == null || _grantingCraftBonusItems)
         {
-            return 0;
+            return;
         }
 
         var player = TryGetPlayerHero();
-        if (player == null)
+        if (player == null || targetHero == null || !ReferenceEquals(player, targetHero))
         {
-            LogCraftEvent("Hero fallback skipped: player unavailable");
-            return 0;
+            return;
         }
 
-        var granted = 0;
+        if (treasureChestClickTime > 0)
+        {
+            return;
+        }
+
+        var grantedCount = 0;
+        bonusState.Consumed = true;
+        _grantingCraftBonusItems = true;
+
         try
         {
-            for (var i = 0; i < remainingCopies; i++)
+            for (var i = 0; i < bonusState.ExtraItemCount; i++)
             {
-                var bonusItem = TryCloneItem(item);
-                if (bonusItem == null)
-                {
-                    LogCraftEvent($"Hero fallback clone failed for item={DescribeItemSummary(item)} at repeatIndex={i + 1}");
-                    continue;
-                }
-
-                player.GetItem(bonusItem, false, false, 0, false);
-                granted++;
+                targetHero.GetItem(itemData, false, false, 0, skipManageItemPoison);
+                grantedCount++;
             }
         }
         catch (Exception ex)
         {
-            LoggerInstance.LogWarning($"Hero fallback failed for crafted reward replay: {ex.Message}");
+            LoggerInstance.LogWarning($"Failed to grant crafted bonus items from HeroData.GetItem: {ex.Message}");
         }
-
-        if (granted > 0)
+        finally
         {
-            LogCraftEvent($"Hero fallback granted {granted}x item={DescribeItemSummary(item)}");
+            _grantingCraftBonusItems = false;
+            _activeCraftRewardBonus = null;
+            _pendingCraftSelection = null;
         }
 
-        return granted;
+        if (grantedCount <= 0)
+        {
+            LogCraftEvent($"HeroData.GetItem bonus grant produced no extra items for {DescribeItemSummary(itemData)}");
+            return;
+        }
+
+        PushPlayerLog($"【巧手增产】：加入【{bonusState.MaterialName}】后，额外获得 {grantedCount} 个【{itemData.name ?? $"id={itemData.itemID}"}】");
+        LogCraftEvent(
+            $"HeroData.GetItem granted {grantedCount}x item={DescribeItemSummary(itemData)} using material={bonusState.MaterialName}, majorTier={bonusState.MaterialMajorTier}");
     }
 
     private static void TryRepeatCraftPlotItemReward(PlotController? plotController, PlotItemGrantState? state)
@@ -6578,7 +6601,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static int GetCraftMajorTier(ItemData? item)
     {
-        return item?.itemLv ?? int.MinValue;
+        if (item == null)
+        {
+            return int.MinValue;
+        }
+
+        return item.itemLv + 1;
     }
 
     private static void ResetDrinkTracking(DrinkUIController? controller)

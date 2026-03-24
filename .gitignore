@@ -22,6 +22,9 @@ mod-prototype/LongYinQuestSnapshot/test.txt
 .codex-tools/
 .codex-temp/
 archive/
+_codex_staged_updates/
+config.js
+mod-src/LongYinStaminaLock/LongYinStaminaLock.dll
 
 # Logs
 *.log

@@ -14,11 +14,28 @@ import {
   NumberField,
   SelectField,
   StatusPill,
-  TextField,
   clampText,
   defaultSettings,
   mergeSettings
 } from './components';
+
+type NavKey =
+  | 'home'
+  | 'updates'
+  | 'systems'
+  | 'expTalent'
+  | 'worldExplore'
+  | 'tradeCraft'
+  | 'socialTeam'
+  | 'battle';
+
+type NavItem = {
+  key: NavKey;
+  label: string;
+  eyebrow: string;
+  title: string;
+  description: string;
+};
 
 function launchTone(state: GameSnapshot['launchState']): 'good' | 'warn' | 'neutral' {
   if (state === 'running') {
@@ -30,6 +47,14 @@ function launchTone(state: GameSnapshot['launchState']): 'good' | 'warn' | 'neut
   }
 
   return 'neutral';
+}
+
+function healthTone(snapshot: GameSnapshot | null): 'good' | 'warn' | 'neutral' {
+  if (!snapshot?.gameRoot) {
+    return 'neutral';
+  }
+
+  return snapshot.health.healthy ? 'good' : 'warn';
 }
 
 function formatReleaseDate(value?: string): string {
@@ -77,10 +102,37 @@ async function copyText(value: string): Promise<void> {
   await navigator.clipboard.writeText(value);
 }
 
+function CheckList(props: { items: string[]; empty: string }) {
+  if (props.items.length === 0) {
+    return <div className="empty-state">{props.empty}</div>;
+  }
+
+  return (
+    <div className="check-list">
+      {props.items.map((item) => (
+        <div key={item} className="check-list__item">
+          {item}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LogPreview(props: { title: string; body: string }) {
+  return (
+    <div className="log-preview">
+      <div className="log-preview__head">
+        <strong>{props.title}</strong>
+      </div>
+      <pre className="log-preview__body">{props.body}</pre>
+    </div>
+  );
+}
+
 export function App() {
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
   const [settings, setSettings] = useState<VisibleSettings>(defaultSettings());
-  const [activeTab, setActiveTab] = useState<'overview' | 'updates' | 'gameplay' | 'systems' | 'talent' | 'turbo'>('overview');
+  const [activePage, setActivePage] = useState<NavKey>('home');
   const [working, setWorking] = useState<string | null>(null);
   const [message, setMessage] = useState('正在加载...');
   const [error, setError] = useState<string | null>(null);
@@ -93,17 +145,21 @@ export function App() {
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [updateProgressEvents, setUpdateProgressEvents] = useState<UpdateProgressEvent[]>([]);
 
-  const tabs = useMemo(
+  const navItems = useMemo<NavItem[]>(
     () => [
-      { key: 'overview' as const, label: '总览' },
-      { key: 'updates' as const, label: '更新历史' },
-      { key: 'gameplay' as const, label: '玩法' },
-      { key: 'systems' as const, label: '系统' },
-      { key: 'talent' as const, label: '天赋' },
-      { key: 'turbo' as const, label: '战斗加速' }
+      { key: 'home', label: '主页', eyebrow: 'Launcher', title: '主页', description: '集中处理安装、自检、保存配置与安全启动。' },
+      { key: 'updates', label: '更新记录', eyebrow: 'OTA', title: '更新记录', description: '查看当前版本、GitHub Release 说明与 OTA 运行日志。' },
+      { key: 'systems', label: '系统更改', eyebrow: 'Runtime', title: '系统更改', description: '整理全局运行控制、时间冻结与环境自检。' },
+      { key: 'expTalent', label: '经验值，天赋相关', eyebrow: 'Growth', title: '经验值，天赋相关', description: '把经验成长、心悟机制与突破天赋放在同一页。' },
+      { key: 'worldExplore', label: '大地图，探索类', eyebrow: 'Explore', title: '大地图，探索类', description: '专注探索体力、世界地图坐骑与移动体验。' },
+      { key: 'tradeCraft', label: '交易，制造类', eyebrow: 'Commerce', title: '交易，制造类', description: '交易、背包与制造增产统一归档。' },
+      { key: 'socialTeam', label: '聊天，关系，组队', eyebrow: 'Social', title: '聊天，关系，组队', description: '把聊天配额、关系提升与组队辅助集中展示。' },
+      { key: 'battle', label: '战斗相关', eyebrow: 'Battle', title: '战斗相关', description: '收纳战斗数值、战斗节奏与战斗加速。' }
     ],
     []
   );
+
+  const activeNav = navItems.find((item) => item.key === activePage) ?? navItems[0];
 
   const updateSetting = <K extends keyof VisibleSettings>(key: K, value: VisibleSettings[K]) => {
     setSettings((current) => mergeSettings(current, { [key]: value } as Partial<VisibleSettings>));
@@ -161,7 +217,7 @@ export function App() {
     const nextHistory = await window.longyin.getReleaseHistory();
     setReleaseHistory(nextHistory);
     if (!preserveMessage) {
-      setMessage(nextHistory.length > 0 ? '更新历史已刷新。' : '当前还没有可展示的更新历史。');
+      setMessage(nextHistory.length > 0 ? '更新记录已刷新。' : '当前还没有可展示的更新记录。');
     }
     return nextHistory;
   };
@@ -254,14 +310,21 @@ export function App() {
 
   const gameRoot = snapshot?.gameRoot ?? '';
   const gameInstalled = snapshot?.gameInstalled ?? false;
-  const health = snapshot?.health ?? { healthy: false, needsRepair: false, summary: '正在加载自检状态。', driftedFiles: [], checks: [] };
-  const failedChecks = health.checks.filter((check) => !check.ok);
+  const health =
+    snapshot?.health ?? { healthy: false, needsRepair: false, summary: '正在加载自检状态。', driftedFiles: [], checks: [] };
   const payloadRoot = snapshot?.payloadRoot ?? '';
   const userDataRoot = snapshot?.userDataRoot ?? '';
   const startupLogPath = snapshot?.startupLogPath ?? '';
   const otaLogPath = snapshot?.otaLogPath ?? '';
   const launchReady = snapshot?.launchReady ?? false;
   const launchBusy = snapshot?.launchState === 'starting' || snapshot?.launchState === 'running';
+  const latestRelease = releaseHistory.find((release) => release.isLatest) ?? releaseHistory[0] ?? null;
+  const latestProgress = updateProgressEvents[updateProgressEvents.length - 1] ?? null;
+  const updateInFlight =
+    working === '下载更新中' ||
+    (latestProgress !== null && ['checking', 'downloading', 'preparing', 'applying'].includes(latestProgress.stage));
+  const healthPreview = health.checks.slice(0, 8).map((check) => `${check.ok ? '已通过' : '需处理'} · ${check.label} · ${check.detail}`);
+  const releasePreview = releaseBodyLines(update?.releaseBody ?? latestRelease?.body).slice(0, 8);
 
   const save = async () => {
     setWorking('保存中');
@@ -391,11 +454,6 @@ export function App() {
     }
   };
 
-  const latestProgress = updateProgressEvents[updateProgressEvents.length - 1] ?? null;
-  const updateInFlight =
-    working === '下载更新中' ||
-    (latestProgress !== null && ['checking', 'downloading', 'preparing', 'applying'].includes(latestProgress.stage));
-
   if (!snapshot) {
     return (
       <div className="shell shell--loading">
@@ -408,802 +466,824 @@ export function App() {
     <div className="shell">
       <div className="ambient ambient--one" />
       <div className="ambient ambient--two" />
+      <div className="ambient ambient--three" />
 
-      <header className="masthead">
-        <div className="masthead__copy">
-          <span className="eyebrow">龙胤立志传 Pro Max</span>
-          <h1>龙胤立志传 Pro Max</h1>
-          <p className="hero__copy">
-            固定负责三件事：安装模组、保存配置、单次安全启动。首次启动时，BepInEx 可能会先在后台加载 10 到
-            20 秒。
-          </p>
-        </div>
-      </header>
-
-      <section className="summary-grid">
-        <StatusPill label="应用版本" value={snapshot.appVersion} tone="good" />
-        <StatusPill label="游戏目录" value={gameRoot ? '已连接' : '未选择'} tone={gameRoot ? 'good' : 'warn'} />
-        <StatusPill label="模组状态" value={gameInstalled ? '已就绪' : gameRoot ? '需修复' : '未安装'} tone={gameInstalled ? 'good' : 'warn'} />
-        <StatusPill
-          label="启动状态"
-          value={snapshot.launchState === 'starting' ? '启动中' : snapshot.launchState === 'running' ? '运行中' : '待命'}
-          tone={launchTone(snapshot.launchState)}
-        />
-      </section>
-
-      <section className="command-center card">
-        <div className="command-center__main">
-          <div className={`launch-banner launch-banner--${snapshot.launchState}`}>
-            <div className="launch-banner__title">
-              {snapshot.launchState === 'starting'
-                ? '游戏正在启动，请耐心等待'
-                : snapshot.launchState === 'running'
-                  ? '检测到游戏进程正在运行'
-                  : '可以启动游戏'}
-            </div>
-            <div className="launch-banner__body">{snapshot.launchNote}</div>
+      <div className="dashboard">
+        <aside className="sidebar">
+          <div className="sidebar__brand">
+            <span className="eyebrow">龙胤立志传 Pro Max</span>
+            <h1>控制台</h1>
+            <p>左侧按功能分区，右侧专注当前页面，不再把所有开关堆在一起。</p>
           </div>
 
-          <div className="toolbar__cluster">
-            <button className="btn btn--primary" onClick={save} disabled={working !== null}>
-              保存设置
-            </button>
-            <button className="btn btn--ghost" onClick={saveAndLaunch} disabled={working !== null || !launchReady}>
-              {launchBusy ? '启动中，请等待' : '保存并启动'}
-            </button>
-            <button
-              className={`btn btn--launch ${launchBusy ? 'btn--launching' : ''}`}
-              onClick={launch}
-              disabled={working !== null || !launchReady}
-            >
-              <span className="btn--launch__glow" />
-              <span className="btn--launch__label">{launchBusy ? '启动中，请等待' : '启动游戏'}</span>
-            </button>
-          </div>
-        </div>
+          <nav className="sidebar__nav" aria-label="主导航">
+            {navItems.map((item) => (
+              <button
+                key={item.key}
+                className={`nav-item ${activePage === item.key ? 'nav-item--active' : ''}`}
+                onClick={() => setActivePage(item.key)}
+              >
+                <span className="nav-item__eyebrow">{item.eyebrow}</span>
+                <strong>{item.label}</strong>
+                <span className="nav-item__desc">{item.description}</span>
+              </button>
+            ))}
+          </nav>
 
-        <div className="command-center__side">
-          <button className="btn" onClick={install} disabled={working !== null || !gameRoot || launchBusy}>
-            安装模组
-          </button>
-          <button className="btn" onClick={uninstall} disabled={working !== null || !gameRoot || launchBusy}>
-            卸载模组
-          </button>
-          <button className="btn" onClick={checkUpdates} disabled={working !== null}>
-            检查更新
-          </button>
-          {update?.updateAvailable ? (
-            <button className="btn btn--accent" onClick={applyUpdate} disabled={working !== null || launchBusy}>
-              立即更新
-            </button>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="status-strip">
-        <div className="status-strip__label">当前状态</div>
-        <div className="status-strip__value">{working ?? message}</div>
-      </section>
-
-      {copyNotice ? <div className="copy-banner">{copyNotice}</div> : null}
-
-      {error ? (
-        <div className="error-banner">
-          <div className="error-banner__head">
-            <div>
-              <strong>最近错误</strong>
-              <span>{errorTime ? formatProgressTimestamp(errorTime) : '刚刚'}</span>
+          <div className="sidebar__panel">
+            <div className="sidebar__panel-row">
+              <span>应用版本</span>
+              <strong>{snapshot.appVersion}</strong>
             </div>
-            <div className="inline-actions">
-              <button className="btn btn--small" onClick={() => void handleCopy('错误信息', error)}>
-                复制错误
+            <div className="sidebar__panel-row">
+              <span>游戏目录</span>
+              <strong>{gameRoot ? '已连接' : '未选择'}</strong>
+            </div>
+            <div className="sidebar__panel-row">
+              <span>模组状态</span>
+              <strong>{gameInstalled ? '已就绪' : gameRoot ? '需修复' : '未安装'}</strong>
+            </div>
+            <div className="sidebar__panel-row">
+              <span>更新状态</span>
+              <strong>{update?.updateAvailable ? `可升级到 ${update.latestVersion}` : '已是最新'}</strong>
+            </div>
+          </div>
+        </aside>
+
+        <div className="workspace">
+          <header className="workspace__hero card">
+            <div className="workspace__hero-copy">
+              <span className="eyebrow">{activeNav.eyebrow}</span>
+              <h2>{activeNav.title}</h2>
+              <p>{activeNav.description}</p>
+            </div>
+
+            <div className="workspace__hero-actions">
+              <button className="btn btn--primary" onClick={save} disabled={working !== null}>
+                保存设置
               </button>
-              <button className="btn btn--small" onClick={openLogFolder} disabled={!userDataRoot}>
-                打开日志目录
+              <button className="btn btn--ghost" onClick={saveAndLaunch} disabled={working !== null || !launchReady}>
+                {launchBusy ? '启动中，请等待' : '保存并启动'}
               </button>
-              <button className="btn btn--small" onClick={clearError}>
-                清除提示
+              <button
+                className={`btn btn--launch ${launchBusy ? 'btn--launching' : ''}`}
+                onClick={launch}
+                disabled={working !== null || !launchReady}
+              >
+                <span className="btn--launch__glow" />
+                <span className="btn--launch__label">{launchBusy ? '启动中，请等待' : '启动游戏'}</span>
               </button>
             </div>
-          </div>
-          <div className="error-banner__body">{error}</div>
-        </div>
-      ) : null}
+          </header>
 
-      {updateInFlight ? (
-        <section className="progress-card">
-          <div className="progress-card__head">
-            <div>
-              <strong>更新正在进行</strong>
-              <span>{latestProgress?.detail ?? '正在准备更新步骤...'}</span>
-            </div>
-            {typeof latestProgress?.percent === 'number' ? <strong>{latestProgress.percent}%</strong> : null}
-          </div>
-          <div className="progress-bar" aria-hidden="true">
-            <div
-              className="progress-bar__fill"
-              style={{ width: `${Math.max(8, latestProgress?.percent ?? 12)}%` }}
+          <section className="summary-grid">
+            <StatusPill label="应用版本" value={snapshot.appVersion} tone="good" />
+            <StatusPill label="游戏目录" value={gameRoot ? '已连接' : '未选择'} tone={gameRoot ? 'good' : 'warn'} />
+            <StatusPill label="模组状态" value={gameInstalled ? '已就绪' : gameRoot ? '需修复' : '未安装'} tone={gameInstalled ? 'good' : 'warn'} />
+            <StatusPill
+              label="启动状态"
+              value={snapshot.launchState === 'starting' ? '启动中' : snapshot.launchState === 'running' ? '运行中' : '待命'}
+              tone={launchTone(snapshot.launchState)}
             />
-          </div>
-          <div className="check-list">
-            {updateProgressEvents.length > 0 ? (
-              updateProgressEvents.map((event, index) => (
-                <div key={`${event.timestamp}-${index}`} className="check-list__item">
-                  [{formatProgressTimestamp(event.timestamp)}] {event.detail}
+            <StatusPill label="环境自检" value={health.summary} tone={healthTone(snapshot)} />
+            <StatusPill label="OTA 通道" value={update?.updateAvailable ? `发现 ${update.latestVersion}` : '已是最新'} tone={update?.updateAvailable ? 'warn' : 'good'} />
+          </section>
+
+          <section className="status-strip">
+            <div className="status-strip__label">当前状态</div>
+            <div className="status-strip__value">{working ?? message}</div>
+          </section>
+
+          {copyNotice ? <div className="copy-banner">{copyNotice}</div> : null}
+
+          {error ? (
+            <div className="error-banner">
+              <div className="error-banner__head">
+                <div>
+                  <strong>最近错误</strong>
+                  <span>{errorTime ? formatProgressTimestamp(errorTime) : '刚刚'}</span>
                 </div>
-              ))
-            ) : (
-              <div className="check-list__item">正在向 GitHub 检查最新版本，请稍候。</div>
-            )}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="nav-tabs">
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            className={`tab ${activeTab === tab.key ? 'tab--active' : ''}`}
-            onClick={() => setActiveTab(tab.key)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </section>
-
-      <main className="content">
-        {activeTab === 'overview' ? (
-          <div className="overview-layout">
-            <Card title="游戏目录" eyebrow="环境">
-              <div className="stack">
-                <p className="body-copy">
-                  {gameRoot
-                    ? '应用会在这个目录安装并管理模组文件。'
-                    : '请选择包含 LongYinLiZhiZhuan.exe 的目录，或者让应用自动识别 Steam。'}
-                </p>
-                <div className="path-box">{gameRoot || '尚未选择游戏目录'}</div>
                 <div className="inline-actions">
-                  <button className="btn btn--primary" onClick={pickGameRoot} disabled={working !== null || launchBusy}>
-                    {gameRoot ? '更换目录' : '选择目录'}
+                  <button className="btn btn--small" onClick={() => void handleCopy('错误信息', error)}>
+                    复制错误
                   </button>
-                  <button className="btn" onClick={openGameRoot} disabled={!gameRoot}>
-                    打开目录
+                  <button className="btn btn--small" onClick={openLogFolder} disabled={!userDataRoot}>
+                    打开日志目录
+                  </button>
+                  <button className="btn btn--small" onClick={clearError}>
+                    清除提示
                   </button>
                 </div>
               </div>
-            </Card>
+              <div className="error-banner__body">{error}</div>
+            </div>
+          ) : null}
 
-            <Card title="更新通道" eyebrow="OTA">
-              <div className="stack">
-                <div className="stat-line">
-                  <span>当前版本</span>
-                  <strong>{snapshot.appVersion}</strong>
+          {updateInFlight ? (
+            <section className="progress-card">
+              <div className="progress-card__head">
+                <div>
+                  <strong>更新正在进行</strong>
+                  <span>{latestProgress?.detail ?? '正在准备更新步骤...'}</span>
                 </div>
-                <div className="stat-line">
-                  <span>更新状态</span>
-                  <strong>{update?.updateAvailable ? `可升级到 ${update.latestVersion}` : '已是最新'}</strong>
-                </div>
-                <p className="body-copy">
-                  旧版本 app 也会从 GitHub Releases 自检并更新自己。更新时会保留本地 `user-data`。
-                </p>
-                <div className="release-inline-card">
-                  <div className="release-inline-card__head">
-                    <div>
-                      <strong>{update?.releaseName || '最新发布说明'}</strong>
-                      <span>{formatReleaseDate(update?.publishedAt)}</span>
+                {typeof latestProgress?.percent === 'number' ? <strong>{latestProgress.percent}%</strong> : null}
+              </div>
+              <div className="progress-bar" aria-hidden="true">
+                <div className="progress-bar__fill" style={{ width: `${Math.max(8, latestProgress?.percent ?? 12)}%` }} />
+              </div>
+              <div className="check-list">
+                {updateProgressEvents.length > 0 ? (
+                  updateProgressEvents.map((event, index) => (
+                    <div key={`${event.timestamp}-${index}`} className="check-list__item">
+                      [{formatProgressTimestamp(event.timestamp)}] {event.detail}
                     </div>
-                    {update?.releaseUrl ? (
-                      <button className="btn btn--small" onClick={() => void openReleasePage(update.releaseUrl)}>
-                        打开发布页
+                  ))
+                ) : (
+                  <div className="check-list__item">正在向 GitHub 检查最新版本，请稍候。</div>
+                )}
+              </div>
+            </section>
+          ) : null}
+
+          <main className="page-stack">
+            {activePage === 'home' ? (
+              <div className="page-grid">
+                <section className="command-center card">
+                  <div className="command-center__main">
+                    <div className={`launch-banner launch-banner--${snapshot.launchState}`}>
+                      <div className="launch-banner__title">
+                        {snapshot.launchState === 'starting'
+                          ? '游戏正在启动，请耐心等待'
+                          : snapshot.launchState === 'running'
+                            ? '检测到游戏进程正在运行'
+                            : '可以启动游戏'}
+                      </div>
+                      <div className="launch-banner__body">{snapshot.launchNote}</div>
+                    </div>
+
+                    <div className="toolbar__cluster">
+                      <button className="btn" onClick={pickGameRoot} disabled={working !== null || launchBusy}>
+                        {gameRoot ? '更换目录' : '选择目录'}
+                      </button>
+                      <button className="btn" onClick={openGameRoot} disabled={!gameRoot}>
+                        打开游戏目录
+                      </button>
+                      <button className="btn" onClick={openPayloadRoot} disabled={!payloadRoot}>
+                        打开载荷目录
+                      </button>
+                      <button className="btn" onClick={openLogFolder} disabled={!userDataRoot}>
+                        打开日志目录
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="command-center__side">
+                    <button className="btn" onClick={install} disabled={working !== null || !gameRoot || launchBusy}>
+                      安装模组
+                    </button>
+                    <button className="btn" onClick={uninstall} disabled={working !== null || !gameRoot || launchBusy}>
+                      卸载模组
+                    </button>
+                    <button className="btn" onClick={checkUpdates} disabled={working !== null}>
+                      检查更新
+                    </button>
+                    {update?.updateAvailable ? (
+                      <button className="btn btn--accent" onClick={applyUpdate} disabled={working !== null || launchBusy}>
+                        立即更新
                       </button>
                     ) : null}
                   </div>
-                  <div className="release-note">
-                    {releaseBodyLines(update?.releaseBody).slice(0, 5).map((line, index) => (
-                      <div key={`${line}-${index}`} className="release-note__line">
-                        {line}
+                </section>
+
+                <Card title="游戏目录与载荷" eyebrow="Environment">
+                  <div className="stack">
+                    <p className="body-copy">
+                      {gameRoot
+                        ? '启动器会在这个目录安装并管理模组文件。'
+                        : '请选择包含 LongYinLiZhiZhuan.exe 的目录，或者让应用自动识别 Steam。'}
+                    </p>
+                    <div className="path-box">{gameRoot || '尚未选择游戏目录'}</div>
+                    <div className="path-box path-box--soft">{payloadRoot || '未找到当前 Electron 载荷目录'}</div>
+                  </div>
+                </Card>
+
+                <Card title="自检摘要" eyebrow="Health">
+                  <div className="stack">
+                    <p className="body-copy">{health.summary}</p>
+                    <CheckList
+                      items={healthPreview}
+                      empty={gameRoot ? '还没有自检项可展示。' : '选择游戏目录后，这里会显示安装自检结果。'}
+                    />
+                  </div>
+                </Card>
+
+                <Card title="更新通道" eyebrow="Release">
+                  <div className="stack">
+                    <div className="stat-line">
+                      <span>当前版本</span>
+                      <strong>{snapshot.appVersion}</strong>
+                    </div>
+                    <div className="stat-line">
+                      <span>最新版本</span>
+                      <strong>{update?.latestVersion ?? snapshot.appVersion}</strong>
+                    </div>
+                    <div className="stat-line">
+                      <span>状态</span>
+                      <strong>{update?.updateAvailable ? '有新版本可下载' : '已是最新'}</strong>
+                    </div>
+                    <div className="release-note release-note--panel">
+                      {releasePreview.map((line, index) => (
+                        <div key={`home-release-${index}`} className="release-note__line">
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="inline-actions">
+                      <button className="btn btn--small" onClick={() => void refreshReleaseHistory()} disabled={working !== null}>
+                        刷新更新记录
+                      </button>
+                      {update?.releaseUrl ? (
+                        <button className="btn btn--small" onClick={() => void openReleasePage(update.releaseUrl)}>
+                          打开发布页
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            ) : null}
+
+            {activePage === 'updates' ? (
+              <div className="page-grid">
+                <Card title="当前 OTA 状态" eyebrow="Current">
+                  <div className="stack">
+                    <div className="stat-line">
+                      <span>当前版本</span>
+                      <strong>{update?.currentVersion ?? snapshot.appVersion}</strong>
+                    </div>
+                    <div className="stat-line">
+                      <span>最新版本</span>
+                      <strong>{update?.latestVersion ?? snapshot.appVersion}</strong>
+                    </div>
+                    <div className="stat-line">
+                      <span>发布时间</span>
+                      <strong>{formatReleaseDate(update?.publishedAt ?? latestRelease?.publishedAt)}</strong>
+                    </div>
+                    <div className="stat-line">
+                      <span>更新状态</span>
+                      <strong>{update?.status ?? '更新检查尚未运行。'}</strong>
+                    </div>
+                    <div className="inline-actions">
+                      <button className="btn btn--primary" onClick={checkUpdates} disabled={working !== null}>
+                        检查更新
+                      </button>
+                      <button className="btn" onClick={() => void refreshReleaseHistory()} disabled={working !== null}>
+                        刷新更新记录
+                      </button>
+                      <button className="btn" onClick={() => void refreshLogs()} disabled={working !== null || logsBusy}>
+                        {logsBusy ? '刷新中...' : '刷新日志'}
+                      </button>
+                      {update?.updateAvailable ? (
+                        <button className="btn btn--accent" onClick={applyUpdate} disabled={working !== null || launchBusy}>
+                          立即更新
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </Card>
+
+                <Card title="本次发布说明" eyebrow="Release Body">
+                  <div className="stack">
+                    <div className="release-note release-note--panel">
+                      {releaseBodyLines(update?.releaseBody ?? latestRelease?.body).map((line, index) => (
+                        <div key={`current-release-${index}`} className="release-note__line">
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                    {update?.releaseUrl || latestRelease?.htmlUrl ? (
+                      <div className="inline-actions">
+                        <button
+                          className="btn btn--small"
+                          onClick={() => void openReleasePage(update?.releaseUrl ?? latestRelease?.htmlUrl)}
+                        >
+                          打开这个发布页
+                        </button>
                       </div>
-                    ))}
+                    ) : null}
                   </div>
-                </div>
-                <div className="inline-actions">
-                  <button className="btn" onClick={checkUpdates} disabled={working !== null}>
-                    刷新状态
-                  </button>
-                  <button className="btn" onClick={() => setActiveTab('updates')}>
-                    查看历史
-                  </button>
-                  <button className="btn" onClick={openLogFolder} disabled={!userDataRoot}>
-                    打开日志目录
-                  </button>
-                  <button className="btn" onClick={() => void refreshLogs()} disabled={logsBusy}>
-                    {logsBusy ? '正在刷新日志...' : '刷新日志内容'}
-                  </button>
-                  {update?.updateAvailable ? (
-                    <button className="btn btn--accent" onClick={applyUpdate} disabled={working !== null || launchBusy}>
-                      {working === '下载更新中' ? '更新下载中...' : '应用更新'}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </Card>
+                </Card>
 
-            <Card title="模组载荷" eyebrow="来源">
-              <div className="stack">
-                <p className="body-copy">
-                  当前 Electron 包内自带已验证过的模组载荷。安装模组时，复制的就是这一份。
-                </p>
-                <div className="path-box">{payloadRoot || '未找到载荷目录'}</div>
-                <div className="inline-actions">
-                  <button className="btn" onClick={openPayloadRoot} disabled={!payloadRoot}>
-                    打开载荷目录
-                  </button>
-                </div>
-              </div>
-            </Card>
-
-            <Card title="启动提醒" eyebrow="安全">
-              <div className="stack">
-                <div className="check-list">
-                  <div className="check-list__item">首次启动时，请只点击一次“启动游戏”或“保存并启动”。</div>
-                  <div className="check-list__item">如果 BepInEx 正在注入，窗口可能延迟 10 到 20 秒才出现。</div>
-                  <div className="check-list__item">当界面显示“启动中”或“运行中”时，启动按钮会自动锁定。</div>
-                </div>
-              </div>
-            </Card>
-
-            <Card title="安装体检" eyebrow="自检">
-              <div className="stack">
-                <p className="body-copy">{health.summary}</p>
-                <div className="check-list">
-                  {health.checks.length > 0 ? (
-                    health.checks
-                      .filter((check) => !check.ok)
-                      .slice(0, 8)
-                      .map((check) => (
-                        <div key={check.key} className="check-list__item">
-                          {check.label}: {check.detail}
-                        </div>
-                      ))
-                  ) : (
-                    <div className="check-list__item">选择游戏目录后，这里会显示真实安装检查结果。</div>
-                  )}
-                  {health.driftedFiles.length > 0 ? (
-                    <div className="check-list__item">
-                      当前游戏目录仍在使用旧载荷：{health.driftedFiles.slice(0, 4).join('，')}
-                      {health.driftedFiles.length > 4 ? ' ...' : ''}
-                    </div>
-                  ) : null}
-                  {health.checks.length > 0 && failedChecks.length === 0 && health.driftedFiles.length === 0 ? (
-                    <div className="check-list__item">核心文件、配置写入权限、以及载荷版本同步均已通过。</div>
-                  ) : null}
-                </div>
-                <div className="inline-actions">
-                  <button className="btn" onClick={install} disabled={working !== null || !gameRoot || launchBusy}>
-                    重新安装并修复
-                  </button>
-                  <button className="btn" onClick={() => void refresh()} disabled={working !== null}>
-                    刷新自检
-                  </button>
-                </div>
-              </div>
-            </Card>
-
-            <Card title="错误与日志" eyebrow="排错">
-              <div className="stack">
-                <p className="body-copy">
-                  更新失败、保存失败、自动重启失败时，详细过程会落到本地日志，不再只闪一下红条。
-                </p>
-                <div className="path-box">{userDataRoot || '未找到日志目录'}</div>
-                <div className="check-list">
-                  <div className="check-list__item">启动日志: {startupLogPath || '未生成'}</div>
-                  <div className="check-list__item">OTA 日志: {otaLogPath || '未生成'}</div>
-                </div>
-                <div className="inline-actions">
-                  <button className="btn" onClick={openLogFolder} disabled={!userDataRoot}>
-                    打开日志目录
-                  </button>
-                  <button className="btn" onClick={openStartupLog} disabled={!startupLogPath}>
-                    打开 startup.log
-                  </button>
-                  <button className="btn" onClick={openOtaLog} disabled={!otaLogPath}>
-                    打开 ota-update.log
-                  </button>
-                  <button className="btn" onClick={() => void refreshLogs()} disabled={logsBusy}>
-                    {logsBusy ? '正在刷新日志...' : '刷新日志内容'}
-                  </button>
-                  <button className="btn" onClick={() => void handleCopy('startup.log', startupLogText)}>
-                    复制 startup.log
-                  </button>
-                  <button className="btn" onClick={() => void handleCopy('ota-update.log', otaLogText)}>
-                    复制 ota-update.log
-                  </button>
-                </div>
-                <div className="log-preview-grid">
-                  <div className="log-preview">
-                    <div className="log-preview__head">
-                      <strong>startup.log</strong>
-                    </div>
-                    <pre className="log-preview__body">{startupLogText}</pre>
-                  </div>
-                  <div className="log-preview">
-                    <div className="log-preview__head">
-                      <strong>ota-update.log</strong>
-                    </div>
-                    <pre className="log-preview__body">{otaLogText}</pre>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          </div>
-        ) : null}
-
-        {activeTab === 'updates' ? (
-          <div className="updates-layout">
-            <Card title="最新发布说明" eyebrow="Release">
-              <div className="stack">
-                <div className="release-header">
-                  <div>
-                    <strong>{update?.releaseName || releaseHistory[0]?.name || '暂无发布说明'}</strong>
-                    <span>{formatReleaseDate(update?.publishedAt || releaseHistory[0]?.publishedAt)}</span>
-                  </div>
-                  {update?.releaseUrl ? (
-                    <button className="btn btn--small" onClick={() => void openReleasePage(update.releaseUrl)}>
-                      在 GitHub 查看
-                    </button>
-                  ) : null}
-                </div>
-                <div className="release-note release-note--panel">
-                  {releaseBodyLines(update?.releaseBody || releaseHistory[0]?.body).map((line, index) => (
-                    <div key={`${line}-${index}`} className="release-note__line">
-                      {line}
-                    </div>
-                  ))}
-                </div>
-                <div className="inline-actions">
-                  <button className="btn" onClick={checkUpdates} disabled={working !== null}>
-                    同步最新状态
-                  </button>
-                  <button className="btn" onClick={() => void refreshReleaseHistory()} disabled={working !== null}>
-                    刷新历史
-                  </button>
-                </div>
-              </div>
-            </Card>
-
-            <Card title="版本更新历史" eyebrow="History">
-              <div className="stack">
-                <p className="body-copy">这里直接展示 GitHub Releases 的每次发布说明，发布时写什么，用户这里就看到什么。</p>
-                <div className="release-history">
-                  {releaseHistory.length > 0 ? (
-                    releaseHistory.map((release) => (
-                      <article key={release.tagName || release.version} className="release-history__item">
-                        <div className="release-history__meta">
-                          <div className="release-history__title">
-                            <strong>{release.name}</strong>
-                            {release.isLatest ? <span className="release-badge">最新</span> : null}
-                          </div>
-                          <div className="release-history__subline">
-                            <span>{release.tagName || `v${release.version}`}</span>
-                            <span>{formatReleaseDate(release.publishedAt)}</span>
-                          </div>
-                        </div>
-                        <div className="release-note">
-                          {releaseBodyLines(release.body).map((line, index) => (
-                            <div key={`${release.tagName}-${index}`} className="release-note__line">
-                              {line}
+                <Card title="版本更新记录" eyebrow="History">
+                  <div className="stack">
+                    <p className="body-copy">这里直接展示 GitHub Releases 的每次发布说明，发布时写什么，用户这里就看到什么。</p>
+                    <div className="release-history">
+                      {releaseHistory.length > 0 ? (
+                        releaseHistory.map((release) => (
+                          <article key={release.tagName || release.version} className="release-history__item">
+                            <div className="release-history__meta">
+                              <div className="release-history__title">
+                                <strong>{release.name}</strong>
+                                {release.isLatest ? <span className="release-badge">最新</span> : null}
+                              </div>
+                              <div className="release-history__subline">
+                                <span>{release.tagName || `v${release.version}`}</span>
+                                <span>{formatReleaseDate(release.publishedAt)}</span>
+                              </div>
                             </div>
-                          ))}
-                        </div>
-                        {release.htmlUrl ? (
-                          <div className="inline-actions">
-                            <button className="btn btn--small" onClick={() => void openReleasePage(release.htmlUrl)}>
-                              打开这个发布页
-                            </button>
-                          </div>
-                        ) : null}
-                      </article>
-                    ))
-                  ) : (
-                    <div className="empty-state">当前还没有从 GitHub 拉取到更新历史。你可以先点“刷新历史”。</div>
-                  )}
-                </div>
-              </div>
-            </Card>
-          </div>
-        ) : null}
+                            <div className="release-note">
+                              {releaseBodyLines(release.body).map((line, index) => (
+                                <div key={`${release.tagName}-${index}`} className="release-note__line">
+                                  {line}
+                                </div>
+                              ))}
+                            </div>
+                            {release.htmlUrl ? (
+                              <div className="inline-actions">
+                                <button className="btn btn--small" onClick={() => void openReleasePage(release.htmlUrl)}>
+                                  打开这个发布页
+                                </button>
+                              </div>
+                            ) : null}
+                          </article>
+                        ))
+                      ) : (
+                        <div className="empty-state">当前还没有从 GitHub 拉取到更新历史。你可以先点“刷新更新记录”。</div>
+                      )}
+                    </div>
+                  </div>
+                </Card>
 
-        {activeTab === 'gameplay' ? (
-          <div className="panel-grid">
-            <Card title="玩法核心" eyebrow="控制">
-              <div className="field-grid">
-                <CheckboxField
-                  label="锁定探索体力"
-                  value={settings.lockStamina}
-                  onChange={(value) => updateSetting('lockStamina', value)}
-                />
-                <CheckboxField
-                  label="宝箱自动选最高价值"
-                  value={settings.treasureChestAutoPickMostValuable}
-                  onChange={(value) => updateSetting('treasureChestAutoPickMostValuable', value)}
-                  hint="探索宝箱多选奖励出现后，自动拿取价值最高的一项。"
-                />
-                <NumberField
-                  label="书籍经验倍率"
-                  value={settings.expMultiplier}
-                  onChange={(value) => updateSetting('expMultiplier', value)}
-                  min={1}
-                  max={999}
-                  step={1}
-                />
-                <NumberField
-                  label="战斗武学经验倍率"
-                  value={settings.battleSkillExpMultiplier}
-                  onChange={(value) => updateSetting('battleSkillExpMultiplier', value)}
-                  min={1}
-                  max={999}
-                  step={1}
-                  hint="只影响战斗内通过出招获得的武学经验，敌我双方都会生效。"
-                />
-                <NumberField
-                  label="创作点倍率"
-                  value={settings.creationPointMultiplier}
-                  onChange={(value) => updateSetting('creationPointMultiplier', value)}
-                  min={1}
-                  max={999}
-                  step={1}
-                />
-                <NumberField
-                  label="幸运返利命中概率"
-                  value={settings.luckyHitChancePercent}
-                  onChange={(value) => updateSetting('luckyHitChancePercent', value)}
-                  min={0}
-                  max={100}
-                  step={1}
-                  suffix="%"
-                />
-                <NumberField
-                  label="额外好感增长"
-                  value={settings.extraRelationshipGainChancePercent}
-                  onChange={(value) => updateSetting('extraRelationshipGainChancePercent', value)}
-                  min={0}
-                  max={100}
-                  step={1}
-                  suffix="%"
-                />
-                <CheckboxField
-                  label="队友每日自动加好感"
-                  value={settings.teamAutoFavorEnabled}
-                  onChange={(value) => updateSetting('teamAutoFavorEnabled', value)}
-                  hint="当前队伍中的已招募 NPC 会在每个游戏日自动获得好感。"
-                />
-                <NumberField
-                  label="队友每日自动加好感点数"
-                  value={settings.teamAutoFavorPerDay}
-                  onChange={(value) => updateSetting('teamAutoFavorPerDay', value)}
-                  min={0}
-                  max={999}
-                  step={1}
-                />
-                <NumberField
-                  label="队友离队天数倍率"
-                  value={settings.teamStayDurationMultiplier}
-                  onChange={(value) => updateSetting('teamStayDurationMultiplier', value)}
-                  min={0.1}
-                  max={999}
-                  step={0.25}
-                  hint="临时入队 NPC 的停留时间按这个倍率缩放。3 倍约等于 90 天。"
-                />
-                <NumberField
-                  label="伴侣上限"
-                  value={settings.maxLoverCount}
-                  onChange={(value) => updateSetting('maxLoverCount', value)}
-                  min={1}
-                  max={999}
-                  step={1}
-                  hint="提高玩家可同时拥有的伴侣/夫妻数量。默认改为 8。"
-                />
-                <CheckboxField
-                  label="追加材料按大阶增产"
-                  value={settings.craftRandomPickUpgrade}
-                  onChange={(value) => updateSetting('craftRandomPickUpgrade', value)}
-                  hint="按追加材料的大阶给成品加数量。下面 5 个数值分别对应一阶到五阶，可自由修改。"
-                />
-                <NumberField
-                  label="一阶额外数量"
-                  value={settings.craftTier1ExtraItems}
-                  onChange={(value) => updateSetting('craftTier1ExtraItems', value)}
-                  min={0}
-                  max={999}
-                  step={1}
-                  hint="默认 0，对应凡品/最低大阶。"
-                />
-                <NumberField
-                  label="二阶额外数量"
-                  value={settings.craftTier2ExtraItems}
-                  onChange={(value) => updateSetting('craftTier2ExtraItems', value)}
-                  min={0}
-                  max={999}
-                  step={1}
-                  hint="默认 1。"
-                />
-                <NumberField
-                  label="三阶额外数量"
-                  value={settings.craftTier3ExtraItems}
-                  onChange={(value) => updateSetting('craftTier3ExtraItems', value)}
-                  min={0}
-                  max={999}
-                  step={1}
-                  hint="默认 2。"
-                />
-                <NumberField
-                  label="四阶额外数量"
-                  value={settings.craftTier4ExtraItems}
-                  onChange={(value) => updateSetting('craftTier4ExtraItems', value)}
-                  min={0}
-                  max={999}
-                  step={1}
-                  hint="默认 3。"
-                />
-                <NumberField
-                  label="五阶额外数量"
-                  value={settings.craftTier5ExtraItems}
-                  onChange={(value) => updateSetting('craftTier5ExtraItems', value)}
-                  min={0}
-                  max={999}
-                  step={1}
-                  hint="默认 4，对应绝世/最高大阶。"
-                />
-                <NumberField
-                  label="商人现金下限"
-                  value={settings.merchantCarryCash}
-                  onChange={(value) => updateSetting('merchantCarryCash', value)}
-                  min={0}
-                  max={999999999}
-                  step={1000}
-                />
-                <CheckboxField
-                  label="珍宝自动加入购物车"
-                  value={settings.treasureAutoTradeEnabled}
-                  onChange={(value) => updateSetting('treasureAutoTradeEnabled', value)}
-                  hint="进入珍宝铺时，自动把预估有利润的未鉴定珍宝加入购物车；不会替你结账。"
-                />
-                <CheckboxField
-                  label="忽略负重"
-                  value={settings.ignoreCarryWeight}
-                  onChange={(value) => updateSetting('ignoreCarryWeight', value)}
-                />
-                <NumberField
-                  label="负重上限"
-                  value={settings.carryWeightCap}
-                  onChange={(value) => updateSetting('carryWeightCap', value)}
-                  min={0}
-                  max={999999999}
-                  step={1000}
-                />
+                <Card title="运行日志" eyebrow="Logs">
+                  <div className="stack">
+                    <div className="inline-actions">
+                      <button className="btn btn--small" onClick={openStartupLog} disabled={!startupLogPath}>
+                        打开 startup.log
+                      </button>
+                      <button className="btn btn--small" onClick={openOtaLog} disabled={!otaLogPath}>
+                        打开 ota-update.log
+                      </button>
+                      <button className="btn btn--small" onClick={openLogFolder} disabled={!userDataRoot}>
+                        打开日志目录
+                      </button>
+                    </div>
+                    <div className="log-preview-grid">
+                      <LogPreview title="startup.log" body={startupLogText} />
+                      <LogPreview title="ota-update.log" body={otaLogText} />
+                    </div>
+                  </div>
+                </Card>
               </div>
-            </Card>
+            ) : null}
 
-            <Card title="世界地图坐骑" eyebrow="移动">
-              <div className="field-grid">
-                <CheckboxField
-                  label="锁定加速体力"
-                  value={settings.lockHorseTurboStamina}
-                  onChange={(value) => updateSetting('lockHorseTurboStamina', value)}
-                  hint="避免体力耗尽时加速提前结束。"
-                />
-                <NumberField
-                  label="基础速度倍率"
-                  value={settings.horseBaseSpeedMultiplier}
-                  onChange={(value) => updateSetting('horseBaseSpeedMultiplier', value)}
-                  min={0.01}
-                  max={999}
-                  step={0.25}
-                />
-                <NumberField
-                  label="加速速度倍率"
-                  value={settings.horseTurboSpeedMultiplier}
-                  onChange={(value) => updateSetting('horseTurboSpeedMultiplier', value)}
-                  min={0.01}
-                  max={999}
-                  step={0.25}
-                />
-                <NumberField
-                  label="加速持续倍率"
-                  value={settings.horseTurboDurationMultiplier}
-                  onChange={(value) => updateSetting('horseTurboDurationMultiplier', value)}
-                  min={0.01}
-                  max={999}
-                  step={0.25}
-                />
-                <NumberField
-                  label="加速冷却倍率"
-                  value={settings.horseTurboCooldownMultiplier}
-                  onChange={(value) => updateSetting('horseTurboCooldownMultiplier', value)}
-                  min={0.01}
-                  max={999}
-                  step={0.25}
-                />
-                <NumberField
-                  label="坐骑体力倍率"
-                  value={settings.horseStaminaMultiplier}
-                  onChange={(value) => updateSetting('horseStaminaMultiplier', value)}
-                  min={0.01}
-                  max={999}
-                  step={0.25}
-                  hint="大于 1 的数值会让坐骑持续更久。"
-                />
-              </div>
-            </Card>
-          </div>
-        ) : null}
+            {activePage === 'systems' ? (
+              <div className="page-grid">
+                <Card title="时间与运行控制" eyebrow="Systems">
+                  <div className="field-grid">
+                    <CheckboxField
+                      label="启动时开启冻结日期"
+                      value={settings.freezeDate}
+                      onChange={(value) => updateSetting('freezeDate', value)}
+                    />
+                    <SelectField
+                      label="冻结快捷键"
+                      value={settings.freezeHotkey}
+                      onChange={(value) => updateSetting('freezeHotkey', clampText(value))}
+                      options={HOTKEY_OPTIONS}
+                    />
+                    <SelectField
+                      label="战斗外加速快捷键"
+                      value={settings.outsideBattleSpeedHotkey}
+                      onChange={(value) => updateSetting('outsideBattleSpeedHotkey', clampText(value))}
+                      options={HOTKEY_OPTIONS}
+                      hint="用于切换战斗外的测试速度倍率。"
+                    />
+                  </div>
+                </Card>
 
-        {activeTab === 'systems' ? (
-          <div className="panel-grid">
-            <Card title="时间与心悟" eyebrow="系统">
-              <div className="field-grid">
-                <CheckboxField
-                  label="启动时开启冻结日期"
-                  value={settings.freezeDate}
-                  onChange={(value) => updateSetting('freezeDate', value)}
-                />
-                <SelectField
-                  label="冻结快捷键"
-                  value={settings.freezeHotkey}
-                  onChange={(value) => updateSetting('freezeHotkey', clampText(value))}
-                  options={HOTKEY_OPTIONS}
-                />
-                <SelectField
-                  label="战斗外加速快捷键"
-                  value={settings.outsideBattleSpeedHotkey}
-                  onChange={(value) => updateSetting('outsideBattleSpeedHotkey', clampText(value))}
-                  options={HOTKEY_OPTIONS}
-                />
-                <NumberField
-                  label="每月对话次数倍率"
-                  value={settings.dialogMonthlyLimitMultiplier}
-                  onChange={(value) => updateSetting('dialogMonthlyLimitMultiplier', value)}
-                  min={0}
-                  max={999}
-                  step={1}
-                  hint="影响交谈、请教等每月互动次数。"
-                />
-                <CheckboxField
-                  label="启用剧情快进辅助"
-                  value={settings.dialogFastForwardAssistEnabled}
-                  onChange={(value) => updateSetting('dialogFastForwardAssistEnabled', value)}
-                  hint="在剧情出现快进按钮时自动开启快进，游戏内热键仍然是 P。"
-                />
-                <NumberField
-                  label="辩论我方伤害倍率"
-                  value={settings.debatePlayerDamageTakenMultiplier}
-                  onChange={(value) => updateSetting('debatePlayerDamageTakenMultiplier', value)}
-                  min={0}
-                  max={999}
-                  step={0.25}
-                />
-                <NumberField
-                  label="辩论敌方伤害倍率"
-                  value={settings.debateEnemyDamageTakenMultiplier}
-                  onChange={(value) => updateSetting('debateEnemyDamageTakenMultiplier', value)}
-                  min={0}
-                  max={999}
-                  step={0.25}
-                />
-                <NumberField
-                  label="对酒我方伤害倍率"
-                  value={settings.drinkPlayerPowerCostMultiplier}
-                  onChange={(value) => updateSetting('drinkPlayerPowerCostMultiplier', value)}
-                  min={0}
-                  max={999}
-                  step={0.25}
-                />
-                <NumberField
-                  label="对酒敌方伤害倍率"
-                  value={settings.drinkEnemyPowerCostMultiplier}
-                  onChange={(value) => updateSetting('drinkEnemyPowerCostMultiplier', value)}
-                  min={0}
-                  max={999}
-                  step={0.25}
-                />
-                <NumberField
-                  label="心悟触发几率"
-                  value={settings.dailySkillInsightChancePercent}
-                  onChange={(value) => updateSetting('dailySkillInsightChancePercent', value)}
-                  min={0}
-                  max={100}
-                  step={1}
-                  suffix="%"
-                />
-                <NumberField
-                  label="心悟经验值比率"
-                  value={settings.dailySkillInsightExpPercent}
-                  onChange={(value) => updateSetting('dailySkillInsightExpPercent', value)}
-                  min={0}
-                  max={999}
-                  step={0.5}
-                  suffix="%"
-                />
-                <CheckboxField
-                  label="心悟经验值按武学品级调整"
-                  value={settings.dailySkillInsightUseRarityScaling}
-                  onChange={(value) => updateSetting('dailySkillInsightUseRarityScaling', value)}
-                />
-                <NumberField
-                  label="心悟触发频率"
-                  value={settings.dailySkillInsightRealtimeIntervalSeconds}
-                  onChange={(value) => updateSetting('dailySkillInsightRealtimeIntervalSeconds', value)}
-                  min={0}
-                  max={999}
-                  step={0.5}
-                  suffix="秒"
-                />
+                <Card title="环境自检与目录" eyebrow="Environment">
+                  <div className="stack">
+                    <p className="body-copy">
+                      这一页保留和环境稳定性最相关的入口。目录更换、载荷查看、自检结果和失败项都放在这里。
+                    </p>
+                    <div className="path-box">{gameRoot || '尚未选择游戏目录'}</div>
+                    <div className="path-box path-box--soft">{payloadRoot || '未找到当前载荷目录'}</div>
+                    <div className="inline-actions">
+                      <button className="btn" onClick={pickGameRoot} disabled={working !== null || launchBusy}>
+                        {gameRoot ? '更换目录' : '选择目录'}
+                      </button>
+                      <button className="btn" onClick={openGameRoot} disabled={!gameRoot}>
+                        打开游戏目录
+                      </button>
+                      <button className="btn" onClick={openPayloadRoot} disabled={!payloadRoot}>
+                        打开载荷目录
+                      </button>
+                    </div>
+                    <CheckList
+                      items={health.checks.map((check) => `${check.ok ? '已通过' : '需处理'} · ${check.label} · ${check.detail}`)}
+                      empty={gameRoot ? '没有可展示的环境检查。' : '选择游戏目录后，这里会出现完整自检信息。'}
+                    />
+                  </div>
+                </Card>
               </div>
-            </Card>
-          </div>
-        ) : null}
+            ) : null}
 
-        {activeTab === 'talent' ? (
-          <div className="panel-grid">
-            <Card title="突破成功额外天赋" eyebrow="天赋">
-              <div className="field-grid">
-                <CheckboxField
-                  label="启用突破成功额外天赋"
-                  value={settings.skillTalentEnabled}
-                  onChange={(value) => updateSetting('skillTalentEnabled', value)}
-                />
-                <NumberField
-                  label="武学等级触发"
-                  value={settings.skillTalentLevelThreshold}
-                  onChange={(value) => updateSetting('skillTalentLevelThreshold', value)}
-                  min={1}
-                  max={999}
-                  step={1}
-                  hint="如果设为 5，武学修炼到 5 级时触发天赋奖励。奖励值会根据武学品级变化。"
-                />
-                <NumberField
-                  label="品级天赋倍率"
-                  value={settings.skillTalentTierPointMultiplier}
-                  onChange={(value) => updateSetting('skillTalentTierPointMultiplier', value)}
-                  min={0.1}
-                  max={999}
-                  step={0.25}
-                  hint="如果倍率 = 1，灰级 = 1 点、青级 = 2 点天赋。"
-                />
-                <CheckboxField
-                  label="仅玩家角色"
-                  value={settings.skillTalentPlayerOnly}
-                  onChange={(value) => updateSetting('skillTalentPlayerOnly', value)}
-                />
-              </div>
-            </Card>
-          </div>
-        ) : null}
+            {activePage === 'expTalent' ? (
+              <div className="page-grid">
+                <Card title="经验成长" eyebrow="EXP">
+                  <div className="field-grid">
+                    <NumberField
+                      label="书籍经验倍率"
+                      value={settings.expMultiplier}
+                      onChange={(value) => updateSetting('expMultiplier', value)}
+                      min={1}
+                      max={999}
+                      step={1}
+                    />
+                    <NumberField
+                      label="战斗武学经验倍率"
+                      value={settings.battleSkillExpMultiplier}
+                      onChange={(value) => updateSetting('battleSkillExpMultiplier', value)}
+                      min={1}
+                      max={999}
+                      step={1}
+                      hint="只影响战斗内通过出招获得的武学经验，敌我双方都会生效。"
+                    />
+                    <NumberField
+                      label="创作点倍率"
+                      value={settings.creationPointMultiplier}
+                      onChange={(value) => updateSetting('creationPointMultiplier', value)}
+                      min={1}
+                      max={999}
+                      step={1}
+                    />
+                  </div>
+                </Card>
 
-        {activeTab === 'turbo' ? (
-          <div className="panel-grid">
-            <Card title="战斗加速" eyebrow="性能">
-              <div className="stack">
-                <CheckboxField
-                  label="启动时开启战斗加速"
-                  value={settings.battleTurboEnabled}
-                  onChange={(value) => updateSetting('battleTurboEnabled', value)}
-                />
-                <SelectField
-                  label="战斗加速快捷键"
-                  value={settings.battleTurboHotkey}
-                  onChange={(value) => updateSetting('battleTurboHotkey', clampText(value))}
-                  options={BATTLE_TURBO_HOTKEYS}
-                  hint="在战斗中按下可切换加速开关。20x 速度，取消技能视觉特效。"
-                />
-                <p className="body-copy body-copy--muted">
-                  保存时会自动保留原始模组配置中的高级计时与视觉标记。
-                </p>
+                <Card title="心悟机制" eyebrow="Insight">
+                  <div className="field-grid">
+                    <NumberField
+                      label="心悟触发几率"
+                      value={settings.dailySkillInsightChancePercent}
+                      onChange={(value) => updateSetting('dailySkillInsightChancePercent', value)}
+                      min={0}
+                      max={100}
+                      step={1}
+                      suffix="%"
+                    />
+                    <NumberField
+                      label="心悟经验值比率"
+                      value={settings.dailySkillInsightExpPercent}
+                      onChange={(value) => updateSetting('dailySkillInsightExpPercent', value)}
+                      min={0}
+                      max={999}
+                      step={0.5}
+                      suffix="%"
+                    />
+                    <CheckboxField
+                      label="心悟经验值按武学品级调整"
+                      value={settings.dailySkillInsightUseRarityScaling}
+                      onChange={(value) => updateSetting('dailySkillInsightUseRarityScaling', value)}
+                    />
+                    <NumberField
+                      label="心悟触发频率"
+                      value={settings.dailySkillInsightRealtimeIntervalSeconds}
+                      onChange={(value) => updateSetting('dailySkillInsightRealtimeIntervalSeconds', value)}
+                      min={0}
+                      max={999}
+                      step={0.5}
+                      suffix="秒"
+                    />
+                  </div>
+                </Card>
+
+                <Card title="突破成功额外天赋" eyebrow="Talent">
+                  <div className="field-grid">
+                    <CheckboxField
+                      label="启用突破成功额外天赋"
+                      value={settings.skillTalentEnabled}
+                      onChange={(value) => updateSetting('skillTalentEnabled', value)}
+                    />
+                    <CheckboxField
+                      label="仅玩家角色"
+                      value={settings.skillTalentPlayerOnly}
+                      onChange={(value) => updateSetting('skillTalentPlayerOnly', value)}
+                    />
+                    <NumberField
+                      label="武学等级触发"
+                      value={settings.skillTalentLevelThreshold}
+                      onChange={(value) => updateSetting('skillTalentLevelThreshold', value)}
+                      min={1}
+                      max={999}
+                      step={1}
+                      hint="如果设为 5，武学修炼到 5 级时触发天赋奖励。"
+                    />
+                    <NumberField
+                      label="品级天赋倍率"
+                      value={settings.skillTalentTierPointMultiplier}
+                      onChange={(value) => updateSetting('skillTalentTierPointMultiplier', value)}
+                      min={0.1}
+                      max={999}
+                      step={0.25}
+                      hint="如果倍率 = 1，灰级 = 1 点、青级 = 2 点天赋。"
+                    />
+                  </div>
+                </Card>
               </div>
-            </Card>
-          </div>
-        ) : null}
-      </main>
+            ) : null}
+
+            {activePage === 'worldExplore' ? (
+              <div className="page-grid">
+                <Card title="探索辅助" eyebrow="Explore">
+                  <div className="stack">
+                    <p className="body-copy">
+                      这页只保留确认有效的探索与大地图项。已确认无效的“宝箱自动选最高价值”已从界面和脚本中移除。
+                    </p>
+                    <div className="field-grid field-grid--single">
+                      <CheckboxField
+                        label="锁定探索体力"
+                        value={settings.lockStamina}
+                        onChange={(value) => updateSetting('lockStamina', value)}
+                      />
+                    </div>
+                  </div>
+                </Card>
+
+                <Card title="世界地图坐骑" eyebrow="World Map">
+                  <div className="field-grid">
+                    <CheckboxField
+                      label="锁定加速体力"
+                      value={settings.lockHorseTurboStamina}
+                      onChange={(value) => updateSetting('lockHorseTurboStamina', value)}
+                      hint="避免体力耗尽时加速提前结束。"
+                    />
+                    <NumberField
+                      label="坐骑体力倍率"
+                      value={settings.horseStaminaMultiplier}
+                      onChange={(value) => updateSetting('horseStaminaMultiplier', value)}
+                      min={0.01}
+                      max={999}
+                      step={0.25}
+                      hint="大于 1 的数值会让坐骑持续更久。"
+                    />
+                    <NumberField
+                      label="基础速度倍率"
+                      value={settings.horseBaseSpeedMultiplier}
+                      onChange={(value) => updateSetting('horseBaseSpeedMultiplier', value)}
+                      min={0.01}
+                      max={999}
+                      step={0.25}
+                    />
+                    <NumberField
+                      label="加速速度倍率"
+                      value={settings.horseTurboSpeedMultiplier}
+                      onChange={(value) => updateSetting('horseTurboSpeedMultiplier', value)}
+                      min={0.01}
+                      max={999}
+                      step={0.25}
+                    />
+                    <NumberField
+                      label="加速持续倍率"
+                      value={settings.horseTurboDurationMultiplier}
+                      onChange={(value) => updateSetting('horseTurboDurationMultiplier', value)}
+                      min={0.01}
+                      max={999}
+                      step={0.25}
+                    />
+                    <NumberField
+                      label="加速冷却倍率"
+                      value={settings.horseTurboCooldownMultiplier}
+                      onChange={(value) => updateSetting('horseTurboCooldownMultiplier', value)}
+                      min={0.01}
+                      max={999}
+                      step={0.25}
+                    />
+                  </div>
+                </Card>
+              </div>
+            ) : null}
+
+            {activePage === 'tradeCraft' ? (
+              <div className="page-grid">
+                <Card title="交易与背包" eyebrow="Trade">
+                  <div className="field-grid">
+                    <NumberField
+                      label="商人现金下限"
+                      value={settings.merchantCarryCash}
+                      onChange={(value) => updateSetting('merchantCarryCash', value)}
+                      min={0}
+                      max={999999999}
+                      step={1000}
+                    />
+                    <CheckboxField
+                      label="珍宝自动加入购物车"
+                      value={settings.treasureAutoTradeEnabled}
+                      onChange={(value) => updateSetting('treasureAutoTradeEnabled', value)}
+                      hint="进入珍宝铺时，自动把预估有利润的未鉴定珍宝加入购物车；不会替你结账。"
+                    />
+                    <NumberField
+                      label="幸运返利命中概率"
+                      value={settings.luckyHitChancePercent}
+                      onChange={(value) => updateSetting('luckyHitChancePercent', value)}
+                      min={0}
+                      max={100}
+                      step={1}
+                      suffix="%"
+                    />
+                    <CheckboxField
+                      label="忽略负重"
+                      value={settings.ignoreCarryWeight}
+                      onChange={(value) => updateSetting('ignoreCarryWeight', value)}
+                    />
+                    <NumberField
+                      label="负重上限"
+                      value={settings.carryWeightCap}
+                      onChange={(value) => updateSetting('carryWeightCap', value)}
+                      min={0}
+                      max={999999999}
+                      step={1000}
+                    />
+                  </div>
+                </Card>
+
+                <Card title="制造增产" eyebrow="Craft">
+                  <div className="field-grid">
+                    <CheckboxField
+                      label="追加材料按大阶增产"
+                      value={settings.craftRandomPickUpgrade}
+                      onChange={(value) => updateSetting('craftRandomPickUpgrade', value)}
+                      hint="按追加材料的大阶给成品加数量。下面 5 个数值分别对应一阶到五阶。"
+                    />
+                    <NumberField
+                      label="一阶额外数量"
+                      value={settings.craftTier1ExtraItems}
+                      onChange={(value) => updateSetting('craftTier1ExtraItems', value)}
+                      min={0}
+                      max={999}
+                      step={1}
+                    />
+                    <NumberField
+                      label="二阶额外数量"
+                      value={settings.craftTier2ExtraItems}
+                      onChange={(value) => updateSetting('craftTier2ExtraItems', value)}
+                      min={0}
+                      max={999}
+                      step={1}
+                    />
+                    <NumberField
+                      label="三阶额外数量"
+                      value={settings.craftTier3ExtraItems}
+                      onChange={(value) => updateSetting('craftTier3ExtraItems', value)}
+                      min={0}
+                      max={999}
+                      step={1}
+                    />
+                    <NumberField
+                      label="四阶额外数量"
+                      value={settings.craftTier4ExtraItems}
+                      onChange={(value) => updateSetting('craftTier4ExtraItems', value)}
+                      min={0}
+                      max={999}
+                      step={1}
+                    />
+                    <NumberField
+                      label="五阶额外数量"
+                      value={settings.craftTier5ExtraItems}
+                      onChange={(value) => updateSetting('craftTier5ExtraItems', value)}
+                      min={0}
+                      max={999}
+                      step={1}
+                    />
+                  </div>
+                </Card>
+              </div>
+            ) : null}
+
+            {activePage === 'socialTeam' ? (
+              <div className="page-grid">
+                <Card title="聊天与互动" eyebrow="Dialog">
+                  <div className="field-grid">
+                    <NumberField
+                      label="每月对话次数倍率"
+                      value={settings.dialogMonthlyLimitMultiplier}
+                      onChange={(value) => updateSetting('dialogMonthlyLimitMultiplier', value)}
+                      min={0}
+                      max={999}
+                      step={1}
+                      hint="影响交谈、请教等每月互动次数。"
+                    />
+                    <CheckboxField
+                      label="启用剧情快进辅助"
+                      value={settings.dialogFastForwardAssistEnabled}
+                      onChange={(value) => updateSetting('dialogFastForwardAssistEnabled', value)}
+                      hint="在剧情出现快进按钮时自动开启快进，游戏内热键仍然是 P。"
+                    />
+                    <NumberField
+                      label="额外好感增长"
+                      value={settings.extraRelationshipGainChancePercent}
+                      onChange={(value) => updateSetting('extraRelationshipGainChancePercent', value)}
+                      min={0}
+                      max={100}
+                      step={1}
+                      suffix="%"
+                    />
+                  </div>
+                </Card>
+
+                <Card title="关系与组队" eyebrow="Relationship">
+                  <div className="stack">
+                    <p className="body-copy">已确认无效的“队友离队天数倍率”已移除，避免继续在界面里误导使用。</p>
+                    <div className="field-grid">
+                      <CheckboxField
+                        label="队友每日自动加好感"
+                        value={settings.teamAutoFavorEnabled}
+                        onChange={(value) => updateSetting('teamAutoFavorEnabled', value)}
+                        hint="当前队伍中的已招募 NPC 会在每个游戏日自动获得好感。"
+                      />
+                      <NumberField
+                        label="队友每日自动加好感点数"
+                        value={settings.teamAutoFavorPerDay}
+                        onChange={(value) => updateSetting('teamAutoFavorPerDay', value)}
+                        min={0}
+                        max={999}
+                        step={1}
+                      />
+                      <NumberField
+                        label="伴侣上限"
+                        value={settings.maxLoverCount}
+                        onChange={(value) => updateSetting('maxLoverCount', value)}
+                        min={1}
+                        max={999}
+                        step={1}
+                        hint="提高玩家可同时拥有的伴侣/夫妻数量。默认改为 8。"
+                      />
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            ) : null}
+
+            {activePage === 'battle' ? (
+              <div className="page-grid">
+                <Card title="战斗数值" eyebrow="Combat">
+                  <div className="field-grid">
+                    <NumberField
+                      label="辩论我方伤害倍率"
+                      value={settings.debatePlayerDamageTakenMultiplier}
+                      onChange={(value) => updateSetting('debatePlayerDamageTakenMultiplier', value)}
+                      min={0}
+                      max={999}
+                      step={0.25}
+                    />
+                    <NumberField
+                      label="辩论敌方伤害倍率"
+                      value={settings.debateEnemyDamageTakenMultiplier}
+                      onChange={(value) => updateSetting('debateEnemyDamageTakenMultiplier', value)}
+                      min={0}
+                      max={999}
+                      step={0.25}
+                    />
+                    <NumberField
+                      label="对酒我方伤害倍率"
+                      value={settings.drinkPlayerPowerCostMultiplier}
+                      onChange={(value) => updateSetting('drinkPlayerPowerCostMultiplier', value)}
+                      min={0}
+                      max={999}
+                      step={0.25}
+                    />
+                    <NumberField
+                      label="对酒敌方伤害倍率"
+                      value={settings.drinkEnemyPowerCostMultiplier}
+                      onChange={(value) => updateSetting('drinkEnemyPowerCostMultiplier', value)}
+                      min={0}
+                      max={999}
+                      step={0.25}
+                    />
+                  </div>
+                </Card>
+
+                <Card title="战斗节奏" eyebrow="Turbo">
+                  <div className="stack">
+                    <CheckboxField
+                      label="启动时开启战斗加速"
+                      value={settings.battleTurboEnabled}
+                      onChange={(value) => updateSetting('battleTurboEnabled', value)}
+                    />
+                    <SelectField
+                      label="战斗加速快捷键"
+                      value={settings.battleTurboHotkey}
+                      onChange={(value) => updateSetting('battleTurboHotkey', clampText(value))}
+                      options={BATTLE_TURBO_HOTKEYS}
+                      hint="在战斗中按下可切换加速开关。20x 速度，取消技能视觉特效。"
+                    />
+                    <p className="body-copy body-copy--muted">保存时会自动保留原始模组配置中的高级计时与视觉标记。</p>
+                  </div>
+                </Card>
+              </div>
+            ) : null}
+          </main>
+        </div>
+      </div>
     </div>
   );
 }

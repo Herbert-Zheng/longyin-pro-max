@@ -24,7 +24,6 @@ interface MainConfigHidden {
   moveRevealRadius: number;
   revealAllOnStepTile: boolean;
   treasureChestChoiceEnabled: boolean;
-  treasureChestAutoPickMostValuable: boolean;
   treasureChestChoiceOptions: number;
   treasureChestTotalItems: number;
 }
@@ -44,7 +43,6 @@ interface BattleConfigHidden {
 
 const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   lockStamina: true,
-  treasureChestAutoPickMostValuable: true,
   expMultiplier: 1,
   battleSkillExpMultiplier: 1,
   creationPointMultiplier: 1,
@@ -62,7 +60,6 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   extraRelationshipGainChancePercent: 0,
   teamAutoFavorEnabled: true,
   teamAutoFavorPerDay: 5,
-  teamStayDurationMultiplier: 3,
   maxLoverCount: 8,
   debatePlayerDamageTakenMultiplier: 1,
   debateEnemyDamageTakenMultiplier: 1,
@@ -96,7 +93,6 @@ const DEFAULT_MAIN_HIDDEN: MainConfigHidden = {
   moveRevealRadius: 2,
   revealAllOnStepTile: true,
   treasureChestChoiceEnabled: true,
-  treasureChestAutoPickMostValuable: true,
   treasureChestChoiceOptions: 3,
   treasureChestTotalItems: 2
 };
@@ -321,6 +317,10 @@ function removeIniSectionValue(text: string, section: string, key: string): stri
   });
 }
 
+function removeIniValue(text: string, key: string): string {
+  return text.replace(new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*.*(?:\\r?\\n)?`, 'gmi'), '');
+}
+
 function getIniSectionBody(text: string | undefined, section: string): string | undefined {
   if (!text) {
     return undefined;
@@ -345,7 +345,6 @@ RevealExtraFogOnMove = ${boolText(hidden.revealExtraFogOnMove)}
 MoveRevealRadius = ${hidden.moveRevealRadius}
 RevealAllOnStepTile = ${boolText(hidden.revealAllOnStepTile)}
 TreasureChestChoiceEnabled = ${boolText(hidden.treasureChestChoiceEnabled)}
-TreasureChestAutoPickMostValuable = ${boolText(settings.treasureChestAutoPickMostValuable)}
 TreasureChestChoiceOptions = ${hidden.treasureChestChoiceOptions}
 TreasureChestTotalItems = ${hidden.treasureChestTotalItems}
 
@@ -381,7 +380,6 @@ LuckyHitChancePercent = ${settings.luckyHitChancePercent}
 ExtraRelationshipGainChancePercent = ${settings.extraRelationshipGainChancePercent}
 TeamAutoFavorEnabled = ${boolText(settings.teamAutoFavorEnabled)}
 TeamAutoFavorPerDay = ${formatFloat(settings.teamAutoFavorPerDay)}
-TeamStayDurationMultiplier = ${formatFloat(settings.teamStayDurationMultiplier)}
 MaxLoverCount = ${settings.maxLoverCount}
 
 [Debate]
@@ -528,7 +526,6 @@ export async function removeLegacyArtifacts(gameRoot: string): Promise<void> {
 function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
   return {
     lockStamina: input.lockStamina,
-    treasureChestAutoPickMostValuable: input.treasureChestAutoPickMostValuable,
     expMultiplier: Math.round(clamp(input.expMultiplier, 1, 999)),
     battleSkillExpMultiplier: Math.round(clamp(input.battleSkillExpMultiplier, 1, 999)),
     creationPointMultiplier: Math.round(clamp(input.creationPointMultiplier, 1, 999)),
@@ -546,7 +543,6 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     extraRelationshipGainChancePercent: Math.round(clamp(input.extraRelationshipGainChancePercent, 0, 100)),
     teamAutoFavorEnabled: input.teamAutoFavorEnabled,
     teamAutoFavorPerDay: clamp(input.teamAutoFavorPerDay, 0, 999),
-    teamStayDurationMultiplier: clamp(input.teamStayDurationMultiplier, 0.1, 999),
     maxLoverCount: Math.round(clamp(input.maxLoverCount, 1, 999)),
     debatePlayerDamageTakenMultiplier: clamp(input.debatePlayerDamageTakenMultiplier, 0, 999),
     debateEnemyDamageTakenMultiplier: clamp(input.debateEnemyDamageTakenMultiplier, 0, 999),
@@ -588,11 +584,6 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
 
   return {
     lockStamina: readBool(text, 'LockStamina', DEFAULT_VISIBLE_SETTINGS.lockStamina),
-    treasureChestAutoPickMostValuable: readBool(
-      text,
-      'TreasureChestAutoPickMostValuable',
-      DEFAULT_VISIBLE_SETTINGS.treasureChestAutoPickMostValuable
-    ),
     expMultiplier: readInt(text, 'ExpMultiplier', DEFAULT_VISIBLE_SETTINGS.expMultiplier),
     battleSkillExpMultiplier: readInt(
       battleSection ?? text,
@@ -629,11 +620,6 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       relationshipSection ?? text,
       'TeamAutoFavorPerDay',
       DEFAULT_VISIBLE_SETTINGS.teamAutoFavorPerDay
-    ),
-    teamStayDurationMultiplier: readFloat(
-      relationshipSection ?? text,
-      'TeamStayDurationMultiplier',
-      DEFAULT_VISIBLE_SETTINGS.teamStayDurationMultiplier
     ),
     maxLoverCount: readInt(
       relationshipSection ?? text,
@@ -896,11 +882,8 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
 
   let nextMain = mainText;
   nextMain = upsertIniValue(nextMain, 'LockStamina', boolText(normalized.lockStamina));
-  nextMain = upsertIniValue(
-    nextMain,
-    'TreasureChestAutoPickMostValuable',
-    boolText(normalized.treasureChestAutoPickMostValuable)
-  );
+  nextMain = removeIniSectionValue(nextMain, 'Exploration', 'TreasureChestAutoPickMostValuable');
+  nextMain = removeIniValue(nextMain, 'TreasureChestAutoPickMostValuable');
   nextMain = upsertIniValue(nextMain, 'ExpMultiplier', String(normalized.expMultiplier));
   nextMain = upsertIniSectionValue(nextMain, 'Battle', 'SkillExpMultiplier', String(normalized.battleSkillExpMultiplier));
   nextMain = upsertIniValue(nextMain, 'PointMultiplier', String(normalized.creationPointMultiplier));
@@ -933,12 +916,8 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'TeamAutoFavorPerDay',
     formatFloat(normalized.teamAutoFavorPerDay)
   );
-  nextMain = upsertIniSectionValue(
-    nextMain,
-    'Relationship',
-    'TeamStayDurationMultiplier',
-    formatFloat(normalized.teamStayDurationMultiplier)
-  );
+  nextMain = removeIniSectionValue(nextMain, 'Relationship', 'TeamStayDurationMultiplier');
+  nextMain = removeIniValue(nextMain, 'TeamStayDurationMultiplier');
   nextMain = upsertIniSectionValue(
     nextMain,
     'Relationship',

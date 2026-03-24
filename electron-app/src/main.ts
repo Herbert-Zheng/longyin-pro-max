@@ -51,7 +51,6 @@ const OTA_UPDATER_PATH = IS_PACKAGED
 
 const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   lockStamina: true,
-  treasureChestAutoPickMostValuable: true,
   expMultiplier: 1,
   battleSkillExpMultiplier: 1,
   creationPointMultiplier: 1,
@@ -69,7 +68,6 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   extraRelationshipGainChancePercent: 0,
   teamAutoFavorEnabled: true,
   teamAutoFavorPerDay: 5,
-  teamStayDurationMultiplier: 3,
   maxLoverCount: 8,
   debatePlayerDamageTakenMultiplier: 1,
   debateEnemyDamageTakenMultiplier: 1,

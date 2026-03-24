@@ -5,7 +5,6 @@ export const APP_FOLDER_NAME = 'LongYinProMaxApp';
 
 export interface VisibleSettings {
   lockStamina: boolean;
-  treasureChestAutoPickMostValuable: boolean;
   expMultiplier: number;
   battleSkillExpMultiplier: number;
   creationPointMultiplier: number;
@@ -23,7 +22,6 @@ export interface VisibleSettings {
   extraRelationshipGainChancePercent: number;
   teamAutoFavorEnabled: boolean;
   teamAutoFavorPerDay: number;
-  teamStayDurationMultiplier: number;
   maxLoverCount: number;
   debatePlayerDamageTakenMultiplier: number;
   debateEnemyDamageTakenMultiplier: number;

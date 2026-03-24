@@ -175,6 +175,54 @@ Result:
 - `PointMultiplier = 2` gives double starting points
 - `PointMultiplier = 3` gives triple starting points
 
+### 4. Team-stat driven test features
+
+Confirmed from interop metadata and live test work on `2026-03-24`:
+
+- `HeroData.GetBaseAttriNum(BaseAttriType targetAttri)` is a valid stat-read entry point
+- `HeroData.totalAttri` and `HeroData.baseAttri` are also readable and indexed by `BaseAttriType`
+- `HeroData.ChangeMoney(int num, bool showInfo)` is the correct runtime money-grant path for the player
+
+Important enum finding:
+
+- `BaseAttriType.Inte = 2`
+- `BaseAttriType.Knowledge = 17`
+- for the requested `智慧` test, the correct mapped stat was `Inte`, not `Knowledge`
+
+Practical stat-read recommendation:
+
+- if the feature should use the hero's current effective attribute, prefer `hero.totalAttri[(int)BaseAttriType.Inte]`
+- if a direct list read is not safe in the current context, `hero.GetBaseAttriNum(BaseAttriType.Inte)` is a workable fallback
+- keep in mind that `GetBaseAttriNum(...)` appears base-stat oriented, while `totalAttri` is better for "current final stat" style features
+
+Confirmed current-player team aggregation path:
+
+- start with the player hero explicitly
+- then append `GetPlayerTeamMembers(player)`
+- the helper already de-duplicates heroes and checks actual current team membership
+- this means "all team member certain stats sum, including player" should be implemented as `player + GetPlayerTeamMembers(player)`, not teammates alone
+
+Confirmed money-grant test shape that worked in live play:
+
+- test behavior: press `K`
+- compute `X = team sum of 智慧`
+- grant `X` money to the player
+- show a visible player-facing confirmation message
+
+Hotkey note for future sessions:
+
+- `K` is currently reserved as a test hotkey reference for this team-stat / money-grant experiment
+- do not casually reuse `K` for unrelated debug actions unless this test is intentionally retired or moved
+
+Implementation caution:
+
+- if the plugin already patches `HeroData.ChangeMoney(...)` for bonus effects such as lucky-money logic, guard the manual grant path against recursive side effects with a dedicated flag or by temporarily suppressing the bonus handler during the test grant
+
+Result:
+
+- the live test mod that granted team-`智慧` sum as money on `K` was confirmed fully working
+- this establishes a proven path for future features based on single-character stats and team-stat sums
+
 ## Current User-Facing Control Path
 
 The in-game custom menu experiment should be treated as failed for this game.
@@ -231,6 +279,46 @@ Practical conclusion:
 
 - use cursor/world popup text as the stable notification surface for now
 - treat left-side feed delivery as a separate unresolved UI hook
+
+## Character Detail / Fame Tier Findings
+
+Confirmed live-game findings from the `K` hotkey test path:
+
+- `HeroDetailController.ShowHeroDetail(...)`
+- `HeroDetailController.SetHeroDetail(...)`
+- `HeroDetailController.FreshNowHeroDetail(...)`
+- `HeroDetailController.mainShowHero`
+- `HeroDetailController.nowShowHero`
+
+Practical conclusion:
+
+- these are reliable hooks for "currently viewing character" on the character detail screen
+
+Confirmed reputation path:
+
+- `HeroData.fame`
+- `HeroData.ChangeFame(...)`
+
+Practical conclusion:
+
+- the viewed character's displayed reputation is `fame`, not `favor`
+- changing `favor` only changes relationship rating, which is the wrong stat for the reputation/tier experiments
+
+Confirmed tier / rank path:
+
+- `HeroData.heroForceLv`
+- `HeroData.GetHeroForceLvDescribeSimplify()`
+- `HeroData.CheckHeroFameForceLv()`
+- `HeroData.GetFameForceLv()`
+- `HeroData.ChangeHeroForceLv(...)`
+- `HeroData.SetHeroForceLv(...)`
+
+Practical conclusion:
+
+- player-character tier can follow fame gain directly
+- sect-affiliated NPC tier appears to remain managed by sect logic; fame gain alone did not force a visible tier upgrade in testing
+- sect-less NPCs (for example `游侠 / 大侠 / 宗师` style 江湖人士) can be promoted by reading the fame-derived target with `GetFameForceLv()` and then applying `ChangeHeroForceLv(...)` or `SetHeroForceLv(...)`
+- if a future mod wants reliable fame-tier promotion, branch sect NPCs and sect-less NPCs separately
 
 ## Dialog / Plot Handling Notes
 

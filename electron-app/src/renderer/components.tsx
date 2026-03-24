@@ -1,8 +1,6 @@
 import type { ReactNode } from 'react';
 import type { VisibleSettings } from '../shared/types';
 
-export type TabKey = 'overview' | 'gameplay' | 'systems' | 'talent' | 'turbo';
-
 export const HOTKEY_OPTIONS = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'];
 export const BATTLE_TURBO_HOTKEYS = [
   'F1',
@@ -33,7 +31,6 @@ export const BATTLE_TURBO_HOTKEYS = [
 export function defaultSettings(): VisibleSettings {
   return {
     lockStamina: true,
-    treasureChestAutoPickMostValuable: true,
     expMultiplier: 1,
     battleSkillExpMultiplier: 1,
     creationPointMultiplier: 1,
@@ -51,7 +48,6 @@ export function defaultSettings(): VisibleSettings {
     extraRelationshipGainChancePercent: 0,
     teamAutoFavorEnabled: true,
     teamAutoFavorPerDay: 5,
-    teamStayDurationMultiplier: 3,
     maxLoverCount: 8,
     debatePlayerDamageTakenMultiplier: 1,
     debateEnemyDamageTakenMultiplier: 1,

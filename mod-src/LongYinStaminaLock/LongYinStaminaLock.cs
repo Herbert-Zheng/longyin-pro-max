@@ -23,13 +23,18 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const int LuckyMoneyMaxPercent = 30;
     private const int TeachSkillSplashMinPercentFloor = 0;
     private const int TeachSkillSplashMaxPercentCeiling = 500;
-private const float TeachSkillSideTabDurationSeconds = 4.5f;
-private const string TeachSkillSideTabAtlasName = "IconAtlas";
-private const string TeachSkillSideTabIconName = "1";
-private const string TeachSkillSideTabSoundName = "Woosh";
-private const float TeachSkillSideTabSoundVolume = 1f;
+    private const KeyCode ViewedHeroFavorTestHotkey = KeyCode.K;
+    private const float TeachSkillSideTabDurationSeconds = 4.5f;
+    private const string TeachSkillSideTabAtlasName = "IconAtlas";
+    private const string TeachSkillSideTabIconName = "1";
+    private const string TeachSkillSideTabSoundName = "Woosh";
+    private const float TeachSkillSideTabSoundVolume = 1f;
     private const float DrinkFillMatchTolerance = 0.02f;
     private const float DrinkFillDeltaTolerance = 0.005f;
+    private const string ThresholdTalentSource = "codex.threshold-talent";
+    private const string ThresholdTalentCategory = "Pro Max";
+    private const string DefaultThresholdTalentName = "天人感应";
+    private const float ThresholdTalentEvaluationIntervalSeconds = 0.5f;
     private static readonly string[] RelationshipBonusMessages =
     {
         "你今天比较帅，好感有多加 {0}",
@@ -44,7 +49,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<int> _moveRevealRadius = null!;
     private static ConfigEntry<bool> _revealAllOnStepTile = null!;
     private static ConfigEntry<bool> _treasureChestChoiceEnabled = null!;
-    private static ConfigEntry<bool> _treasureChestAutoPickMostValuable = null!;
     private static ConfigEntry<int> _treasureChestChoiceOptions = null!;
     private static ConfigEntry<int> _treasureChestTotalItems = null!;
     private static ConfigEntry<int> _bookExpMultiplier = null!;
@@ -65,8 +69,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<int> _extraRelationshipGainChancePercent = null!;
     private static ConfigEntry<bool> _teamAutoFavorEnabled = null!;
     private static ConfigEntry<float> _teamAutoFavorPerDay = null!;
-    private static ConfigEntry<float> _teamStayDurationMultiplier = null!;
     private static ConfigEntry<int> _maxLoverCount = null!;
+    private static ConfigEntry<bool> _blockOverflowLoverHomeBattle = null!;
     private static ConfigEntry<float> _debatePlayerDamageTakenMultiplier = null!;
     private static ConfigEntry<float> _debateEnemyDamageTakenMultiplier = null!;
     private static ConfigEntry<bool> _craftRandomPickUpgradeEnabled = null!;
@@ -84,6 +88,14 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<bool> _teachSkillSameSectAreaShareEnabled = null!;
     private static ConfigEntry<int> _teachSkillSameSectAreaShareMinPercent = null!;
     private static ConfigEntry<int> _teachSkillSameSectAreaShareMaxPercent = null!;
+    private static ConfigEntry<bool> _thresholdTalentEnabled = null!;
+    private static ConfigEntry<string> _thresholdTalentName = null!;
+    private static ConfigEntry<BaseAttriType> _thresholdTalentRequirementAttribute = null!;
+    private static ConfigEntry<float> _thresholdTalentRequirementValue = null!;
+    private static ConfigEntry<HeroSpeAddDataType> _thresholdTalentBuffType = null!;
+    private static ConfigEntry<float> _thresholdTalentBuffValue = null!;
+    private static ConfigEntry<float> _thresholdTalentDuration = null!;
+    private static ConfigEntry<bool> _thresholdTalentShowInfo = null!;
     private static ConfigEntry<float> _dialogMonthlyLimitMultiplier = null!;
     private static ConfigEntry<bool> _dialogFastForwardAssistEnabled = null!;
     private static ConfigEntry<KeyCode> _dialogFastForwardAssistHotkey = null!;
@@ -91,6 +103,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static ConfigEntry<bool> _traceBattleSkillExp = null!;
     private static ConfigEntry<bool> _traceDialogFastForward = null!;
     private static ConfigEntry<bool> _traceTreasureChestEvents = null!;
+    private static ConfigEntry<bool> _traceLoverBattlePrep = null!;
     private static ConfigEntry<bool> _freezeDate = null!;
     private static ConfigEntry<KeyCode> _freezeDateHotkey = null!;
     private static ConfigEntry<KeyCode> _outsideBattleSpeedHotkey = null!;
@@ -115,12 +128,19 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     private static float _lastDrinkPlayerFillAmount = float.NaN;
     private static float _lastDrinkEnemyFillAmount = float.NaN;
     private static bool? _lastResolvedDrinkTargetIsPlayer;
+    private static bool _preferredBattleTimeScaleCaptured;
+    private static float _preferredBattleTimeScale = 1f;
     private static readonly Dictionary<string, int> _dialogMonthlyUseCounts = new(StringComparer.Ordinal);
-    private static readonly Dictionary<int, int> _teamStayAdjustedAutoLeaveDays = new();
     private static HeroData? _activeDialogHero;
     private static int _activeDialogHeroId = -1;
+    private static HeroData? _activeHeroDetailHero;
+    private static int _activeHeroDetailHeroId = -1;
     private static bool _dialogFastForwardAssistOwnsSkip;
     private static readonly List<KungfuSkillLvData> _dailySkillInsightCandidateBuffer = new();
+    private static int _thresholdTalentTagId = -1;
+    private static string _thresholdTalentTagName = DefaultThresholdTalentName;
+    private static float _nextThresholdTalentEvaluationAt = -1f;
+    private static bool _thresholdTalentRegistrationWarned;
     private Harmony? _harmony;
 
     private sealed class MoneyChangeState
@@ -136,15 +156,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
     {
         public string BeforeText { get; init; } = "Date: unavailable";
         public TimeData? BeforeDate { get; init; }
-    }
-
-    private sealed class TeamStayJoinState
-    {
-        public HeroData? Hero { get; init; }
-        public int HeroId { get; init; } = -1;
-        public bool WasInTeam { get; init; }
-        public bool WasRecruitedByPlayer { get; init; }
-        public int? AutoLeaveTeamDayBefore { get; init; }
     }
 
     private sealed class TeachSkillSplashState
@@ -185,8 +196,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         public string? LastObservedChoiceParam { get; set; }
         public bool PendingClickConfirm { get; set; }
         public int PendingClickConfirmFrames { get; set; }
-        public bool PendingAutoPick { get; set; }
-        public int PendingAutoPickFrames { get; set; }
     }
 
     private sealed class TreasureTradeOpportunity
@@ -245,7 +254,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _moveRevealRadius = Config.Bind("Exploration", "MoveRevealRadius", 2, "Legacy compatibility value for the old per-move reveal experiment. No longer used.");
         _revealAllOnStepTile = Config.Bind("Exploration", "RevealAllOnStepTile", true, "Reveal the whole exploration map once, after the first completed move in each exploration run.");
         _treasureChestChoiceEnabled = Config.Bind("Exploration", "TreasureChestChoiceEnabled", true, "When true, exploration treasure chests show several reward items and let you choose 1.");
-        _treasureChestAutoPickMostValuable = Config.Bind("Exploration", "TreasureChestAutoPickMostValuable", true, "When true, treasure chest choice mode automatically takes the highest-value option.");
         _treasureChestChoiceOptions = Config.Bind("Exploration", "TreasureChestChoiceOptions", 3, "How many reward options each exploration treasure chest should show when choice mode is enabled.");
         _treasureChestTotalItems = Config.Bind("Exploration", "TreasureChestTotalItems", 2, "Total item rewards to grant from exploration treasure chests. Set to 1 for vanilla behavior.");
         _bookExpMultiplier = Config.Bind("ReadBook", "ExpMultiplier", 1, "Multiplies EXP gained from reading books.");
@@ -266,8 +274,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _extraRelationshipGainChancePercent = Config.Bind("Relationship", "ExtraRelationshipGainChancePercent", 0, "Chance from 0 to 100 that positive relationship gain becomes double.");
         _teamAutoFavorEnabled = Config.Bind("Relationship", "TeamAutoFavorEnabled", true, "When true, current player teammates automatically gain favor each elapsed in-game day.");
         _teamAutoFavorPerDay = Config.Bind("Relationship", "TeamAutoFavorPerDay", 5f, "Favor granted to each current player teammate per elapsed in-game day.");
-        _teamStayDurationMultiplier = Config.Bind("Relationship", "TeamStayDurationMultiplier", 3f, "Multiplies how long temporary recruited teammates stay before asking to leave. Vanilla is about 30 days, so 3 means about 90 days.");
         _maxLoverCount = Config.Bind("Relationship", "MaxLoverCount", 8, "Overrides the maximum number of lovers/couples the player can have at the same time. Vanilla appears to be 4.");
+        _blockOverflowLoverHomeBattle = Config.Bind("Relationship", "BlockOverflowLoverHomeBattle", true, "When true, suppresses the home-entry lover ambush battle entirely, because the current modded romance setup can crash during its battle prep.");
         _debatePlayerDamageTakenMultiplier = Config.Bind("Debate", "PlayerDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the player side when a round is lost.");
         _debateEnemyDamageTakenMultiplier = Config.Bind("Debate", "EnemyDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the enemy side when a round is won.");
         _craftRandomPickUpgradeEnabled = Config.Bind("Craft", "RandomPickUpgrade", true, "Adds extra crafted items based on the added crafting material's major tier.");
@@ -285,6 +293,14 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _teachSkillSameSectAreaShareEnabled = Config.Bind("Teaching", "SameSectAreaShareEnabled", true, "When the player teaches martial-skill EXP to a same-sect NPC, other same-sect NPCs in the same area who already know that skill also gain EXP.");
         _teachSkillSameSectAreaShareMinPercent = Config.Bind("Teaching", "SameSectAreaShareMinPercent", 80, "Minimum percent of the original taught EXP shared to each additional same-sect NPC in the area.");
         _teachSkillSameSectAreaShareMaxPercent = Config.Bind("Teaching", "SameSectAreaShareMaxPercent", 120, "Maximum percent of the original taught EXP shared to each additional same-sect NPC in the area.");
+        _thresholdTalentEnabled = Config.Bind("ThresholdTalent", "Enabled", true, "When true, the player automatically gains a custom talent while the chosen attribute stays at or above the configured threshold.");
+        _thresholdTalentName = Config.Bind("ThresholdTalent", "TalentName", DefaultThresholdTalentName, "Display name for the custom threshold talent.");
+        _thresholdTalentRequirementAttribute = Config.Bind("ThresholdTalent", "RequirementAttribute", BaseAttriType.Inte, "Hero attribute checked for the threshold talent.");
+        _thresholdTalentRequirementValue = Config.Bind("ThresholdTalent", "RequirementValue", 10f, "Required current attribute value to activate the threshold talent.");
+        _thresholdTalentBuffType = Config.Bind("ThresholdTalent", "BuffType", HeroSpeAddDataType.addAttri2, "Buff applied by the custom threshold talent while active.");
+        _thresholdTalentBuffValue = Config.Bind("ThresholdTalent", "BuffValue", 10f, "Buff magnitude applied by the custom threshold talent while active.");
+        _thresholdTalentDuration = Config.Bind("ThresholdTalent", "Duration", 1f, "Fallback duration used when the custom threshold talent is applied. The mod re-checks the threshold continuously and removes the talent when it no longer qualifies.");
+        _thresholdTalentShowInfo = Config.Bind("ThresholdTalent", "ShowInfo", false, "When true, the game also shows its normal add/remove talent popups for the threshold talent.");
         _dialogMonthlyLimitMultiplier = Config.Bind("DialogFlow", "MonthlyLimitMultiplier", 3f, "Scales the monthly per-NPC interaction quota used by talk, teach, and similar meet choices.");
         _dialogFastForwardAssistEnabled = Config.Bind("DialogFlow", "FastForwardAssistEnabled", false, "When true, the mod automatically turns on plot fast-forward (快进) whenever the current dialog actually exposes the skip button.");
         _dialogFastForwardAssistHotkey = Config.Bind("DialogFlow", "ToggleFastForwardAssistHotkey", KeyCode.P, "Hotkey that toggles the dialog fast-forward assist while in game.");
@@ -292,6 +308,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _traceBattleSkillExp = Config.Bind("Debug", "TraceBattleSkillExp", false, "When TracerEnabled is true, logs each in-battle martial-skill EXP award before and after the multiplier.");
         _traceDialogFastForward = Config.Bind("Debug", "TraceDialogFastForward", false, "When TracerEnabled is true, logs dialog fast-forward assist decisions and key PlotController fast-forward events.");
         _traceTreasureChestEvents = Config.Bind("Debug", "TraceTreasureChestEvents", false, "When TracerEnabled is true, logs treasure chest interception, choice UI, and reward resolution.");
+        _traceLoverBattlePrep = Config.Bind("Debug", "TraceLoverBattlePrep", false, "When TracerEnabled is true, logs the lover-result battle setup payloads before the home-entry lover battle prepares teams.");
         _freezeDate = Config.Bind("Time", "FreezeDate", false, "Blocks in-game day, month, and year progression.");
         _freezeDateHotkey = Config.Bind("Time", "ToggleFreezeDateHotkey", KeyCode.F10, "Hotkey that toggles date freezing while in game.");
         _outsideBattleSpeedHotkey = Config.Bind("Time", "CycleOutsideBattleSpeedHotkey", KeyCode.F11, "Hotkey that cycles the test speed multiplier outside battle.");
@@ -318,20 +335,24 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(PlotController), nameof(PlotController.SetSkipPlot), new[] { typeof(bool) }, null, nameof(DialogFastForwardSetSkipPlotPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.ShowHeroInteractUI), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.ManageMeetNpcPlot), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
-        PatchMethod(typeof(PlotController), nameof(PlotController.FriendAskJoin), Type.EmptyTypes, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
-        PatchMethod(typeof(PlotController), nameof(PlotController.NewAskJoin), Type.EmptyTypes, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
-        PatchMethod(typeof(PlotController), nameof(PlotController.NewAskJoinResult), new[] { typeof(string) }, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
-        PatchMethod(typeof(PlotController), nameof(PlotController.AskHeroJoinTeamTemp), Type.EmptyTypes, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
-        PatchMethod(typeof(PlotController), nameof(PlotController.SureHeroJoinTeamTemp), Type.EmptyTypes, nameof(TeamStayJoinFlowPrefix), nameof(TeamStayJoinFlowPostfix));
+        PatchMethod(typeof(HeroDetailController), nameof(HeroDetailController.ShowHeroDetail), new[] { typeof(HeroData), typeof(bool) }, null, nameof(HeroDetailViewedHeroPostfix));
+        PatchMethod(typeof(HeroDetailController), nameof(HeroDetailController.SetHeroDetail), new[] { typeof(HeroData) }, null, nameof(HeroDetailViewedHeroPostfix));
+        PatchMethod(typeof(HeroDetailController), nameof(HeroDetailController.FreshNowHeroDetail), new[] { typeof(HeroData), typeof(bool) }, null, nameof(HeroDetailViewedHeroPostfix));
+        PatchMethod(typeof(HeroDetailController), nameof(HeroDetailController.UnshowHeroDetail), Type.EmptyTypes, null, nameof(HeroDetailHiddenPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.LoverInteractWithNPC), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.AskHeroToLover), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.StartAskHeroToLoverPlot), new[] { typeof(string) }, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.SureHeroToLover), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.FinishHeroToLover), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.PlotStartLoverResultFight), Type.EmptyTypes, nameof(LoverBattlePlotStartPrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.PlotStartLoverResultFightResult), new[] { typeof(string) }, nameof(LoverBattlePlotResultPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.CheckChoiceMeetRequire), new[] { typeof(Il2CppSystem.Collections.Generic.List<PlotChoiceRequirement>), typeof(bool) }, nameof(MaxLoverCountSyncPrefix), nameof(CheckChoiceMeetRequirePostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.CheckMeetRequire), new[] { typeof(ChoiceRequirementType), typeof(float), typeof(bool) }, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(GlobalData), "get_MaxLoverNum", Type.EmptyTypes, null, nameof(GlobalDataMaxLoverNumPostfix));
         PatchMethod(typeof(GameController), nameof(GameController.MeetLoverResultRequire), Type.EmptyTypes, null, nameof(MeetLoverResultRequirePostfix));
+        PatchMethod(typeof(BattleController), nameof(BattleController.PrepareBattleMap), new[] { typeof(BattleType), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(float), typeof(string), typeof(bool), typeof(bool), typeof(BattleMapTypeData), typeof(int), typeof(float) }, nameof(LoverBattlePrepareBattleMapDirectPrefix), null);
+        PatchMethod(typeof(BattleController), nameof(BattleController.PrepareBattleMap), new[] { typeof(BattleType), typeof(Il2CppSystem.Collections.Generic.List<Il2CppSystem.Collections.Generic.List<HeroData>>), typeof(Il2CppSystem.Collections.Generic.List<Il2CppSystem.Collections.Generic.List<HeroData>>), typeof(float), typeof(string), typeof(bool), typeof(BattleMapTypeData), typeof(int), typeof(float) }, nameof(LoverBattlePrepareBattleMapGroupedPrefix), null);
+        PatchMethod(typeof(BattleController), nameof(BattleController.BattleTeamPrepare), Type.EmptyTypes, nameof(LoverBattleTeamPreparePrefix), null);
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.Update), Type.EmptyTypes, null, nameof(DialogChoiceRowPostfix));
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.OnClick), Type.EmptyTypes, nameof(DialogChoiceClickPrefix), null);
         PatchMethod(typeof(BuildChoiceButtonController), nameof(BuildChoiceButtonController.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
@@ -372,6 +393,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         PatchMethod(typeof(DrinkUIController), nameof(DrinkUIController.HideDrinkUI), Type.EmptyTypes, null, nameof(DrinkHideUiPostfix));
         PatchMethod(typeof(StartMenuController), nameof(StartMenuController.SetAttriPreset), new[] { typeof(int) }, null, nameof(SetAttriPresetPostfix));
         PatchMethod(typeof(StartMenuController), nameof(StartMenuController.ResetPlayerAttri), Type.EmptyTypes, null, nameof(ResetPlayerAttriPostfix));
+        PatchMethod(typeof(GameDataController), nameof(GameDataController.LoadAllGameData), Type.EmptyTypes, null, nameof(LoadAllGameDataPostfix));
         PatchMethod(typeof(GameController), "Update", Type.EmptyTypes, null, nameof(GameControllerUpdatePostfix));
         PatchMethod(typeof(GameController), nameof(GameController.ChangeDay), Type.EmptyTypes, nameof(CalendarChangePrefix), nameof(CalendarChangePostfix));
         PatchMethod(typeof(GameController), nameof(GameController.ChangeDay), new[] { typeof(int) }, nameof(CalendarChangePrefix), nameof(CalendarChangePostfix));
@@ -387,10 +409,13 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo($"Exploration stamina lock starts {(_lockExploreStamina.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Exploration first-move full reveal starts {(_revealAllOnStepTile.Value ? "ON" : "OFF")}.");
         Log.LogInfo(
-            $"Exploration treasure chest choice mode starts {(_treasureChestChoiceEnabled.Value ? "ON" : "OFF")} with a 3-5 option chest-only picker " +
-            $"and highest-value auto-pick {(_treasureChestAutoPickMostValuable.Value ? "ON" : "OFF")}.");
+            $"Exploration treasure chest choice mode starts {(_treasureChestChoiceEnabled.Value ? "ON" : "OFF")} with a 3-5 option chest-only picker.");
         Log.LogInfo($"Exploration treasure chest rewards start at x{Math.Max(1, _treasureChestTotalItems.Value)} total items when choice mode is OFF.");
         Log.LogInfo($"Read-book EXP multiplier starts at x{Mathf.Max(1, _bookExpMultiplier.Value)}.");
+        Log.LogInfo(
+            $"Threshold talent prototype starts {(_thresholdTalentEnabled.Value ? "ON" : "OFF")}: " +
+            $"{GetConfiguredThresholdTalentName()} on {_thresholdTalentRequirementAttribute.Value} >= {SafeFormatValue(_thresholdTalentRequirementValue.Value)} " +
+            $"gives {_thresholdTalentBuffType.Value} {SafeFormatValue(_thresholdTalentBuffValue.Value)}.");
         Log.LogInfo($"Battle skill EXP multiplier starts at x{Mathf.Max(1, _battleSkillExpMultiplier.Value)}.");
         Log.LogInfo($"Character creation point multiplier starts at x{Math.Max(1, _creationPointMultiplier.Value)}.");
         Log.LogInfo($"Battle speed multiplier starts at x{Math.Max(1, _battleSpeedMultiplier.Value)}.");
@@ -407,8 +432,8 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
         Log.LogInfo($"Extra relationship gain chance starts at {ClampPercent(_extraRelationshipGainChancePercent.Value)}%.");
         Log.LogInfo($"Team auto favor starts {(_teamAutoFavorEnabled.Value ? "ON" : "OFF")} at +{FormatConfigFloat(Math.Max(0f, _teamAutoFavorPerDay.Value))}/day.");
-        Log.LogInfo($"Temporary teammate stay multiplier starts at x{FormatConfigFloat(Math.Max(0.01f, _teamStayDurationMultiplier.Value))}.");
         Log.LogInfo($"Max lover count override starts at {Math.Max(1, _maxLoverCount.Value)}.");
+        Log.LogInfo($"Lover home battle blocker starts {(_blockOverflowLoverHomeBattle.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Debate player damage taken multiplier starts at x{FormatConfigFloat(_debatePlayerDamageTakenMultiplier.Value)}.");
         Log.LogInfo($"Debate enemy damage taken multiplier starts at x{FormatConfigFloat(_debateEnemyDamageTakenMultiplier.Value)}.");
         Log.LogInfo(
@@ -429,6 +454,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         Log.LogInfo($"Battle skill EXP tracer starts {(_traceBattleSkillExp.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Dialog fast-forward tracer starts {(_traceDialogFastForward.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Treasure chest tracer starts {(_traceTreasureChestEvents.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Lover battle prep tracer starts {(_traceLoverBattlePrep.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Date freeze starts {(_freezeDate.Value ? "ON" : "OFF")} with hotkey {_freezeDateHotkey.Value}.");
         Log.LogInfo($"Outside-battle speed cycle hotkey is {_outsideBattleSpeedHotkey.Value}.");
     }
@@ -813,9 +839,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             Player = player,
             Options = options,
             SkipManageItemPoison = skipManageItemPoison,
-            OpenedAtRealtime = Time.realtimeSinceStartup,
-            PendingAutoPick = _treasureChestAutoPickMostValuable.Value,
-            PendingAutoPickFrames = _treasureChestAutoPickMostValuable.Value ? 2 : 0
+            OpenedAtRealtime = Time.realtimeSinceStartup
         };
 
         try
@@ -1102,11 +1126,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             return;
         }
 
-        if (TryRunPendingTreasureChestAutoPick(session, plotController))
-        {
-            return;
-        }
-
         var currentParam = TryGetTreasureChestCurrentChoiceParam(plotController);
         if (!string.IsNullOrWhiteSpace(currentParam))
         {
@@ -1141,90 +1160,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
         session.PendingClickConfirm = false;
         plotController.AutoPlotButtonClicked();
-    }
-
-    private static bool TryRunPendingTreasureChestAutoPick(TreasureChestChoiceSession session, PlotController plotController)
-    {
-        if (!session.PendingAutoPick)
-        {
-            return false;
-        }
-
-        if (session.PendingAutoPickFrames > 0)
-        {
-            session.PendingAutoPickFrames--;
-            return true;
-        }
-
-        session.PendingAutoPick = false;
-        var bestIndex = FindBestTreasureChestChoiceIndex(session.Options);
-        if (bestIndex < 0 || bestIndex >= session.Options.Count)
-        {
-            return false;
-        }
-
-        var chosenItem = session.Options[bestIndex];
-        TraceTreasureChestEvent(
-            "TryRunPendingTreasureChestAutoPick resolved",
-            session.Player,
-            chosenItem,
-            1,
-            session.SkipManageItemPoison,
-            $"index={bestIndex}, options={DescribeItemSummaries(session.Options)}");
-        GrantTreasureChestChoiceReward(session, chosenItem, $"auto:value:{bestIndex}");
-        TryCloseTreasureChestChoicePlot(plotController);
-        return true;
-    }
-
-    private static int FindBestTreasureChestChoiceIndex(IReadOnlyList<ItemData> options)
-    {
-        if (options == null || options.Count <= 0)
-        {
-            return -1;
-        }
-
-        var bestIndex = 0;
-        for (var i = 1; i < options.Count; i++)
-        {
-            if (CompareTreasureChestChoicePriority(options[i], options[bestIndex]) > 0)
-            {
-                bestIndex = i;
-            }
-        }
-
-        return bestIndex;
-    }
-
-    private static int CompareTreasureChestChoicePriority(ItemData? left, ItemData? right)
-    {
-        if (ReferenceEquals(left, right))
-        {
-            return 0;
-        }
-
-        if (left == null)
-        {
-            return -1;
-        }
-
-        if (right == null)
-        {
-            return 1;
-        }
-
-        var valueComparison = left.value.CompareTo(right.value);
-        if (valueComparison != 0)
-        {
-            return valueComparison;
-        }
-
-        var rarityComparison = left.rareLv.CompareTo(right.rareLv);
-        if (rarityComparison != 0)
-        {
-            return rarityComparison;
-        }
-
-        return left.itemLv.CompareTo(right.itemLv);
     }
 
     private static void TryGrantTreasureChestBonusItems(HeroData? targetHero, ItemData? itemData, int treasureChestClickTime, bool skipManageItemPoison)
@@ -2704,6 +2639,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         worldData.battleTimeScale = adjustedSpeed;
+        RememberPreferredBattleTimeScale(adjustedSpeed, "BattleTimeScaleButtonClicked");
         LoggerInstance.LogInfo($"Battle speed adjusted from x{selectedSpeed:0.###} to x{adjustedSpeed:0.###} using multiplier x{multiplier}.");
     }
 
@@ -2838,6 +2774,7 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         ApplyConfiguredMaxLoverCount("GameController.Update");
         EnsureDailySkillInsightBaseline();
         TryRunRealtimeSkillInsight();
+        TryEvaluateThresholdTalent();
         UpdateTreasureChestChoiceSession();
         UpdateDialogFastForwardAssist();
         KeepPlayerHorseTurboReady("Update");
@@ -2858,11 +2795,284 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         {
             CycleOutsideBattleSpeed();
         }
+
+        if (Input.GetKeyDown(ViewedHeroFavorTestHotkey))
+        {
+            GrantTeamIntelligenceMoneyTest();
+            ApplyViewedHeroFavorTest();
+        }
+
+    }
+
+    private static void LoadAllGameDataPostfix()
+    {
+        EnsureThresholdTalentRegistered("LoadAllGameData");
+    }
+
+    private static void TryEvaluateThresholdTalent()
+    {
+        if (Time.realtimeSinceStartup < _nextThresholdTalentEvaluationAt)
+        {
+            return;
+        }
+
+        _nextThresholdTalentEvaluationAt = Time.realtimeSinceStartup + ThresholdTalentEvaluationIntervalSeconds;
+
+        var player = TryGetPlayerHero();
+        if (player == null)
+        {
+            return;
+        }
+
+        if (!EnsureThresholdTalentRegistered("GameController.Update"))
+        {
+            return;
+        }
+
+        if (_thresholdTalentTagId < 0)
+        {
+            return;
+        }
+
+        var alreadyHasTag = TryHeroHasTag(player, _thresholdTalentTagId);
+        if (!_thresholdTalentEnabled.Value)
+        {
+            if (alreadyHasTag)
+            {
+                RemoveThresholdTalent(player, "feature-disabled");
+            }
+
+            return;
+        }
+
+        var currentValue = TryReadHeroAttribute(player, _thresholdTalentRequirementAttribute.Value);
+        if (!currentValue.HasValue)
+        {
+            return;
+        }
+
+        var meetsThreshold = currentValue.Value >= _thresholdTalentRequirementValue.Value;
+        if (meetsThreshold == alreadyHasTag)
+        {
+            return;
+        }
+
+        if (meetsThreshold)
+        {
+            GrantThresholdTalent(player, currentValue.Value);
+        }
+        else
+        {
+            RemoveThresholdTalent(player, "threshold-lost");
+        }
+    }
+
+    private static bool EnsureThresholdTalentRegistered(string source)
+    {
+        _thresholdTalentTagName = GetConfiguredThresholdTalentName();
+
+        var gameData = GameDataController.Instance;
+        var database = gameData?.heroTagDataBase;
+        if (gameData == null || database == null)
+        {
+            if (!_thresholdTalentRegistrationWarned && _thresholdTalentEnabled.Value)
+            {
+                LoggerInstance.LogWarning($"Threshold talent registration skipped from {source} because GameDataController or heroTagDataBase is unavailable.");
+                _thresholdTalentRegistrationWarned = true;
+            }
+
+            return false;
+        }
+
+        _thresholdTalentRegistrationWarned = false;
+
+        var existingId = FindTagIdByName(database, _thresholdTalentTagName);
+        if (existingId >= 0)
+        {
+            _thresholdTalentTagId = existingId;
+
+            try
+            {
+                var existing = database[existingId];
+                if (existing != null)
+                {
+                    ApplyThresholdTalentDefinition(existing, existingId);
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.LogWarning($"Threshold talent definition refresh failed for existing tag {_thresholdTalentTagName} (id={existingId}): {ex.Message}");
+            }
+
+            return true;
+        }
+
+        try
+        {
+            var customTag = new HeroTagDataBase();
+            var newId = database.Count;
+            ApplyThresholdTalentDefinition(customTag, newId);
+            database.Add(customTag);
+            _thresholdTalentTagId = newId;
+            LoggerInstance.LogInfo(
+                $"Registered threshold talent '{_thresholdTalentTagName}' with runtime id={_thresholdTalentTagId}, " +
+                $"buff={_thresholdTalentBuffType.Value}:{SafeFormatValue(_thresholdTalentBuffValue.Value)}, " +
+                $"requirement={_thresholdTalentRequirementAttribute.Value}>={SafeFormatValue(_thresholdTalentRequirementValue.Value)}.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to register threshold talent '{_thresholdTalentTagName}' from {source}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static void ApplyThresholdTalentDefinition(HeroTagDataBase tag, int order)
+    {
+        if (tag == null)
+        {
+            return;
+        }
+
+        tag.name = _thresholdTalentTagName;
+        tag.value = 0;
+        tag.effectTarget = SkillTargetType.Self;
+        tag.sameMeaning = string.Empty;
+        tag.oppositeMeaning = string.Empty;
+        tag.canRandom = false;
+        tag.category = ThresholdTalentCategory;
+        tag.showRightLine = true;
+        tag.order = Math.Max(0, order);
+        tag.requirement = new Il2CppSystem.Collections.Generic.List<string>();
+        tag.replaceTag = new Il2CppSystem.Collections.Generic.List<string>();
+
+        var buffData = new HeroSpeAddData();
+        buffData.Set(_thresholdTalentBuffType.Value, _thresholdTalentBuffValue.Value);
+        tag.buffData = buffData;
+    }
+
+    private static int FindTagIdByName(Il2CppSystem.Collections.Generic.List<HeroTagDataBase> database, string targetName)
+    {
+        if (database == null || string.IsNullOrWhiteSpace(targetName))
+        {
+            return -1;
+        }
+
+        for (var i = 0; i < database.Count; i++)
+        {
+            try
+            {
+                var entry = database[i];
+                if (entry != null &&
+                    string.Equals(entry.name, targetName, StringComparison.Ordinal) &&
+                    string.Equals(entry.category, ThresholdTalentCategory, StringComparison.Ordinal))
+                {
+                    return i;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return -1;
+    }
+
+    private static void GrantThresholdTalent(HeroData hero, float currentValue)
+    {
+        try
+        {
+            hero.AddTag(
+                _thresholdTalentTagId,
+                Mathf.Max(0.01f, _thresholdTalentDuration.Value),
+                ThresholdTalentSource,
+                _thresholdTalentShowInfo.Value,
+                true);
+
+            LoggerInstance.LogInfo(
+                $"Threshold talent granted to {TryGetHeroName(hero)}: " +
+                $"tag={_thresholdTalentTagName} (id={_thresholdTalentTagId}), " +
+                $"current={SafeFormatValue(currentValue)}, requirement={_thresholdTalentRequirementAttribute.Value}>={SafeFormatValue(_thresholdTalentRequirementValue.Value)}.");
+            PushPlayerSideTabLog($"{_thresholdTalentTagName} 生效");
+            TryRefreshHeroDetail(hero);
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to grant threshold talent {_thresholdTalentTagName} to {TryGetHeroName(hero)}: {ex.Message}");
+        }
+    }
+
+    private static void RemoveThresholdTalent(HeroData hero, string reason)
+    {
+        try
+        {
+            hero.RemoveTag(_thresholdTalentTagId, _thresholdTalentShowInfo.Value);
+            LoggerInstance.LogInfo(
+                $"Threshold talent removed from {TryGetHeroName(hero)}: " +
+                $"tag={_thresholdTalentTagName} (id={_thresholdTalentTagId}), reason={reason}.");
+            PushPlayerSideTabLog($"{_thresholdTalentTagName} 失效");
+            TryRefreshHeroDetail(hero);
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to remove threshold talent {_thresholdTalentTagName} from {TryGetHeroName(hero)}: {ex.Message}");
+        }
+    }
+
+    private static void TryRefreshHeroDetail(HeroData hero)
+    {
+        try
+        {
+            hero.CheckHeroDetailDirty(true);
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var viewedHero = TryGetViewedHeroDetailHero();
+            if (TryGetHeroId(viewedHero) == TryGetHeroId(hero))
+            {
+                HeroDetailController.Instance?.FreshNowHeroDetail(hero, false);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static bool TryHeroHasTag(HeroData hero, int tagId)
+    {
+        try
+        {
+            return hero.HaveTag(tagId);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string GetConfiguredThresholdTalentName()
+    {
+        var configured = _thresholdTalentName.Value?.Trim();
+        return string.IsNullOrWhiteSpace(configured) ? DefaultThresholdTalentName : configured;
     }
 
     private static void DialogHeroContextPostfix(HeroData __0)
     {
         CacheActiveDialogHero(__0);
+    }
+
+    private static void HeroDetailViewedHeroPostfix(HeroData __0)
+    {
+        CacheActiveHeroDetailHero(__0);
+    }
+
+    private static void HeroDetailHiddenPostfix()
+    {
+        CacheActiveHeroDetailHero(null);
     }
 
     private static void GlobalDataMaxLoverNumPostfix(ref int __result)
@@ -2903,6 +3113,109 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         ApplyConfiguredMaxLoverCount("lover-flow");
     }
 
+    private static void LoverBattlePlotStartPrefix(PlotController __instance)
+    {
+        var player = TryGetPlayerHero();
+        var loverCount = player == null ? -1 : GetPlayerLoverCount(player);
+        if (player != null && _blockOverflowLoverHomeBattle.Value)
+        {
+            LoggerInstance.LogWarning(
+                $"Lover home battle detected at PlotStartLoverResultFight: loverCount={loverCount}. Battle prep will be bypassed when PrepareBattleMap runs.");
+        }
+
+        if (!IsLoverBattlePrepTraceEnabled())
+        {
+            return;
+        }
+
+        LoggerInstance.LogInfo(
+            $"[TRACE][LoverBattle] PlotStartLoverResultFight: " +
+            $"player={DescribeHeroForLoverBattleTrace(player)}, loverCount={loverCount}, " +
+            $"playerList={DescribeHeroListForLoverBattleTrace(SafeGetMemberValue(__instance, "playerList"))}, " +
+            $"playerSupportList={DescribeHeroListForLoverBattleTrace(SafeGetMemberValue(__instance, "playerSupportList"))}, " +
+            $"enemyList={DescribeHeroListForLoverBattleTrace(SafeGetMemberValue(__instance, "enemyList"))}, " +
+            $"enemySupportList={DescribeHeroListForLoverBattleTrace(SafeGetMemberValue(__instance, "enemySupportList"))}.");
+    }
+
+    private static void LoverBattlePlotResultPrefix(string winTeamID)
+    {
+        if (!ShouldTraceLoverBattlePrepare(nameof(PlotController.PlotStartLoverResultFightResult)))
+        {
+            return;
+        }
+
+        LoggerInstance.LogInfo($"[TRACE][LoverBattle] PlotStartLoverResultFightResult: winTeamID={SafeFormatValue(winTeamID)}.");
+    }
+
+    private static bool LoverBattlePrepareBattleMapDirectPrefix(
+        BattleController __instance,
+        Il2CppSystem.Collections.Generic.List<HeroData>? __1,
+        Il2CppSystem.Collections.Generic.List<HeroData>? __2,
+        Il2CppSystem.Collections.Generic.List<HeroData>? __3,
+        Il2CppSystem.Collections.Generic.List<HeroData>? __4,
+        string? __6,
+        int __10)
+    {
+        if (TryBypassOverflowLoverHomeBattle(__instance, __6, "PrepareBattleMap-direct"))
+        {
+            return false;
+        }
+
+        if (!ShouldTraceLoverBattlePrepare(__6))
+        {
+            return true;
+        }
+
+        LoggerInstance.LogInfo(
+            $"[TRACE][LoverBattle] PrepareBattleMap-direct: " +
+            $"fightEndCall={SafeFormatValue(__6)}, maxHeroNum={__10}, " +
+            $"player={DescribeHeroListForLoverBattleTrace(__1)}, playerSupport={DescribeHeroListForLoverBattleTrace(__2)}, " +
+            $"enemy={DescribeHeroListForLoverBattleTrace(__3)}, enemySupport={DescribeHeroListForLoverBattleTrace(__4)}, " +
+            $"battleState={DescribeBattleControllerForLoverBattleTrace(__instance)}.");
+        return true;
+    }
+
+    private static bool LoverBattlePrepareBattleMapGroupedPrefix(
+        BattleController __instance,
+        Il2CppSystem.Collections.Generic.List<Il2CppSystem.Collections.Generic.List<HeroData>>? __1,
+        Il2CppSystem.Collections.Generic.List<Il2CppSystem.Collections.Generic.List<HeroData>>? __2,
+        string? __4,
+        int __7)
+    {
+        if (TryBypassOverflowLoverHomeBattle(__instance, __4, "PrepareBattleMap-grouped"))
+        {
+            return false;
+        }
+
+        if (!ShouldTraceLoverBattlePrepare(__4))
+        {
+            return true;
+        }
+
+        LoggerInstance.LogInfo(
+            $"[TRACE][LoverBattle] PrepareBattleMap-grouped: " +
+            $"fightEndCall={SafeFormatValue(__4)}, maxHeroNum={__7}, " +
+            $"fightMemData={DescribeHeroGroupListForLoverBattleTrace(__1)}, " +
+            $"fightSupportData={DescribeHeroGroupListForLoverBattleTrace(__2)}, " +
+            $"battleState={DescribeBattleControllerForLoverBattleTrace(__instance)}.");
+        return true;
+    }
+
+    private static void LoverBattleTeamPreparePrefix(BattleController __instance)
+    {
+        CaptureOrRestorePreferredBattleTimeScale("BattleTeamPrepare");
+
+        if (!ShouldTraceLoverBattlePrepare(TryReadStringMember(__instance, new[] { "fightEndCallFuc" })))
+        {
+            return;
+        }
+
+        LoggerInstance.LogInfo(
+            $"[TRACE][LoverBattle] BattleTeamPrepare: {DescribeBattleControllerForLoverBattleTrace(__instance)}, " +
+            $"teamMemPrepareData={DescribeTeamPrepareDataForLoverBattleTrace(SafeGetMemberValue(__instance, "teamMemPrepareData"))}, " +
+            $"teamSupportPrepareData={DescribeTeamPrepareDataForLoverBattleTrace(SafeGetMemberValue(__instance, "teamSupportPrepareData"))}.");
+    }
+
     private static void CheckChoiceMeetRequirePostfix(ref bool __result)
     {
         ApplyConfiguredMaxLoverCount("PlotController.CheckChoiceMeetRequire");
@@ -2931,24 +3244,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             TrySanitizeLoverChoiceDescribe(choice);
             LoggerInstance.LogInfo($"Lover choice meet requirement override allowed romance choice: current={currentCount}, configuredMax={configured}.");
         }
-    }
-
-    private static void TeamStayJoinFlowPrefix(out TeamStayJoinState __state)
-    {
-        var hero = ResolveTrackedDialogHero();
-        __state = new TeamStayJoinState
-        {
-            Hero = hero,
-            HeroId = TryGetHeroId(hero) ?? -1,
-            WasInTeam = TryIsHeroInTeam(hero),
-            WasRecruitedByPlayer = TryIsHeroRecruitedByPlayer(hero),
-            AutoLeaveTeamDayBefore = TryReadAutoLeaveTeamDay(hero)
-        };
-    }
-
-    private static void TeamStayJoinFlowPostfix(TeamStayJoinState __state, MethodBase __originalMethod)
-    {
-        TryApplyTeamStayDurationMultiplier(__state, DescribeMethod(__originalMethod));
     }
 
     private static void DialogChoiceRowPostfix(PlotInteractController __instance)
@@ -3015,113 +3310,165 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         _activeDialogHeroId = TryGetHeroId(hero) ?? -1;
     }
 
-    private static HeroData? ResolveTrackedDialogHero()
+    private static void CacheActiveHeroDetailHero(HeroData? hero)
     {
-        if (_activeDialogHero != null)
+        _activeHeroDetailHero = hero;
+        _activeHeroDetailHeroId = TryGetHeroId(hero) ?? -1;
+    }
+
+    private static HeroData? TryGetViewedHeroDetailHero()
+    {
+        try
         {
-            return _activeDialogHero;
+            var heroDetailController = HeroDetailController.Instance;
+            if (heroDetailController != null)
+            {
+                foreach (var memberName in new[] { "nowShowHero", "targetHero", "mainShowHero", "nowChooseHero" })
+                {
+                    var hero = SafeProperty(heroDetailController, memberName) as HeroData
+                               ?? SafeField(heroDetailController, memberName) as HeroData;
+                    if (hero != null)
+                    {
+                        CacheActiveHeroDetailHero(hero);
+                        return hero;
+                    }
+                }
+
+                if (heroDetailController.gameObject != null && heroDetailController.gameObject.activeInHierarchy)
+                {
+                    var playerHero = TryGetPlayerHero();
+                    if (playerHero != null)
+                    {
+                        CacheActiveHeroDetailHero(playerHero);
+                        return playerHero;
+                    }
+                }
+            }
+        }
+        catch
+        {
         }
 
-        if (_activeDialogHeroId < 0)
+        if (_activeHeroDetailHero != null)
+        {
+            return _activeHeroDetailHero;
+        }
+
+        if (_activeHeroDetailHeroId > 0)
+        {
+            try
+            {
+                return GameController.Instance?.worldData?.GetHero(_activeHeroDetailHeroId);
+            }
+            catch
+            {
+            }
+        }
+
+        return null;
+    }
+
+    private static float? TryReadFame(HeroData? hero)
+    {
+        if (hero == null)
         {
             return null;
+        }
+
+        foreach (var memberName in new[] { "fame", "Fame", "hornor", "Hornor" })
+        {
+            var value = SafeProperty(hero, memberName) ?? SafeField(hero, memberName);
+            var floatValue = TryConvertToFloat(value);
+            if (floatValue.HasValue)
+            {
+                return floatValue.Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static int? TryReadHeroForceLv(HeroData? hero)
+    {
+        if (hero == null)
+        {
+            return null;
+        }
+
+        var value = SafeProperty(hero, "heroForceLv") ?? SafeField(hero, "heroForceLv");
+        return TryConvertToInt(value);
+    }
+
+    private static bool IsSectlessHero(HeroData? hero)
+    {
+        if (hero == null)
+        {
+            return false;
         }
 
         try
         {
-            return GameController.Instance?.worldData?.GetHero(_activeDialogHeroId);
+            if (hero.GetForce(false) == null)
+            {
+                return true;
+            }
         }
         catch
         {
-            return null;
         }
+
+        var belongForceId = TryConvertToInt(SafeProperty(hero, "belongForceID") ?? SafeField(hero, "belongForceID"));
+        if (belongForceId.GetValueOrDefault() <= 0)
+        {
+            return true;
+        }
+
+        var outsideForce = TryConvertToBool(SafeProperty(hero, "outsideForce") ?? SafeField(hero, "outsideForce"));
+        return outsideForce == true;
     }
 
-    private static void TryApplyTeamStayDurationMultiplier(TeamStayJoinState state, string source)
+    private static bool TryPromoteSectlessHeroForceLvFromFame(HeroData hero, int? beforeForceLv, out int? targetForceLv)
     {
-        var multiplier = Math.Max(0.01f, _teamStayDurationMultiplier.Value);
-        var hero = state.Hero ?? ResolveTrackedDialogHero();
-        var heroId = state.HeroId >= 0 ? state.HeroId : TryGetHeroId(hero) ?? -1;
-        if (hero == null || heroId < 0)
+        targetForceLv = beforeForceLv;
+        if (hero == null || !beforeForceLv.HasValue || !IsSectlessHero(hero))
         {
-            return;
+            return false;
         }
 
-        var isInTeam = TryIsHeroInTeam(hero);
-        var recruitedByPlayer = TryIsHeroRecruitedByPlayer(hero);
-        if (!isInTeam || !recruitedByPlayer)
+        float computedForceLv;
+        try
         {
-            _teamStayAdjustedAutoLeaveDays.Remove(heroId);
-            return;
+            computedForceLv = hero.GetFameForceLv();
+        }
+        catch
+        {
+            return false;
         }
 
-        var currentAutoLeaveTeamDay = TryReadAutoLeaveTeamDay(hero);
-        if (!currentAutoLeaveTeamDay.HasValue || currentAutoLeaveTeamDay.Value <= 0)
+        var desiredForceLv = Mathf.Max(beforeForceLv.Value, Mathf.FloorToInt(computedForceLv + 0.001f));
+        if (desiredForceLv <= beforeForceLv.Value)
         {
-            _teamStayAdjustedAutoLeaveDays.Remove(heroId);
-            return;
+            return false;
         }
 
-        var newlyJoined = !state.WasInTeam || !state.WasRecruitedByPlayer;
-        var deadlineChanged = !state.AutoLeaveTeamDayBefore.HasValue || state.AutoLeaveTeamDayBefore.Value != currentAutoLeaveTeamDay.Value;
-        if (!newlyJoined && !deadlineChanged)
+        try
         {
-            return;
+            hero.ChangeHeroForceLv(desiredForceLv - beforeForceLv.Value, false);
+        }
+        catch
+        {
+            try
+            {
+                hero.SetHeroForceLv(desiredForceLv);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
-        if (_teamStayAdjustedAutoLeaveDays.TryGetValue(heroId, out var lastAdjusted) && lastAdjusted == currentAutoLeaveTeamDay.Value)
-        {
-            return;
-        }
-
-        var scaledAutoLeaveTeamDay = TryScaleAutoLeaveTeamDay(currentAutoLeaveTeamDay.Value, multiplier, out var interpretation);
-        if (!scaledAutoLeaveTeamDay.HasValue || scaledAutoLeaveTeamDay.Value == currentAutoLeaveTeamDay.Value)
-        {
-            return;
-        }
-
-        if (!TryWriteAutoLeaveTeamDay(hero, scaledAutoLeaveTeamDay.Value))
-        {
-            LoggerInstance.LogWarning(
-                $"Temporary teammate stay multiplier failed for {TryGetHeroName(hero)} from {source}: current={currentAutoLeaveTeamDay.Value}, target={scaledAutoLeaveTeamDay.Value}, multiplier={SafeFormatValue(multiplier)}.");
-            return;
-        }
-
-        _teamStayAdjustedAutoLeaveDays[heroId] = scaledAutoLeaveTeamDay.Value;
-        LoggerInstance.LogInfo(
-            $"Temporary teammate stay multiplier applied for {TryGetHeroName(hero)} from {source}: {currentAutoLeaveTeamDay.Value} -> {scaledAutoLeaveTeamDay.Value}, mode={interpretation}, multiplier={SafeFormatValue(multiplier)}.");
-    }
-
-    private static int? TryScaleAutoLeaveTeamDay(int currentAutoLeaveTeamDay, float multiplier, out string interpretation)
-    {
-        interpretation = "unknown";
-        if (currentAutoLeaveTeamDay <= 0)
-        {
-            return null;
-        }
-
-        if (currentAutoLeaveTeamDay <= 366)
-        {
-            interpretation = "relative-days";
-            return Math.Max(1, (int)Math.Ceiling(currentAutoLeaveTeamDay * multiplier));
-        }
-
-        var currentDate = TryGetWorldDateSnapshot();
-        if (currentDate == null)
-        {
-            return null;
-        }
-
-        var currentDateSerial = ApproximateDateSerial(currentDate);
-        var remainingDays = currentAutoLeaveTeamDay - currentDateSerial;
-        if (remainingDays <= 0 || remainingDays > 366)
-        {
-            return null;
-        }
-
-        interpretation = "absolute-deadline";
-        var scaledRemainingDays = Math.Max(1, (int)Math.Ceiling(remainingDays * multiplier));
-        return currentDateSerial + scaledRemainingDays;
+        targetForceLv = TryReadHeroForceLv(hero) ?? desiredForceLv;
+        return targetForceLv.Value > beforeForceLv.Value;
     }
 
     private static bool TryHandleTreasureChestChoiceClick(SinglePlotChoiceData choice)
@@ -3437,6 +3784,147 @@ private const float TeachSkillSideTabSoundVolume = 1f;
 
         LoggerInstance.LogInfo($"Outside-battle speed changed from x{current:0.###} to x{next:0.###}.");
         PushPlayerLog($"Mod: Outside battle speed x{next:0.###}");
+    }
+
+    private static void GrantTeamIntelligenceMoneyTest()
+    {
+        var player = TryGetPlayerHero();
+        if (player == null)
+        {
+            LoggerInstance.LogWarning("Team intelligence money test hotkey ignored because the player hero is unavailable.");
+            PushPlayerLog("Mod测试: 当前无法找到玩家角色");
+            return;
+        }
+
+        var teamMembers = new List<HeroData> { player };
+        teamMembers.AddRange(GetPlayerTeamMembers(player));
+
+        var totalIntelligence = 0;
+        var contributors = 0;
+        var preview = new List<string>();
+        foreach (var member in teamMembers)
+        {
+            var intelligence = TryReadHeroAttribute(member, BaseAttriType.Inte);
+            if (!intelligence.HasValue)
+            {
+                continue;
+            }
+
+            var roundedIntelligence = Mathf.Max(0, Mathf.RoundToInt(intelligence.Value));
+            totalIntelligence += roundedIntelligence;
+            contributors++;
+
+            if (preview.Count < 6)
+            {
+                preview.Add($"{TryGetHeroName(member)}:{roundedIntelligence}");
+            }
+        }
+
+        if (contributors <= 0 || totalIntelligence <= 0)
+        {
+            LoggerInstance.LogWarning("Team intelligence money test hotkey found no readable intelligence values.");
+            PushPlayerLog("Mod测试: 当前队伍无法读取智慧属性");
+            return;
+        }
+
+        try
+        {
+            _applyingLuckyMoneyRefund = true;
+            player.ChangeMoney(totalIntelligence, true);
+        }
+        finally
+        {
+            _applyingLuckyMoneyRefund = false;
+        }
+
+        LoggerInstance.LogInfo(
+            $"Team intelligence money test granted {totalIntelligence} money from {contributors} contributors: {string.Join(", ", preview)}.");
+        PushPlayerLog($"Mod测试: 队伍智慧总和 {totalIntelligence}，获得 {totalIntelligence} 文钱");
+    }
+
+    private static void ApplyViewedHeroFavorTest()
+    {
+        var viewedHero = TryGetViewedHeroDetailHero();
+        if (viewedHero == null)
+        {
+            return;
+        }
+
+        var heroId = TryGetHeroId(viewedHero);
+        var beforeValue = TryReadFame(viewedHero);
+        var beforeForceLv = TryReadHeroForceLv(viewedHero);
+        string? beforeForceLvText = null;
+        try
+        {
+            beforeForceLvText = viewedHero.GetHeroForceLvDescribeSimplify();
+        }
+        catch
+        {
+        }
+
+        if (!beforeValue.HasValue)
+        {
+            LoggerInstance.LogWarning($"Viewed hero reputation test hotkey could not read fame for {TryGetHeroName(viewedHero)}.");
+            PushPlayerLog($"Mod测试: 无法读取当前角色 {TryGetHeroName(viewedHero)} 的声望");
+            return;
+        }
+
+        var reputationDelta = Random.Next(200, 601);
+
+        try
+        {
+            viewedHero.ChangeFame(reputationDelta, false);
+            viewedHero.CheckHeroFameForceLv();
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Viewed hero fame test hotkey failed for {TryGetHeroName(viewedHero)}: {ex.Message}");
+            PushPlayerLog($"Mod测试: 修改 {TryGetHeroName(viewedHero)} 的声望失败");
+            return;
+        }
+
+        var sectlessTierPromotionApplied = TryPromoteSectlessHeroForceLvFromFame(viewedHero, beforeForceLv, out _);
+
+        try
+        {
+            var heroDetailController = HeroDetailController.Instance;
+            if (heroDetailController != null)
+            {
+                heroDetailController.FreshNowHeroDetail(viewedHero, false);
+            }
+        }
+        catch
+        {
+        }
+
+        var afterValue = TryReadFame(viewedHero);
+        var afterForceLv = TryReadHeroForceLv(viewedHero);
+        string? afterForceLvText = null;
+        try
+        {
+            afterForceLvText = viewedHero.GetHeroForceLvDescribeSimplify();
+        }
+        catch
+        {
+        }
+
+        if (!afterValue.HasValue)
+        {
+            afterValue = beforeValue.Value + reputationDelta;
+        }
+
+        var appliedDelta = afterValue.Value - beforeValue.Value;
+        var appliedDeltaText = appliedDelta >= 0f
+            ? $"+{SafeFormatValue(appliedDelta)}"
+            : SafeFormatValue(appliedDelta);
+        var tierChanged = afterForceLv.HasValue && beforeForceLv.HasValue && afterForceLv.Value != beforeForceLv.Value;
+        var tierSummary = $"tier {SafeFormatValue(beforeForceLv)} {SafeFormatValue(beforeForceLvText)} -> {SafeFormatValue(afterForceLv)} {SafeFormatValue(afterForceLvText)}";
+
+        LoggerInstance.LogInfo(
+            $"Viewed hero reputation test applied to {TryGetHeroName(viewedHero)} (id={SafeFormatValue(heroId)}): " +
+            $"kind=fame, before={SafeFormatValue(beforeValue.Value)}, requestedDelta={reputationDelta}, after={SafeFormatValue(afterValue.Value)}, appliedDelta={SafeFormatValue(appliedDelta)}, {tierSummary}, tierChanged={tierChanged}, sectlessPromotionApplied={sectlessTierPromotionApplied}.");
+        PushPlayerLog(
+            $"Mod测试: 当前查看角色 {TryGetHeroName(viewedHero)}(ID {SafeFormatValue(heroId)}) 声望 {SafeFormatValue(beforeValue.Value)} -> {SafeFormatValue(afterValue.Value)} ({appliedDeltaText})，{tierSummary}");
     }
 
     private static void PushPlayerLog(string text)
@@ -3988,6 +4476,205 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             $"{(string.IsNullOrWhiteSpace(extra) ? string.Empty : $", {extra}")}");
     }
 
+    private static bool IsLoverBattlePrepTraceEnabled()
+    {
+        return _traceMode.Value && _traceLoverBattlePrep.Value;
+    }
+
+    private static bool ShouldTraceLoverBattlePrepare(string? fightEndCall)
+    {
+        return IsLoverBattlePrepTraceEnabled() &&
+               string.Equals(fightEndCall, nameof(PlotController.PlotStartLoverResultFightResult), StringComparison.Ordinal);
+    }
+
+    private static bool TryBypassOverflowLoverHomeBattle(BattleController? controller, string? fightEndCall, string source)
+    {
+        if (!_blockOverflowLoverHomeBattle.Value ||
+            !string.Equals(fightEndCall, nameof(PlotController.PlotStartLoverResultFightResult), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var player = TryGetPlayerHero();
+        if (player == null)
+        {
+            return false;
+        }
+
+        var loverCount = GetPlayerLoverCount(player);
+
+        var plotController = PlotController.Instance;
+        if (plotController == null)
+        {
+            LoggerInstance.LogWarning(
+                $"Overflow lover home battle bypass could not resolve because PlotController.Instance is unavailable from {source}. loverCount={loverCount}.");
+            return false;
+        }
+
+        var playerTeamId = 0;
+        try
+        {
+            if (controller != null)
+            {
+                playerTeamId = controller.GetPlayerControlTeamID();
+            }
+        }
+        catch
+        {
+        }
+
+        var winTeamId = playerTeamId.ToString();
+        try
+        {
+            LoggerInstance.LogWarning(
+                $"Blocked lover home battle from {source}: loverCount={loverCount}, syntheticWinTeamID={winTeamId}.");
+            PushPlayerLog("Mod: 已拦截回家情缘围攻事件");
+            plotController.PlotStartLoverResultFightResult(winTeamId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"Lover home battle bypass failed from {source}: loverCount={loverCount}, syntheticWinTeamID={winTeamId}, error={ex.Message}.");
+            return false;
+        }
+    }
+
+    private static string DescribeBattleControllerForLoverBattleTrace(BattleController? controller)
+    {
+        if (controller == null)
+        {
+            return "battle=unavailable";
+        }
+
+        var maxHeroNum = TryConvertToInt(SafeGetMemberValue(controller, "maxHeroNum"));
+        var fightEndCall = TryReadStringMember(controller, new[] { "fightEndCallFuc" });
+        return
+            $"fightEndCall={SafeFormatValue(fightEndCall)}, " +
+            $"maxHeroNum={SafeFormatValue(maxHeroNum)}, " +
+            $"teamMemJoinBattleNum={DescribeSimpleCollectionForLoverBattleTrace(SafeGetMemberValue(controller, "teamMemJoinBattleNum"))}";
+    }
+
+    private static string DescribeHeroGroupListForLoverBattleTrace(object? groups)
+    {
+        if (groups == null)
+        {
+            return "null";
+        }
+
+        if (groups is not System.Collections.IEnumerable enumerable)
+        {
+            return SafeFormatValue(groups);
+        }
+
+        var parts = new List<string>();
+        var index = 0;
+        foreach (var group in enumerable)
+        {
+            parts.Add($"{index}:{DescribeHeroListForLoverBattleTrace(group)}");
+            index++;
+        }
+
+        var count = TryGetCollectionCount(groups);
+        return $"count={(count >= 0 ? count : index)}, groups=[{string.Join(" || ", parts)}]";
+    }
+
+    private static string DescribeHeroListForLoverBattleTrace(object? heroes)
+    {
+        if (heroes == null)
+        {
+            return "null";
+        }
+
+        if (heroes is not System.Collections.IEnumerable enumerable)
+        {
+            return SafeFormatValue(heroes);
+        }
+
+        var parts = new List<string>();
+        var index = 0;
+        foreach (var entry in enumerable)
+        {
+            parts.Add($"{index}:{DescribeHeroForLoverBattleTrace(entry as HeroData)}");
+            index++;
+        }
+
+        var count = TryGetCollectionCount(heroes);
+        return $"count={(count >= 0 ? count : index)}, heroes=[{string.Join(" || ", parts)}]";
+    }
+
+    private static string DescribeTeamPrepareDataForLoverBattleTrace(object? prepareData)
+    {
+        if (prepareData == null)
+        {
+            return "null";
+        }
+
+        if (prepareData is not System.Collections.IEnumerable enumerable)
+        {
+            return SafeFormatValue(prepareData);
+        }
+
+        var parts = new List<string>();
+        var index = 0;
+        foreach (var entry in enumerable)
+        {
+            var hero = SafeGetMemberValue(entry, "heroData") as HeroData;
+            var teamId = TryConvertToInt(SafeGetMemberValue(entry, "teamID"));
+            var enterBattle = TryConvertToBool(SafeGetMemberValue(entry, "enterBattle"));
+            var enterBattleTime = TryConvertToFloat(SafeGetMemberValue(entry, "enterBattleTime"));
+            parts.Add(
+                $"{index}:team={SafeFormatValue(teamId)}, enter={SafeFormatValue(enterBattle)}, " +
+                $"enterTime={SafeFormatValue(enterBattleTime)}, hero={DescribeHeroForLoverBattleTrace(hero)}");
+            index++;
+        }
+
+        var count = TryGetCollectionCount(prepareData);
+        return $"count={(count >= 0 ? count : index)}, entries=[{string.Join(" || ", parts)}]";
+    }
+
+    private static string DescribeSimpleCollectionForLoverBattleTrace(object? value)
+    {
+        if (value == null)
+        {
+            return "null";
+        }
+
+        if (value is not System.Collections.IEnumerable enumerable || value is string)
+        {
+            return SafeFormatValue(value);
+        }
+
+        var parts = new List<string>();
+        foreach (var entry in enumerable)
+        {
+            parts.Add(SafeFormatValue(entry));
+        }
+
+        var count = TryGetCollectionCount(value);
+        return $"count={(count >= 0 ? count : parts.Count)}, values=[{string.Join(", ", parts)}]";
+    }
+
+    private static string DescribeHeroForLoverBattleTrace(HeroData? hero)
+    {
+        if (hero == null)
+        {
+            return "null";
+        }
+
+        var dead = TryConvertToBool(SafeGetMemberValue(hero, "dead"));
+        var lover = TryConvertToBool(SafeGetMemberValue(hero, "Lover"));
+        var preLovers = SafeGetMemberValue(hero, "PreLovers");
+        var preLoverCount = TryGetCollectionCount(preLovers);
+        var teamLeader = TryConvertToInt(SafeGetMemberValue(hero, "teamLeader"));
+
+        return
+            $"{TryGetHeroName(hero)}/{SafeFormatValue(TryGetHeroId(hero))}" +
+            $"(inTeam={SafeFormatValue(TryIsHeroInTeam(hero))}, recruit={SafeFormatValue(TryIsHeroRecruitedByPlayer(hero))}, " +
+            $"dead={SafeFormatValue(dead)}, lover={SafeFormatValue(lover)}, preLovers={SafeFormatValue(preLoverCount >= 0 ? preLoverCount : null)}, " +
+            $"teamLeader={SafeFormatValue(teamLeader)})";
+    }
+
     private static string? TryReadPlotText(PlotController? plotController)
     {
         if (plotController == null)
@@ -4111,6 +4798,44 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         }
 
         ResetDrinkTracking(controller);
+    }
+
+    private static void CaptureOrRestorePreferredBattleTimeScale(string source)
+    {
+        var worldData = GameController.Instance?.worldData;
+        if (worldData == null)
+        {
+            return;
+        }
+
+        var current = Mathf.Max(0.01f, worldData.battleTimeScale);
+        if (!_preferredBattleTimeScaleCaptured)
+        {
+            RememberPreferredBattleTimeScale(current, $"{source}-initial");
+            return;
+        }
+
+        if (Math.Abs(current - _preferredBattleTimeScale) < 0.01f)
+        {
+            return;
+        }
+
+        worldData.battleTimeScale = _preferredBattleTimeScale;
+        LoggerInstance.LogInfo(
+            $"Battle speed restored from x{current:0.###} to x{_preferredBattleTimeScale:0.###} at {source}.");
+    }
+
+    private static void RememberPreferredBattleTimeScale(float speed, string source)
+    {
+        var normalized = Mathf.Max(0.01f, speed);
+        var changed = !_preferredBattleTimeScaleCaptured || Math.Abs(_preferredBattleTimeScale - normalized) >= 0.01f;
+        _preferredBattleTimeScale = normalized;
+        _preferredBattleTimeScaleCaptured = true;
+
+        if (changed)
+        {
+            LoggerInstance.LogInfo($"Battle speed preference captured at x{normalized:0.###} from {source}.");
+        }
     }
 
     private static float ResolveDrinkPowerCostMultiplier(bool? targetIsPlayer)
@@ -4913,6 +5638,55 @@ private const float TeachSkillSideTabSoundVolume = 1f;
         return TryConvertToFloat(value);
     }
 
+    private static float? TryReadHeroAttribute(HeroData? hero, BaseAttriType attriType)
+    {
+        if (hero == null)
+        {
+            return null;
+        }
+
+        var attriIndex = (int)attriType;
+        if (attriIndex >= 0)
+        {
+            try
+            {
+                var totalAttri = hero.totalAttri;
+                if (totalAttri != null && attriIndex < totalAttri.Count)
+                {
+                    return totalAttri[attriIndex];
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        try
+        {
+            return hero.GetBaseAttriNum(attriType);
+        }
+        catch
+        {
+        }
+
+        if (attriIndex >= 0)
+        {
+            try
+            {
+                var baseAttri = hero.baseAttri;
+                if (baseAttri != null && attriIndex < baseAttri.Count)
+                {
+                    return baseAttri[attriIndex];
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return null;
+    }
+
     private static int? TryGetHeroId(HeroData? hero)
     {
         if (hero == null)
@@ -4958,69 +5732,6 @@ private const float TeachSkillSideTabSoundVolume = 1f;
             var value = SafeProperty(hero, "recruitByPlayer") ?? SafeField(hero, "recruitByPlayer");
             return TryConvertToBool(value) ?? false;
         }
-    }
-
-    private static int? TryReadAutoLeaveTeamDay(HeroData? hero)
-    {
-        if (hero == null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return hero.autoLeaveTeamDay;
-        }
-        catch
-        {
-            var value = SafeProperty(hero, "autoLeaveTeamDay") ?? SafeField(hero, "autoLeaveTeamDay");
-            return TryConvertToInt(value);
-        }
-    }
-
-    private static bool TryWriteAutoLeaveTeamDay(HeroData? hero, int value)
-    {
-        if (hero == null)
-        {
-            return false;
-        }
-
-        try
-        {
-            hero.autoLeaveTeamDay = value;
-            return true;
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            var property = hero.GetType().GetProperty("autoLeaveTeamDay", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            if (property != null && property.CanWrite)
-            {
-                property.SetValue(hero, value);
-                return true;
-            }
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            var field = hero.GetType().GetField("autoLeaveTeamDay", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            if (field != null)
-            {
-                field.SetValue(hero, value);
-                return true;
-            }
-        }
-        catch
-        {
-        }
-
-        return false;
     }
 
     private static int? TryGetHeroTeamLeaderId(HeroData? hero)

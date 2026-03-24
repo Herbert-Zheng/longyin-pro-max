@@ -299,7 +299,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _thresholdTalentRequirementValue = Config.Bind("ThresholdTalent", "RequirementValue", 10f, "Required current attribute value to activate the threshold talent.");
         _thresholdTalentBuffType = Config.Bind("ThresholdTalent", "BuffType", HeroSpeAddDataType.addAttri2, "Buff applied by the custom threshold talent while active.");
         _thresholdTalentBuffValue = Config.Bind("ThresholdTalent", "BuffValue", 10f, "Buff magnitude applied by the custom threshold talent while active.");
-        _thresholdTalentDuration = Config.Bind("ThresholdTalent", "Duration", 1f, "Fallback duration used when the custom threshold talent is applied. The mod re-checks the threshold continuously and removes the talent when it no longer qualifies.");
+        _thresholdTalentDuration = Config.Bind("ThresholdTalent", "Duration", 999f, "Duration in days used when the custom threshold talent is applied. Set this very high for testing so the tag behaves like a long-lived talent entry.");
         _thresholdTalentShowInfo = Config.Bind("ThresholdTalent", "ShowInfo", false, "When true, the game also shows its normal add/remove talent popups for the threshold talent.");
         _dialogMonthlyLimitMultiplier = Config.Bind("DialogFlow", "MonthlyLimitMultiplier", 3f, "Scales the monthly per-NPC interaction quota used by talk, teach, and similar meet choices.");
         _dialogFastForwardAssistEnabled = Config.Bind("DialogFlow", "FastForwardAssistEnabled", false, "When true, the mod automatically turns on plot fast-forward (快进) whenever the current dialog actually exposes the skip button.");
@@ -2834,7 +2834,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
-        var alreadyHasTag = TryHeroHasTag(player, _thresholdTalentTagId);
+        var alreadyHasTag = CountThresholdTalentInstances(player) > 0;
         if (!_thresholdTalentEnabled.Value)
         {
             if (alreadyHasTag)
@@ -2982,12 +2982,40 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         try
         {
-            hero.AddTag(
-                _thresholdTalentTagId,
-                Mathf.Max(0.01f, _thresholdTalentDuration.Value),
-                ThresholdTalentSource,
-                _thresholdTalentShowInfo.Value,
-                true);
+            if (CountThresholdTalentInstances(hero) > 0)
+            {
+                return;
+            }
+
+            var definition = TryGetThresholdTalentDefinition();
+            if (definition == null)
+            {
+                LoggerInstance.LogWarning($"Could not grant threshold talent {_thresholdTalentTagName} because its definition was unavailable.");
+                return;
+            }
+
+            hero.AddTempTag(
+                definition,
+                ResolveThresholdTalentDurationDays(),
+                _thresholdTalentShowInfo.Value);
+
+            var appliedCount = CountThresholdTalentInstances(hero);
+            if (appliedCount <= 0 && _thresholdTalentTagId >= 0)
+            {
+                hero.AddTag(
+                    _thresholdTalentTagId,
+                    Mathf.Max(1f, _thresholdTalentDuration.Value),
+                    ThresholdTalentSource,
+                    _thresholdTalentShowInfo.Value,
+                    true);
+                appliedCount = CountThresholdTalentInstances(hero);
+            }
+
+            if (appliedCount <= 0)
+            {
+                LoggerInstance.LogWarning($"Threshold talent {_thresholdTalentTagName} grant did not produce a visible hero tag entry for {TryGetHeroName(hero)}.");
+                return;
+            }
 
             LoggerInstance.LogInfo(
                 $"Threshold talent granted to {TryGetHeroName(hero)}: " +
@@ -3006,7 +3034,24 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         try
         {
-            hero.RemoveTag(_thresholdTalentTagId, _thresholdTalentShowInfo.Value);
+            var removedAny = false;
+            for (var attempt = 0; attempt < 32; attempt++)
+            {
+                var tagId = TryGetFirstThresholdTalentTagId(hero);
+                if (!tagId.HasValue)
+                {
+                    break;
+                }
+
+                hero.RemoveTag(tagId.Value, _thresholdTalentShowInfo.Value);
+                removedAny = true;
+            }
+
+            if (!removedAny)
+            {
+                return;
+            }
+
             LoggerInstance.LogInfo(
                 $"Threshold talent removed from {TryGetHeroName(hero)}: " +
                 $"tag={_thresholdTalentTagName} (id={_thresholdTalentTagId}), reason={reason}.");
@@ -3023,7 +3068,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         try
         {
-            hero.CheckHeroDetailDirty(true);
+            hero.RefreshMaxAttriAndSkill();
         }
         catch
         {
@@ -3031,22 +3076,114 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         try
         {
-            var viewedHero = TryGetViewedHeroDetailHero();
-            if (TryGetHeroId(viewedHero) == TryGetHeroId(hero))
-            {
-                HeroDetailController.Instance?.FreshNowHeroDetail(hero, false);
-            }
+            hero.CheckHeroDetailDirty(true);
         }
         catch
         {
         }
     }
 
-    private static bool TryHeroHasTag(HeroData hero, int tagId)
+    private static HeroTagDataBase? TryGetThresholdTalentDefinition()
     {
         try
         {
-            return hero.HaveTag(tagId);
+            var gameData = GameDataController.Instance;
+            var database = gameData?.heroTagDataBase;
+            if (database == null)
+            {
+                return null;
+            }
+
+            if (_thresholdTalentTagId >= 0 && _thresholdTalentTagId < database.Count)
+            {
+                return database[_thresholdTalentTagId];
+            }
+
+            var existingId = FindTagIdByName(database, _thresholdTalentTagName);
+            if (existingId >= 0)
+            {
+                _thresholdTalentTagId = existingId;
+                return database[existingId];
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static int ResolveThresholdTalentDurationDays()
+    {
+        return Math.Max(1, Mathf.RoundToInt(_thresholdTalentDuration.Value));
+    }
+
+    private static int CountThresholdTalentInstances(HeroData hero)
+    {
+        var count = 0;
+
+        try
+        {
+            var tagData = hero.heroTagData;
+            if (tagData == null)
+            {
+                return 0;
+            }
+
+            for (var i = 0; i < tagData.Count; i++)
+            {
+                if (MatchesThresholdTalent(tagData[i]))
+                {
+                    count++;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return count;
+    }
+
+    private static int? TryGetFirstThresholdTalentTagId(HeroData hero)
+    {
+        try
+        {
+            var tagData = hero.heroTagData;
+            if (tagData == null)
+            {
+                return null;
+            }
+
+            for (var i = 0; i < tagData.Count; i++)
+            {
+                var tag = tagData[i];
+                if (MatchesThresholdTalent(tag))
+                {
+                    return tag.tagID;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static bool MatchesThresholdTalent(HeroTagData? tag)
+    {
+        if (tag == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var dataBase = tag.DataBase();
+            return dataBase != null &&
+                string.Equals(dataBase.name, _thresholdTalentTagName, StringComparison.Ordinal) &&
+                string.Equals(dataBase.category, ThresholdTalentCategory, StringComparison.Ordinal);
         }
         catch
         {

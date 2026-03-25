@@ -2,9 +2,11 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   BASE_ATTRI_TYPE_NAMES,
+  CUSTOM_TALENT_CONDITION_TYPES,
   CUSTOM_TALENT_PACK_VERSION,
   CustomTalentDefinition,
   CustomTalentEffect,
+  CustomTalentConditionType,
   CustomTalentPack,
   GameHealth,
   GAME_EXE_NAME,
@@ -328,8 +330,10 @@ function validateCustomTalentCondition(input: unknown, talentIndex: number, cond
   }
 
   const candidate = input as Record<string, unknown>;
-  if (candidate.type !== 'stat_min') {
-    throw new Error(`第 ${talentIndex + 1} 个天赋的第 ${conditionIndex + 1} 个条件类型无效，只支持 stat_min。`);
+  if (typeof candidate.type !== 'string' || !(CUSTOM_TALENT_CONDITION_TYPES as readonly string[]).includes(candidate.type)) {
+    throw new Error(
+      `第 ${talentIndex + 1} 个天赋的第 ${conditionIndex + 1} 个条件类型无效，只支持 ${CUSTOM_TALENT_CONDITION_TYPES.join(' / ')}。`
+    );
   }
 
   if (typeof candidate.stat !== 'string' || !isBaseAttriTypeName(candidate.stat)) {
@@ -341,7 +345,7 @@ function validateCustomTalentCondition(input: unknown, talentIndex: number, cond
   }
 
   return {
-    type: 'stat_min' as const,
+    type: candidate.type as CustomTalentConditionType,
     stat: candidate.stat,
     min: candidate.min
   };

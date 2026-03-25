@@ -1,8 +1,10 @@
 import {
   BASE_ATTRI_TYPE_NAMES,
   BaseAttriTypeName,
+  CUSTOM_TALENT_CONDITION_TYPES,
   CUSTOM_TALENT_PACK_VERSION,
   CustomTalentCondition,
+  CustomTalentConditionType,
   CustomTalentDefinition,
   CustomTalentEffect,
   CustomTalentPack,
@@ -36,6 +38,11 @@ export const BASE_ATTRI_TYPE_LABELS: Record<BaseAttriTypeName, string> = {
   CraftEquip: '锻造',
   CraftMed: '制药',
   CraftFood: '烹饪'
+};
+
+export const CUSTOM_TALENT_CONDITION_TYPE_LABELS: Record<CustomTalentConditionType, string> = {
+  stat_min: '玩家属性达到门槛',
+  team_stat_sum_min: '队伍属性总和达到门槛'
 };
 
 function createId(prefix: string): string {
@@ -142,7 +149,7 @@ export function validateCustomTalentPack(pack: CustomTalentPack): string[] {
     }
 
     talent.conditions.forEach((condition, conditionIndex) => {
-      if (condition.type !== 'stat_min') {
+      if (!(CUSTOM_TALENT_CONDITION_TYPES as readonly string[]).includes(condition.type)) {
         errors.push(`第 ${displayIndex} 个天赋的第 ${conditionIndex + 1} 条条件类型无效。`);
       }
       if (!(BASE_ATTRI_TYPE_NAMES as readonly string[]).includes(condition.stat)) {
@@ -168,6 +175,10 @@ export function validateCustomTalentPack(pack: CustomTalentPack): string[] {
 
 export function formatBaseAttriType(value: BaseAttriTypeName): string {
   return BASE_ATTRI_TYPE_LABELS[value] ?? value;
+}
+
+export function formatCustomTalentConditionType(value: CustomTalentConditionType): string {
+  return CUSTOM_TALENT_CONDITION_TYPE_LABELS[value] ?? value;
 }
 
 export function formatHeroSpeAddDataType(value: HeroSpeAddDataTypeName): string {

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   BASE_ATTRI_TYPE_NAMES,
+  CUSTOM_TALENT_CONDITION_TYPES,
   HERO_SPE_ADD_DATA_TYPE_NAMES
 } from '../shared/types';
 import type {
   BaseAttriTypeName,
+  CustomTalentConditionType,
   CustomTalentDefinition,
   CustomTalentPack,
   HeroSpeAddDataTypeName,
@@ -35,6 +37,7 @@ import {
   createEmptyCustomTalentPack,
   duplicateCustomTalent,
   formatBaseAttriType,
+  formatCustomTalentConditionType,
   formatHeroSpeAddDataType,
   validateCustomTalentPack
 } from './customTalents';
@@ -1303,12 +1306,30 @@ export function App() {
                   <Card title="条件列表" eyebrow="Conditions">
                     {selectedCustomTalent ? (
                       <div className="stack">
-                        <div className="body-copy">v1 条件固定为多条属性门槛，全部满足后才会生效。</div>
+                        <div className="body-copy">每条条件都可以检查玩家当前属性，或者检查玩家加当前队伍成员的属性总和。全部条件满足后天赋才会生效。</div>
                         <div className="stack">
                           {selectedCustomTalent.conditions.map((condition, conditionIndex) => (
                             <div key={`${selectedCustomTalent.id}-condition-${conditionIndex}`} className="array-row">
                               <div className="array-row__grid array-row__grid--conditions">
-                                <TextField label="类型" value="stat_min" onChange={() => undefined} hint="v1 固定为 stat_min" />
+                                <SelectField
+                                  label="类型"
+                                  value={condition.type}
+                                  onChange={(value) =>
+                                    updateSelectedTalent((talent) => ({
+                                      ...talent,
+                                      conditions: talent.conditions.map((entry, index) =>
+                                        index === conditionIndex
+                                          ? {
+                                              ...entry,
+                                              type: value as CustomTalentConditionType
+                                            }
+                                          : entry
+                                      )
+                                    }))
+                                  }
+                                  options={[...CUSTOM_TALENT_CONDITION_TYPES]}
+                                  hint={formatCustomTalentConditionType(condition.type)}
+                                />
                                 <SelectField
                                   label="属性"
                                   value={condition.stat}

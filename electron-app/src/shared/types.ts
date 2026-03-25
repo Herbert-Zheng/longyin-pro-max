@@ -301,7 +301,9 @@ export interface VisibleSettings {
   battleTurboHotkey: string;
 }
 
-export type CustomTalentConditionType = 'stat_min';
+export const CUSTOM_TALENT_CONDITION_TYPES = ['stat_min', 'team_stat_sum_min'] as const;
+
+export type CustomTalentConditionType = typeof CUSTOM_TALENT_CONDITION_TYPES[number];
 
 export interface CustomTalentCondition {
   type: CustomTalentConditionType;

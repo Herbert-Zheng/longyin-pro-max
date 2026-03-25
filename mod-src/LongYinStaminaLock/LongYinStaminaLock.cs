@@ -27,6 +27,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const int TeachSkillSplashMinPercentFloor = 0;
     private const int TeachSkillSplashMaxPercentCeiling = 500;
     private const KeyCode ViewedHeroFavorTestHotkey = KeyCode.K;
+    private const float TeamFameShareRatio = 0.3f;
     private const float TeachSkillSideTabDurationSeconds = 4.5f;
     private const string TeachSkillSideTabAtlasName = "IconAtlas";
     private const string TeachSkillSideTabIconName = "1";
@@ -36,6 +37,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const float DrinkFillDeltaTolerance = 0.005f;
     private const string ThresholdTalentSource = "codex.threshold-talent";
     private const string ThresholdTalentCategory = "Pro Max";
+    private const string ThresholdTalentMarker = "codex.threshold-talent";
     private const string DefaultThresholdTalentName = "天人感应";
     private const float ThresholdTalentEvaluationIntervalSeconds = 0.5f;
     private const string CustomTalentCategory = "Pro Max Custom";
@@ -135,6 +137,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool _applyingLuckyMoneyRefund;
     private static bool _applyingDailySkillInsightExp;
     private static bool _applyingTeamAutoFavor;
+    private static bool _applyingTeamFameShare;
     private static bool _grantingCraftBonusItems;
     private static bool _repeatingCraftChoiceReward;
     private static bool _exploreFullRevealConsumed;
@@ -163,6 +166,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static float _nextThresholdTalentEvaluationAt = -1f;
     private static float _nextCustomTalentEvaluationAt = -1f;
     private static bool _thresholdTalentRegistrationWarned;
+    private static MethodInfo? _heroChangeFameMethod;
     private Harmony? _harmony;
 
     private sealed class MoneyChangeState
@@ -172,6 +176,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         public int? MoneyBefore { get; init; }
         public bool IsSpend { get; init; }
         public bool IsIncome { get; init; }
+    }
+
+    private sealed class FameChangeState
+    {
+        public bool IsEligible { get; init; }
+        public float RequestedDelta { get; init; }
+        public float? FameBefore { get; init; }
     }
 
     private sealed class CalendarChangeState
@@ -237,8 +248,15 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         public float value { get; set; }
     }
 
+    private enum CustomTalentConditionKind
+    {
+        PlayerStatMin,
+        TeamStatSumMin
+    }
+
     private sealed class RegisteredCustomTalentCondition
     {
+        public CustomTalentConditionKind Kind { get; init; }
         public BaseAttriType Stat { get; init; }
         public float Minimum { get; init; }
     }
@@ -516,6 +534,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(HeroData), nameof(HeroData.BattleChangeSkillFightExp), new[] { typeof(float), typeof(KungfuSkillLvData), typeof(bool) }, nameof(BattleChangeSkillFightExpPrefix), null);
         PatchMethod(typeof(HeroData), nameof(HeroData.ChangeMoney), new[] { typeof(int), typeof(bool) }, nameof(ChangeMoneyPrefix), nameof(ChangeMoneyPostfix));
         PatchMethod(typeof(HeroData), nameof(HeroData.ChangeFavor), new[] { typeof(float), typeof(bool), typeof(float), typeof(float), typeof(bool) }, nameof(ChangeFavorPrefix), null);
+        PatchHeroChangeFameMethod();
         PatchMethod(typeof(PlotController), nameof(PlotController.ManageTeachSkill), new[] { typeof(HeroData), typeof(HeroData), typeof(int), typeof(float), typeof(bool) }, nameof(ManageTeachSkillPrefix), nameof(ManageTeachSkillPostfix));
         PatchMethod(typeof(BattleController), nameof(BattleController.BattleTimeScaleButtonClicked), new[] { typeof(GameObject) }, null, nameof(BattleTimeScaleButtonClickedPostfix));
         PatchMethod(typeof(HorseData), nameof(HorseData.StartSprint), Type.EmptyTypes, null, nameof(HorseStartSprintPostfix));
@@ -597,6 +616,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
         Log.LogInfo($"Extra relationship gain chance starts at {ClampPercent(_extraRelationshipGainChancePercent.Value)}%.");
         Log.LogInfo($"Team auto favor starts {(_teamAutoFavorEnabled.Value ? "ON" : "OFF")} at +{FormatConfigFloat(Math.Max(0f, _teamAutoFavorPerDay.Value))}/day.");
+        Log.LogInfo($"Team fame share starts at {FormatConfigFloat(TeamFameShareRatio * 100f)}% of player fame gains.");
         Log.LogInfo($"Max lover count override starts at {Math.Max(1, _maxLoverCount.Value)}.");
         Log.LogInfo($"Lover home battle blocker starts {(_blockOverflowLoverHomeBattle.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Debate player damage taken multiplier starts at x{FormatConfigFloat(_debatePlayerDamageTakenMultiplier.Value)}.");
@@ -641,6 +661,44 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             prefix: prefix == null ? null : new HarmonyMethod(prefix),
             postfix: postfix == null ? null : new HarmonyMethod(postfix));
         Log.LogInfo($"Patched {type.Name}.{target.Name}({target.GetParameters().Length} params)");
+    }
+
+    private void PatchHeroChangeFameMethod()
+    {
+        var target = typeof(HeroData)
+            .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .FirstOrDefault(method =>
+            {
+                if (!string.Equals(method.Name, nameof(HeroData.ChangeFame), StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                var parameters = method.GetParameters();
+                if (parameters.Length != 2 || parameters[1].ParameterType != typeof(bool))
+                {
+                    return false;
+                }
+
+                var firstParameterType = parameters[0].ParameterType;
+                return firstParameterType == typeof(int) || firstParameterType == typeof(float) || firstParameterType == typeof(double);
+            });
+
+        if (target == null)
+        {
+            Log.LogWarning("Could not patch HeroData.ChangeFame(*) for team fame share.");
+            return;
+        }
+
+        _heroChangeFameMethod = target;
+        var prefix = AccessTools.Method(typeof(LongYinStaminaLockPlugin), nameof(ChangeFamePrefix));
+        var postfix = AccessTools.Method(typeof(LongYinStaminaLockPlugin), nameof(ChangeFamePostfix));
+        _harmony!.Patch(
+            target,
+            prefix: prefix == null ? null : new HarmonyMethod(prefix),
+            postfix: postfix == null ? null : new HarmonyMethod(postfix));
+        Log.LogInfo(
+            $"Patched HeroData.{target.Name}({target.GetParameters().Length} params) for team fame share using {target.GetParameters()[0].ParameterType.Name} delta.");
     }
 
     private static void ChangeMoveStepPrefix(ref int num)
@@ -1779,46 +1837,19 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void GetCraftMaterialExtraCraftRatePostfix(CraftUIController __instance, ref float __result)
     {
-        if (!_craftRandomPickUpgradeEnabled.Value)
-        {
-            return;
-        }
-
-        var material = ResolveCraftAddedMaterial(__instance);
-        var mappedBonus = GetCraftExtraItemCountFromMaterial(material);
-        if (mappedBonus <= 0f)
-        {
-            return;
-        }
-
-        __result = mappedBonus;
-
         if (_traceMode.Value)
         {
             LoggerInstance.LogInfo(
-                $"Craft material extra rate overridden from controller: material={DescribeItemSummary(material)}, mappedBonus={SafeFormatValue(mappedBonus)}.");
+                $"Craft material extra rate preserved from controller: material={DescribeItemSummary(ResolveCraftAddedMaterial(__instance))}, vanillaRate={SafeFormatValue(__result)}.");
         }
     }
 
     private static void GetItemMaterialExtraCraftRatePostfix(ItemData __instance, ref float __result)
     {
-        if (!_craftRandomPickUpgradeEnabled.Value)
-        {
-            return;
-        }
-
-        var mappedBonus = GetCraftExtraItemCountFromMaterial(__instance);
-        if (mappedBonus <= 0f)
-        {
-            return;
-        }
-
-        __result = mappedBonus;
-
         if (_traceMode.Value)
         {
             LoggerInstance.LogInfo(
-                $"Craft material extra rate overridden from item: material={DescribeItemSummary(__instance)}, mappedBonus={SafeFormatValue(mappedBonus)}.");
+                $"Craft material extra rate preserved from item: material={DescribeItemSummary(__instance)}, vanillaRate={SafeFormatValue(__result)}.");
         }
     }
 
@@ -3229,6 +3260,33 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             $"Lucky money bonus applied: kind={(__state.IsSpend ? "spend" : "income")}, base={changedAmount}, bonus={rebateAmount}, percent={rebatePercent}, chance={hitChancePercent}, roll={roll}.");
     }
 
+    private static void ChangeFamePrefix(HeroData __instance, object? __0, out FameChangeState __state)
+    {
+        var requestedDelta = TryConvertToFloat(__0) ?? 0f;
+        __state = new FameChangeState
+        {
+            IsEligible = !_applyingTeamFameShare && requestedDelta > 0f && IsPlayerHero(__instance),
+            RequestedDelta = requestedDelta,
+            FameBefore = TryReadFame(__instance)
+        };
+    }
+
+    private static void ChangeFamePostfix(HeroData __instance, object? __0, FameChangeState __state)
+    {
+        if (!__state.IsEligible)
+        {
+            return;
+        }
+
+        var actualGain = ResolvePositiveFloatGain(__state.RequestedDelta, __state.FameBefore, TryReadFame(__instance));
+        if (actualGain <= 0.001f)
+        {
+            return;
+        }
+
+        TryApplyTeamFameShare(__instance, actualGain);
+    }
+
     private static void ChangeFavorPrefix(HeroData __instance, ref float num)
     {
         if (_applyingTeamAutoFavor || num <= 0f || IsPlayerHero(__instance))
@@ -3329,7 +3387,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             for (var i = 0; i < bonusState.ExtraItemCount; i++)
             {
-                player.GetItem(craftResult, false, false, 0, false);
+                var bonusItem = TryCreateCraftBonusItem(craftResult, player);
+                if (bonusItem == null)
+                {
+                    continue;
+                }
+
+                player.GetItem(bonusItem, false, false, 0, false);
                 grantedCount++;
             }
         }
@@ -4167,7 +4231,16 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 return false;
             }
 
-            if (!string.Equals(conditionFile.type, "stat_min", StringComparison.Ordinal))
+            CustomTalentConditionKind conditionKind;
+            if (string.Equals(conditionFile.type, "stat_min", StringComparison.Ordinal))
+            {
+                conditionKind = CustomTalentConditionKind.PlayerStatMin;
+            }
+            else if (string.Equals(conditionFile.type, "team_stat_sum_min", StringComparison.Ordinal))
+            {
+                conditionKind = CustomTalentConditionKind.TeamStatSumMin;
+            }
+            else
             {
                 error = $"talent '{id}' has unsupported condition type '{conditionFile.type}'";
                 return false;
@@ -4182,6 +4255,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             conditions.Add(
                 new RegisteredCustomTalentCondition
                 {
+                    Kind = conditionKind,
                     Stat = stat,
                     Minimum = conditionFile.min
                 });
@@ -4369,7 +4443,17 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         foreach (var condition in talent.Conditions)
         {
-            var currentValue = TryReadHeroAttribute(hero, condition.Stat);
+            float? currentValue;
+            switch (condition.Kind)
+            {
+                case CustomTalentConditionKind.TeamStatSumMin:
+                    currentValue = TryReadTeamAttributeSum(hero, condition.Stat);
+                    break;
+                default:
+                    currentValue = TryReadHeroAttribute(hero, condition.Stat);
+                    break;
+            }
+
             if (!currentValue.HasValue || currentValue.Value < condition.Minimum)
             {
                 return false;
@@ -4377,6 +4461,28 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
 
         return true;
+    }
+
+    private static float? TryReadTeamAttributeSum(HeroData player, BaseAttriType attriType)
+    {
+        var teamMembers = new List<HeroData> { player };
+        teamMembers.AddRange(GetPlayerTeamMembers(player));
+
+        var total = 0f;
+        var foundAny = false;
+        foreach (var member in teamMembers)
+        {
+            var currentValue = TryReadHeroAttribute(member, attriType);
+            if (!currentValue.HasValue)
+            {
+                continue;
+            }
+
+            total += currentValue.Value;
+            foundAny = true;
+        }
+
+        return foundAny ? total : null;
     }
 
     private static void GrantCustomTalent(HeroData hero, RegisteredCustomTalent talent)
@@ -4579,6 +4685,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
+        RemoveLegacyThresholdTalentInstances(player);
+
         var alreadyHasTag = CountThresholdTalentInstances(player) > 0;
         if (!_thresholdTalentEnabled.Value)
         {
@@ -4631,7 +4739,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         _thresholdTalentRegistrationWarned = false;
 
-        var existingId = FindTagIdByName(database, _thresholdTalentTagName);
+        var existingId = FindThresholdTagId(database);
         if (existingId >= 0)
         {
             _thresholdTalentTagId = existingId;
@@ -4682,7 +4790,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         tag.name = _thresholdTalentTagName;
         tag.value = 0;
         tag.effectTarget = SkillTargetType.Self;
-        tag.sameMeaning = string.Empty;
+        tag.sameMeaning = ThresholdTalentMarker;
         tag.oppositeMeaning = string.Empty;
         tag.canRandom = false;
         tag.category = ThresholdTalentCategory;
@@ -4696,9 +4804,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         tag.buffData = buffData;
     }
 
-    private static int FindTagIdByName(Il2CppSystem.Collections.Generic.List<HeroTagDataBase> database, string targetName)
+    private static int FindThresholdTagId(Il2CppSystem.Collections.Generic.List<HeroTagDataBase> database)
     {
-        if (database == null || string.IsNullOrWhiteSpace(targetName))
+        if (database == null)
         {
             return -1;
         }
@@ -4708,9 +4816,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             try
             {
                 var entry = database[i];
-                if (entry != null &&
-                    string.Equals(entry.name, targetName, StringComparison.Ordinal) &&
-                    string.Equals(entry.category, ThresholdTalentCategory, StringComparison.Ordinal))
+                if (MatchesThresholdTalentDefinition(entry))
                 {
                     return i;
                 }
@@ -4844,7 +4950,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 return database[_thresholdTalentTagId];
             }
 
-            var existingId = FindTagIdByName(database, _thresholdTalentTagName);
+            var existingId = FindThresholdTagId(database);
             if (existingId >= 0)
             {
                 _thresholdTalentTagId = existingId;
@@ -4918,6 +5024,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static bool MatchesThresholdTalent(HeroTagData? tag)
     {
+        return MatchesCurrentThresholdTalent(tag);
+    }
+
+    private static bool MatchesCurrentThresholdTalent(HeroTagData? tag)
+    {
         if (tag == null)
         {
             return false;
@@ -4927,8 +5038,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             var dataBase = tag.DataBase();
             return dataBase != null &&
-                string.Equals(dataBase.name, _thresholdTalentTagName, StringComparison.Ordinal) &&
-                string.Equals(dataBase.category, ThresholdTalentCategory, StringComparison.Ordinal);
+                string.Equals(dataBase.sameMeaning, ThresholdTalentMarker, StringComparison.Ordinal) &&
+                tag.tagID == _thresholdTalentTagId;
         }
         catch
         {
@@ -4936,10 +5047,97 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
     }
 
+    private static bool MatchesAnyThresholdTalent(HeroTagData? tag)
+    {
+        if (tag == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return MatchesThresholdTalentDefinition(tag.DataBase());
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool MatchesThresholdTalentDefinition(HeroTagDataBase? dataBase)
+    {
+        return dataBase != null &&
+            (string.Equals(dataBase.sameMeaning, ThresholdTalentMarker, StringComparison.Ordinal) ||
+             string.Equals(dataBase.category, ThresholdTalentCategory, StringComparison.Ordinal));
+    }
+
+    private static void RemoveLegacyThresholdTalentInstances(HeroData hero)
+    {
+        try
+        {
+            var removedAny = false;
+            for (var attempt = 0; attempt < 32; attempt++)
+            {
+                var tagData = hero.heroTagData;
+                if (tagData == null)
+                {
+                    break;
+                }
+
+                int? staleTagId = null;
+                for (var i = 0; i < tagData.Count; i++)
+                {
+                    var tag = tagData[i];
+                    if (MatchesAnyThresholdTalent(tag) && !MatchesCurrentThresholdTalent(tag))
+                    {
+                        staleTagId = tag.tagID;
+                        break;
+                    }
+                }
+
+                if (!staleTagId.HasValue)
+                {
+                    break;
+                }
+
+                hero.RemoveTag(staleTagId.Value, false);
+                removedAny = true;
+            }
+
+            if (removedAny)
+            {
+                LoggerInstance.LogInfo($"Removed stale threshold talent instances from {TryGetHeroName(hero)}.");
+                TryRefreshHeroDetail(hero);
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to remove stale threshold talents from {TryGetHeroName(hero)}: {ex.Message}");
+        }
+    }
+
     private static string GetConfiguredThresholdTalentName()
     {
         var configured = _thresholdTalentName.Value?.Trim();
-        return string.IsNullOrWhiteSpace(configured) ? DefaultThresholdTalentName : configured;
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return DefaultThresholdTalentName;
+        }
+
+        if (configured.Contains('�'))
+        {
+            return DefaultThresholdTalentName;
+        }
+
+        for (var i = 0; i < configured.Length; i++)
+        {
+            if (char.IsControl(configured[i]))
+            {
+                return DefaultThresholdTalentName;
+            }
+        }
+
+        return configured;
     }
 
     private static void DialogHeroContextPostfix(HeroData __0)
@@ -6136,7 +6334,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             for (var i = 0; i < bonusState.ExtraItemCount; i++)
             {
-                targetHero.GetItem(itemData, false, false, 0, skipManageItemPoison);
+                var bonusItem = TryCreateCraftBonusItem(itemData, targetHero);
+                if (bonusItem == null)
+                {
+                    continue;
+                }
+
+                targetHero.GetItem(bonusItem, false, false, 0, skipManageItemPoison);
                 grantedCount++;
             }
         }
@@ -6194,7 +6398,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             for (var i = 0; i < bonusState.ExtraItemCount; i++)
             {
-                var bonusItem = TryCloneItem(item);
+                var bonusItem = TryCreateCraftBonusItem(item, player);
                 if (bonusItem == null)
                 {
                     continue;
@@ -6231,6 +6435,169 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         LoggerInstance.LogInfo($"[CraftTrace] {message}");
     }
 
+    private static ItemData? TryCreateCraftBonusItem(ItemData? sourceItem, HeroData? targetHero)
+    {
+        if (sourceItem == null)
+        {
+            return null;
+        }
+
+        if (IsEquipmentItem(sourceItem))
+        {
+            var rerolled = TryGenerateDistinctCraftEquipment(sourceItem, targetHero);
+            if (rerolled != null)
+            {
+                return rerolled;
+            }
+        }
+
+        return TryCloneItem(sourceItem) ?? sourceItem;
+    }
+
+    private static ItemData? TryGenerateDistinctCraftEquipment(ItemData sourceItem, HeroData? targetHero)
+    {
+        var gameController = GameController.Instance;
+        if (gameController == null || targetHero == null)
+        {
+            return null;
+        }
+
+        var controller = CraftUIController.Instance;
+        var targetItemType = (int)sourceItem.type;
+        var targetSubType = sourceItem.subType;
+        var targetLittleType = sourceItem.equipmentData?.littleType ?? 0;
+        var targetItemLv = sourceItem.itemLv;
+        var targetWeaponType = controller?.targetWeaponType ?? 0;
+        var bossLv = Mathf.Max(1f, controller?.targetBuilding?.lv ?? Math.Max(1, sourceItem.itemLv + 1));
+        var baseValue = Math.Max(1, sourceItem.value);
+        var valueMultipliers = new[] { 1f, 1.08f, 1.2f, 1.35f, 1.55f, 1.8f, 2.1f, 2.5f, 3f };
+        ItemData? bestFamilyMatch = null;
+
+        foreach (var multiplier in valueMultipliers)
+        {
+            var targetValue = Mathf.Max(baseValue, Mathf.RoundToInt(baseValue * multiplier));
+            ItemData? candidate = null;
+
+            try
+            {
+                candidate = gameController.GenerateRandomItemValue(
+                    targetValue,
+                    targetItemType,
+                    bossLv,
+                    targetSubType,
+                    targetLittleType,
+                    targetHero,
+                    targetWeaponType);
+            }
+            catch (Exception ex)
+            {
+                if (_traceMode.Value)
+                {
+                    LoggerInstance.LogWarning($"Craft bonus reroll failed at value {targetValue}: {ex.Message}");
+                }
+
+                continue;
+            }
+
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            if (!IsCompatibleCraftBonusCandidate(sourceItem, candidate))
+            {
+                if (_traceMode.Value)
+                {
+                    LoggerInstance.LogInfo(
+                        $"Craft bonus reroll rejected candidate {DescribeItemSummary(candidate)} for source {DescribeItemSummary(sourceItem)}.");
+                }
+
+                continue;
+            }
+
+            if (bestFamilyMatch == null)
+            {
+                bestFamilyMatch = candidate;
+            }
+
+            if (IsPreferredCraftBonusCandidate(sourceItem, candidate, bestFamilyMatch))
+            {
+                bestFamilyMatch = candidate;
+            }
+
+            if (IsExactCraftBonusCandidate(sourceItem, candidate))
+            {
+                if (_traceMode.Value)
+                {
+                    LoggerInstance.LogInfo(
+                        $"Craft bonus reroll exact match: source={DescribeItemSummary(sourceItem)}, generated={DescribeItemSummary(candidate)}.");
+                }
+
+                return candidate;
+            }
+        }
+
+        if (_traceMode.Value && bestFamilyMatch != null)
+        {
+            LoggerInstance.LogInfo(
+                $"Craft bonus reroll family match fallback: source={DescribeItemSummary(sourceItem)}, generated={DescribeItemSummary(bestFamilyMatch)}.");
+        }
+
+        return bestFamilyMatch;
+    }
+
+    private static bool IsCompatibleCraftBonusCandidate(ItemData sourceItem, ItemData candidate)
+    {
+        if (sourceItem.type != candidate.type || sourceItem.subType != candidate.subType || sourceItem.itemLv != candidate.itemLv)
+        {
+            return false;
+        }
+
+        return (sourceItem.equipmentData?.littleType ?? 0) == (candidate.equipmentData?.littleType ?? 0);
+    }
+
+    private static bool IsExactCraftBonusCandidate(ItemData sourceItem, ItemData candidate)
+    {
+        if (!IsCompatibleCraftBonusCandidate(sourceItem, candidate))
+        {
+            return false;
+        }
+
+        if (sourceItem.itemID > 0 && candidate.itemID > 0)
+        {
+            return sourceItem.itemID == candidate.itemID;
+        }
+
+        return string.Equals(sourceItem.name, candidate.name, StringComparison.Ordinal);
+    }
+
+    private static bool IsPreferredCraftBonusCandidate(ItemData sourceItem, ItemData candidate, ItemData currentBest)
+    {
+        if (!IsCompatibleCraftBonusCandidate(sourceItem, candidate))
+        {
+            return false;
+        }
+
+        if (IsExactCraftBonusCandidate(sourceItem, candidate))
+        {
+            return !IsExactCraftBonusCandidate(sourceItem, currentBest) ||
+                   candidate.rareLv >= currentBest.rareLv ||
+                   candidate.value >= currentBest.value;
+        }
+
+        if (IsExactCraftBonusCandidate(sourceItem, currentBest))
+        {
+            return false;
+        }
+
+        if (candidate.rareLv != currentBest.rareLv)
+        {
+            return candidate.rareLv > currentBest.rareLv;
+        }
+
+        return candidate.value > currentBest.value;
+    }
+
     private static ItemData? TryCloneItem(ItemData? item)
     {
         if (item == null)
@@ -6246,6 +6613,27 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             return null;
         }
+    }
+
+    private static bool IsEquipmentItem(ItemData? item)
+    {
+        if (item == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (item.type == ItemType.Equip)
+            {
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return string.Equals(TryGetItemTypeName(item), nameof(ItemType.Equip), StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ResetCraftRewardTracking(string source)
@@ -8333,6 +8721,171 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         var teamLeader = TryGetHeroTeamLeaderId(hero);
         return playerId.HasValue && teamLeader.HasValue && teamLeader.Value == playerId.Value;
+    }
+
+    private static float ResolvePositiveFloatGain(float requestedDelta, float? beforeValue, float? afterValue)
+    {
+        if (beforeValue.HasValue && afterValue.HasValue)
+        {
+            return Mathf.Max(0f, afterValue.Value - beforeValue.Value);
+        }
+
+        return Mathf.Max(0f, requestedDelta);
+    }
+
+    private static void TryApplyTeamFameShare(HeroData player, float playerFameGain)
+    {
+        if (player == null || playerFameGain <= 0.001f)
+        {
+            return;
+        }
+
+        var teammates = GetPlayerTeamMembers(player);
+        if (teammates.Count == 0)
+        {
+            if (_traceMode.Value)
+            {
+                LoggerInstance.LogInfo($"Team fame share skipped: no current player teammates for fame gain {SafeFormatValue(playerFameGain)}.");
+            }
+
+            return;
+        }
+
+        var sharePerTeammate = playerFameGain * TeamFameShareRatio;
+        if (sharePerTeammate <= 0.001f)
+        {
+            return;
+        }
+
+        var affectedCount = 0;
+        var totalApplied = 0f;
+        var preview = new List<string>();
+
+        foreach (var teammate in teammates)
+        {
+            var applied = TryApplySharedFameGain(teammate, sharePerTeammate);
+            if (applied <= 0.001f)
+            {
+                continue;
+            }
+
+            affectedCount++;
+            totalApplied += applied;
+            if (preview.Count < 3)
+            {
+                preview.Add($"{TryGetHeroName(teammate)}+{SafeFormatValue(applied)}");
+            }
+        }
+
+        if (affectedCount <= 0)
+        {
+            if (_traceMode.Value)
+            {
+                LoggerInstance.LogInfo(
+                    $"Team fame share found teammates but no fame changed: playerGain={SafeFormatValue(playerFameGain)}, share={SafeFormatValue(sharePerTeammate)}.");
+            }
+
+            return;
+        }
+
+        var previewText = preview.Count == 0 ? $"共{affectedCount}人" : string.Join("、", preview);
+        if (affectedCount > preview.Count)
+        {
+            previewText += $"等{affectedCount}人";
+        }
+
+        PushPlayerLog($"【同队声望】：{previewText}（主角+{SafeFormatValue(playerFameGain)}）");
+        LoggerInstance.LogInfo(
+            $"Team fame share applied: player={TryGetHeroName(player)}, playerGain={SafeFormatValue(playerFameGain)}, share={SafeFormatValue(sharePerTeammate)}, recipients={affectedCount}, totalApplied={SafeFormatValue(totalApplied)}.");
+    }
+
+    private static float TryApplySharedFameGain(HeroData teammate, float fameToGrant)
+    {
+        if (teammate == null || fameToGrant <= 0.001f)
+        {
+            return 0f;
+        }
+
+        var beforeFame = TryReadFame(teammate);
+        if (!beforeFame.HasValue)
+        {
+            return 0f;
+        }
+
+        var beforeForceLv = TryReadHeroForceLv(teammate);
+        try
+        {
+            _applyingTeamFameShare = true;
+            if (!TryInvokeChangeFame(teammate, fameToGrant, false))
+            {
+                return 0f;
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Team fame share failed for {TryGetHeroName(teammate)}: {ex.Message}");
+            return 0f;
+        }
+        finally
+        {
+            _applyingTeamFameShare = false;
+        }
+
+        try
+        {
+            teammate.CheckHeroFameForceLv();
+        }
+        catch
+        {
+        }
+
+        TryPromoteSectlessHeroForceLvFromFame(teammate, beforeForceLv, out _);
+
+        var afterFame = TryReadFame(teammate);
+        if (afterFame.HasValue)
+        {
+            return Mathf.Max(0f, afterFame.Value - beforeFame.Value);
+        }
+
+        return 0f;
+    }
+
+    private static bool TryInvokeChangeFame(HeroData hero, float fameToGrant, bool showInfo)
+    {
+        if (hero == null || _heroChangeFameMethod == null)
+        {
+            return false;
+        }
+
+        var parameters = _heroChangeFameMethod.GetParameters();
+        if (parameters.Length != 2)
+        {
+            return false;
+        }
+
+        object amount;
+        var amountType = parameters[0].ParameterType;
+        if (amountType == typeof(int))
+        {
+            var roundedAmount = Mathf.RoundToInt(fameToGrant);
+            if (roundedAmount <= 0)
+            {
+                return false;
+            }
+
+            amount = roundedAmount;
+        }
+        else if (amountType == typeof(double))
+        {
+            amount = (double)fameToGrant;
+        }
+        else
+        {
+            amount = fameToGrant;
+        }
+
+        _heroChangeFameMethod.Invoke(hero, new[] { amount, (object)showInfo });
+        return true;
     }
 
     private static void TryRollDailySkillInsight(int dayIndex, int totalDays, string source)

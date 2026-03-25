@@ -18,6 +18,7 @@ import {
 
 const MAIN_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.staminalock.cfg');
 const HORSE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.horsestamina.cfg');
+const QUEST_SNAPSHOT_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.questsnapshot.cfg');
 const LEGACY_TRACE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.tracedata.cfg');
 const LEGACY_SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.skilltalenttracer.cfg');
 const SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.skilltalentgrant.cfg');
@@ -252,6 +253,7 @@ export function getGamePaths(gameRoot: string) {
     doorstopConfigPath: path.join(gameRoot, DOORSTOP_NAME),
     mainConfigPath: path.join(gameRoot, MAIN_CONFIG_NAME),
     horseConfigPath: path.join(gameRoot, HORSE_CONFIG_NAME),
+    questSnapshotConfigPath: path.join(gameRoot, QUEST_SNAPSHOT_CONFIG_NAME),
     skillConfigPath: path.join(gameRoot, SKILL_CONFIG_NAME),
     battleConfigPath: path.join(gameRoot, BATTLE_CONFIG_NAME),
     customTalentConfigPath: path.join(gameRoot, CUSTOM_TALENT_CONFIG_NAME),
@@ -647,6 +649,18 @@ StaminaMultiplier = ${formatFloat(settings.horseStaminaMultiplier, 2)}
 `).trimStart();
 }
 
+function buildQuestSnapshotTemplate(): string {
+  return normalizeNewlines(`
+## Settings file was created by LongYinPlus Electron
+## Plugin GUID: codex.longyin.questsnapshot
+
+[General]
+Enabled = false
+RefreshIntervalSeconds = 2
+TraceMode = false
+`).trimStart();
+}
+
 function buildCustomTalentTemplate(pack = DEFAULT_CUSTOM_TALENT_PACK): string {
   return `${JSON.stringify(pack, null, 2)}\n`;
 }
@@ -670,6 +684,24 @@ async function ensureCustomTalentPackFile(filePath: string): Promise<string> {
   const template = buildCustomTalentTemplate();
   await writeUtf8File(filePath, template);
   return template;
+}
+
+async function ensureQuestSnapshotDisabled(filePath: string): Promise<string> {
+  const existing = await readTextIfExists(filePath);
+  if (existing === undefined) {
+    const template = buildQuestSnapshotTemplate();
+    await writeUtf8File(filePath, template);
+    return template;
+  }
+
+  let updated = existing;
+  updated = upsertIniValue(updated, 'Enabled', 'false');
+  updated = upsertIniValue(updated, 'TraceMode', 'false');
+  if (updated !== existing) {
+    await writeUtf8File(filePath, updated);
+  }
+
+  return updated;
 }
 
 async function ensureSteamAppIdFile(filePath: string): Promise<void> {
@@ -1058,6 +1090,7 @@ export async function ensureGameFiles(gameRoot: string): Promise<void> {
   await removeLegacyArtifacts(gameRoot);
   await ensureConfigFile(paths.mainConfigPath, buildMainTemplate());
   await ensureConfigFile(paths.horseConfigPath, buildHorseTemplate());
+  await ensureQuestSnapshotDisabled(paths.questSnapshotConfigPath);
   await ensureConfigFile(paths.skillConfigPath, buildSkillTemplate());
   await ensureConfigFile(paths.battleConfigPath, buildBattleTemplate());
   await ensureCustomTalentPackFile(paths.customTalentConfigPath);

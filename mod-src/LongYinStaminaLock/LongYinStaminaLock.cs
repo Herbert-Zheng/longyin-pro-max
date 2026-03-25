@@ -5039,7 +5039,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             var dataBase = tag.DataBase();
             return dataBase != null &&
                 string.Equals(dataBase.sameMeaning, ThresholdTalentMarker, StringComparison.Ordinal) &&
-                tag.tagID == _thresholdTalentTagId;
+                string.Equals(dataBase.category, ThresholdTalentCategory, StringComparison.Ordinal);
         }
         catch
         {

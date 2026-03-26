@@ -38,7 +38,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const string ThresholdTalentSource = "codex.threshold-talent";
     private const string ThresholdTalentCategory = "Pro Max";
     private const string ThresholdTalentMarker = "codex.threshold-talent";
-    private const string DefaultThresholdTalentName = "天人感应";
+    private const string LegacyThresholdTalentName = "天人感应";
+    private const string DefaultThresholdTalentName = "";
     private const float ThresholdTalentEvaluationIntervalSeconds = 0.5f;
     private const string CustomTalentCategory = "Pro Max Custom";
     private const string CustomTalentMarkerPrefix = "codex.custom-talent:";
@@ -176,7 +177,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static readonly List<KungfuSkillLvData> _dailySkillInsightCandidateBuffer = new();
     private static readonly List<RegisteredCustomTalent> _customTalents = new();
     private static int _thresholdTalentTagId = -1;
-    private static string _thresholdTalentTagName = DefaultThresholdTalentName;
+    private static string _thresholdTalentTagName = LegacyThresholdTalentName;
     private static float _nextThresholdTalentEvaluationAt = -1f;
     private static float _nextCustomTalentEvaluationAt = -1f;
     private static bool _thresholdTalentRegistrationWarned;
@@ -480,7 +481,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _teachSkillSameSectAreaShareMinPercent = Config.Bind("Teaching", "SameSectAreaShareMinPercent", 80, "Minimum percent of the original taught EXP shared to each additional same-sect NPC in the area.");
         _teachSkillSameSectAreaShareMaxPercent = Config.Bind("Teaching", "SameSectAreaShareMaxPercent", 120, "Maximum percent of the original taught EXP shared to each additional same-sect NPC in the area.");
         _thresholdTalentEnabled = Config.Bind("ThresholdTalent", "Enabled", true, "When true, the player automatically gains a custom talent while the chosen attribute stays at or above the configured threshold.");
-        _thresholdTalentName = Config.Bind("ThresholdTalent", "TalentName", DefaultThresholdTalentName, "Display name for the custom threshold talent.");
+        _thresholdTalentName = Config.Bind("ThresholdTalent", "TalentName", DefaultThresholdTalentName, "Display name for the custom threshold talent. Leave blank to keep the subsystem inactive; the legacy test name 天人感应 is ignored.");
         _thresholdTalentRequirementAttribute = Config.Bind("ThresholdTalent", "RequirementAttribute", BaseAttriType.Inte, "Hero attribute checked for the threshold talent.");
         _thresholdTalentRequirementValue = Config.Bind("ThresholdTalent", "RequirementValue", 10f, "Required current attribute value to activate the threshold talent.");
         _thresholdTalentBuffType = Config.Bind("ThresholdTalent", "BuffType", HeroSpeAddDataType.addAttri2, "Buff applied by the custom threshold talent while active.");
@@ -641,10 +642,17 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo($"Exploration treasure chest rewards start at x{Math.Max(1, _treasureChestTotalItems.Value)} total items when choice mode is OFF.");
         Log.LogInfo($"Read-book EXP multiplier starts at x{Mathf.Max(1, _bookExpMultiplier.Value)}.");
         Log.LogInfo($"Book-writing cost multiplier starts at x{FormatConfigFloat(Math.Max(0f, _studySkillCostMultiplier.Value))}.");
-        Log.LogInfo(
-            $"Threshold talent prototype starts {(_thresholdTalentEnabled.Value ? "ON" : "OFF")}: " +
-            $"{GetConfiguredThresholdTalentName()} on {_thresholdTalentRequirementAttribute.Value} >= {SafeFormatValue(_thresholdTalentRequirementValue.Value)} " +
-            $"gives {_thresholdTalentBuffType.Value} {SafeFormatValue(_thresholdTalentBuffValue.Value)}.");
+        if (IsThresholdTalentFeatureActive())
+        {
+            Log.LogInfo(
+                $"Threshold talent subsystem starts ON: " +
+                $"{GetConfiguredThresholdTalentName()} on {_thresholdTalentRequirementAttribute.Value} >= {SafeFormatValue(_thresholdTalentRequirementValue.Value)} " +
+                $"gives {_thresholdTalentBuffType.Value} {SafeFormatValue(_thresholdTalentBuffValue.Value)}.");
+        }
+        else
+        {
+            Log.LogInfo("Threshold talent subsystem starts OFF. The legacy test trigger 天人感应 is disabled.");
+        }
         Log.LogInfo($"Battle skill EXP multiplier starts at x{Mathf.Max(1, _battleSkillExpMultiplier.Value)}.");
         Log.LogInfo($"Character creation point multiplier starts at x{Math.Max(1, _creationPointMultiplier.Value)}.");
         Log.LogInfo($"Battle speed multiplier starts at x{Math.Max(1, _battleSpeedMultiplier.Value)}.");
@@ -5393,6 +5401,15 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
+        if (!IsThresholdTalentFeatureActive())
+        {
+            _thresholdTalentTagName = GetConfiguredThresholdTalentName();
+            _thresholdTalentTagId = -1;
+            RemoveLegacyThresholdTalentInstances(player);
+            RemoveThresholdTalent(player, "legacy-test-disabled");
+            return;
+        }
+
         if (!EnsureThresholdTalentRegistered("GameController.Update"))
         {
             return;
@@ -5441,6 +5458,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool EnsureThresholdTalentRegistered(string source)
     {
         _thresholdTalentTagName = GetConfiguredThresholdTalentName();
+
+        if (!IsThresholdTalentFeatureActive())
+        {
+            _thresholdTalentTagId = -1;
+            return false;
+        }
 
         var gameData = GameDataController.Instance;
         var database = gameData?.heroTagDataBase;
@@ -5839,23 +5862,35 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var configured = _thresholdTalentName.Value?.Trim();
         if (string.IsNullOrWhiteSpace(configured))
         {
-            return DefaultThresholdTalentName;
+            return LegacyThresholdTalentName;
         }
 
         if (configured.Contains('�'))
         {
-            return DefaultThresholdTalentName;
+            return LegacyThresholdTalentName;
         }
 
         for (var i = 0; i < configured.Length; i++)
         {
             if (char.IsControl(configured[i]))
             {
-                return DefaultThresholdTalentName;
+                return LegacyThresholdTalentName;
             }
         }
 
         return configured;
+    }
+
+    private static bool IsThresholdTalentFeatureActive()
+    {
+        if (!_thresholdTalentEnabled.Value)
+        {
+            return false;
+        }
+
+        var configuredName = GetConfiguredThresholdTalentName();
+        return !string.IsNullOrWhiteSpace(configuredName) &&
+            !string.Equals(configuredName, LegacyThresholdTalentName, StringComparison.Ordinal);
     }
 
     private static void DialogHeroContextPostfix(HeroData __0)

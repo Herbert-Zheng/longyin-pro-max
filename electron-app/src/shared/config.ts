@@ -62,6 +62,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   expMultiplier: 1,
   battleSkillExpMultiplier: 1,
   creationPointMultiplier: 1,
+  studySkillCostMultiplier: 1,
   horseBaseSpeedMultiplier: 1,
   horseTurboSpeedMultiplier: 1,
   horseTurboDurationMultiplier: 1,
@@ -534,6 +535,9 @@ TreasureChestTotalItems = ${hidden.treasureChestTotalItems}
 [ReadBook]
 ExpMultiplier = ${settings.expMultiplier}
 
+[StudySkill]
+CostMultiplier = ${formatFloat(settings.studySkillCostMultiplier)}
+
 [CharacterCreation]
 PointMultiplier = ${settings.creationPointMultiplier}
 
@@ -757,6 +761,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     expMultiplier: Math.round(clamp(input.expMultiplier, 1, 999)),
     battleSkillExpMultiplier: Math.round(clamp(input.battleSkillExpMultiplier, 1, 999)),
     creationPointMultiplier: Math.round(clamp(input.creationPointMultiplier, 1, 999)),
+    studySkillCostMultiplier: clamp(input.studySkillCostMultiplier, 0, 999),
     horseBaseSpeedMultiplier: clamp(input.horseBaseSpeedMultiplier, 0.01, 999),
     horseTurboSpeedMultiplier: clamp(input.horseTurboSpeedMultiplier, 0.01, 999),
     horseTurboDurationMultiplier: clamp(input.horseTurboDurationMultiplier, 0.01, 999),
@@ -807,6 +812,7 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
   const battleSection = getIniSectionBody(text, 'Battle');
   const dialogFlowSection = getIniSectionBody(text, 'DialogFlow');
   const dailySkillInsightSection = getIniSectionBody(text, 'DailySkillInsight');
+  const studySkillSection = getIniSectionBody(text, 'StudySkill');
   const relationshipSection = getIniSectionBody(text, 'Relationship');
   const systemsSection = getIniSectionBody(text, 'Systems') ?? getIniSectionBody(text, 'Time');
 
@@ -819,6 +825,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       DEFAULT_VISIBLE_SETTINGS.battleSkillExpMultiplier
     ),
     creationPointMultiplier: readInt(text, 'PointMultiplier', DEFAULT_VISIBLE_SETTINGS.creationPointMultiplier),
+    studySkillCostMultiplier: readFloat(
+      studySkillSection,
+      'CostMultiplier',
+      DEFAULT_VISIBLE_SETTINGS.studySkillCostMultiplier
+    ),
     horseBaseSpeedMultiplier: readFloat(text, 'BaseSpeedMultiplier', DEFAULT_VISIBLE_SETTINGS.horseBaseSpeedMultiplier),
     horseTurboSpeedMultiplier: readFloat(text, 'TurboSpeedMultiplier', DEFAULT_VISIBLE_SETTINGS.horseTurboSpeedMultiplier),
     horseTurboDurationMultiplier: readFloat(text, 'TurboDurationMultiplier', DEFAULT_VISIBLE_SETTINGS.horseTurboDurationMultiplier),
@@ -1131,6 +1142,7 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   nextMain = upsertIniValue(nextMain, 'ExpMultiplier', String(normalized.expMultiplier));
   nextMain = upsertIniSectionValue(nextMain, 'Battle', 'SkillExpMultiplier', String(normalized.battleSkillExpMultiplier));
   nextMain = upsertIniValue(nextMain, 'PointMultiplier', String(normalized.creationPointMultiplier));
+  nextMain = upsertIniSectionValue(nextMain, 'StudySkill', 'CostMultiplier', formatFloat(normalized.studySkillCostMultiplier));
   nextMain = upsertIniValue(nextMain, 'BaseSpeedMultiplier', formatFloat(normalized.horseBaseSpeedMultiplier));
   nextMain = upsertIniValue(nextMain, 'TurboSpeedMultiplier', formatFloat(normalized.horseTurboSpeedMultiplier));
   nextMain = upsertIniValue(nextMain, 'TurboDurationMultiplier', formatFloat(normalized.horseTurboDurationMultiplier));

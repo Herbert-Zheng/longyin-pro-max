@@ -223,6 +223,46 @@ Result:
 - the live test mod that granted team-`智慧` sum as money on `K` was confirmed fully working
 - this establishes a proven path for future features based on single-character stats and team-stat sums
 
+### 5. Custom talent system and bookwriter stat reading
+
+Confirmed custom talent flow:
+
+- custom talents are loaded from `BepInEx\config\codex.longyin.custom-talents.json`
+- each entry is registered as a runtime `HeroTagDataBase` with marker `codex.custom-talent:<id>`
+- the mod evaluates the player on a short interval from `GameController.Update`
+- if a talent's conditions become true, the mod grants the tag with `HeroData.AddTempTag(...)` and falls back to `HeroData.AddTag(...)` if needed
+- if the conditions stop being true, the mod removes the matching tag instances from the hero
+
+Confirmed stat-read path used by both custom talents and bookwriter math:
+
+- `TryReadHeroAttribute(HeroData hero, BaseAttriType attriType)` is the shared helper
+- it reads `hero.totalAttri[(int)attriType]` first
+- then it falls back to `hero.GetBaseAttriNum(attriType)`
+- then it falls back to `hero.baseAttri[(int)attriType]`
+
+Confirmed team-stat path used by custom talents:
+
+- `TryReadTeamAttributeSum(player, attriType)` sums the player plus `GetPlayerTeamMembers(player)`
+- this is the clean pattern when a condition should depend on the whole party instead of a single hero
+
+Bookwriter implementation note:
+
+- the manuscript-copy flow is a separate subsystem from the normal read-book EXP flow
+- the correct bookwriter hooks are `BookWriterUIController.SureButtonClicked`, `BookWriterData.GetTotalTimeCost`, and `BookWriterData.GetEachDayWorkPercent`
+- if `BookWriterData.GetBookWriterHero()` ever returns null, fall back to `bookWriterHeroID` and resolve the hero through `GameController.Instance.worldData.GetHero(...)`
+- the stat-based time formula being tested is:
+  - `X = Inte * 0.5 + ((Agl + Wil) * 0.25)`
+  - `Y = 100 - X`
+  - clamp `Y` to a minimum of `1`
+  - scale the time cost by `Y / 100`
+  - round the final day cost to the nearest whole day, with a minimum of `1`
+
+Practical mapping:
+
+- `智慧` -> `BaseAttriType.Inte`
+- `灵敏` -> `BaseAttriType.Agl`
+- `意志` -> `BaseAttriType.Wil`
+
 ## Current User-Facing Control Path
 
 The in-game custom menu experiment should be treated as failed for this game.

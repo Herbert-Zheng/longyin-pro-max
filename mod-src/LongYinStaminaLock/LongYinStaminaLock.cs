@@ -72,6 +72,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<int> _treasureChestChoiceOptions = null!;
     private static ConfigEntry<int> _treasureChestTotalItems = null!;
     private static ConfigEntry<int> _bookExpMultiplier = null!;
+    private static ConfigEntry<float> _studySkillCostMultiplier = null!;
     private static ConfigEntry<int> _battleSkillExpMultiplier = null!;
     private static ConfigEntry<int> _creationPointMultiplier = null!;
     private static ConfigEntry<int> _battleSpeedMultiplier = null!;
@@ -138,6 +139,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool _applyingDailySkillInsightExp;
     private static bool _applyingTeamAutoFavor;
     private static bool _applyingTeamFameShare;
+    private static bool _studySkillTaskScalingActive;
+    private static bool _studySkillTimeScalingActive;
+    private static bool _studySkillInjectingExtraDay;
+    private static bool _bookWriterCountdownOverrideArmed;
+    private static bool _bookWriterTaskScalingActive;
+    private static bool _readBookCountdownOverrideArmed;
     private static bool _grantingCraftBonusItems;
     private static bool _repeatingCraftChoiceReward;
     private static bool _exploreFullRevealConsumed;
@@ -145,6 +152,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool _grantingTreasureChestBonusItems;
     private static bool _treasureChestChoiceClosingPlot;
     private static bool _dailySkillInsightBaselineReady;
+    private static float _studySkillUnitDayBudget;
+    private static float _studySkillExtraDayCarry;
+    private static TimeData? _studySkillTaskStartDate;
+    private static TimeData? _bookWriterTaskStartDate;
+    private static TimeData? _readBookCountdownStartDate;
+    private static int _bookWriterTaskTargetDays;
+    private static BookWriterData? _bookWriterTaskData;
     private static float _nextRealtimeDailySkillInsightAt = -1f;
     private static TimeData? _lastObservedWorldDate;
     private static int _lastDrinkControllerInstanceId;
@@ -426,6 +440,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _treasureChestChoiceOptions = Config.Bind("Exploration", "TreasureChestChoiceOptions", 3, "How many reward options each exploration treasure chest should show when choice mode is enabled.");
         _treasureChestTotalItems = Config.Bind("Exploration", "TreasureChestTotalItems", 2, "Total item rewards to grant from exploration treasure chests. Set to 1 for vanilla behavior.");
         _bookExpMultiplier = Config.Bind("ReadBook", "ExpMultiplier", 1, "Multiplies EXP gained from reading books.");
+        _studySkillCostMultiplier = Config.Bind("StudySkill", "CostMultiplier", 1f, "Multiplies both silver and time costs for martial-skill book writing / transcription.");
         _battleSkillExpMultiplier = Config.Bind("Battle", "SkillExpMultiplier", 1, "Multiplies martial-skill EXP gained from battle actions for every combatant, including enemies.");
         _creationPointMultiplier = Config.Bind("CharacterCreation", "PointMultiplier", 1, "Multiplies the remaining point pools during character creation.");
         _battleSpeedMultiplier = Config.Bind("Battle", "SpeedMultiplier", 2, "Multiplies the selected in-battle speed option.");
@@ -557,6 +572,37 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.GetMaretialExtraCraftRate), Type.EmptyTypes, null, nameof(GetCraftMaterialExtraCraftRatePostfix));
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.CraftResultChoosen), new[] { typeof(int) }, null, nameof(CraftUiResultChoosenPostfix));
         PatchMethod(typeof(ItemData), nameof(ItemData.GetMaterialExtraCraftRate), Type.EmptyTypes, null, nameof(GetItemMaterialExtraCraftRatePostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.RealStartReadBook), Type.EmptyTypes, nameof(ReadBookTaskStartPrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.ReadBookChoosen), Type.EmptyTypes, nameof(ReadBookTracePrefix), null);
+        PatchMethod(typeof(PlotController), nameof(PlotController.ChooseReadBook), new[] { typeof(string) }, nameof(ReadBookTracePrefix), null);
+        PatchMethod(typeof(ReadBookController), nameof(ReadBookController.ShowReadBookPanel), Type.EmptyTypes, nameof(ReadBookTracePrefix), null);
+        PatchMethod(typeof(ReadBookController), nameof(ReadBookController.GenerateReadBookPanel), Type.EmptyTypes, nameof(ReadBookTracePrefix), null);
+        PatchMethod(typeof(ReadBookController), nameof(ReadBookController.ChangePatient), new[] { typeof(int) }, nameof(ReadBookTracePrefix), null);
+        PatchMethod(typeof(ReadBookController), nameof(ReadBookController.AutoReadBook), Type.EmptyTypes, nameof(ReadBookTracePrefix), null);
+        PatchMethod(typeof(ReadBookController), nameof(ReadBookController.Update), Type.EmptyTypes, null, nameof(ReadBookUpdatePostfix));
+        PatchMethod(typeof(ReadBookController), nameof(ReadBookController.GetReadExp), new[] { typeof(float) }, nameof(ReadBookTracePrefix), null);
+        PatchMethod(typeof(ReadBookController), nameof(ReadBookController.GetTotalExp), Type.EmptyTypes, nameof(ReadBookTracePrefix), null);
+        PatchMethod(typeof(ReadBookController), nameof(ReadBookController.StartReadBook), new[] { typeof(HeroData), typeof(ItemData), typeof(bool), typeof(bool) }, nameof(ReadBookTracePrefix), null);
+        PatchMethod(typeof(ReadBookController), nameof(ReadBookController.SureStartReadBook), Type.EmptyTypes, nameof(ReadBookTaskStartPrefix), null);
+        PatchMethod(typeof(ReadBookController), nameof(ReadBookController.RealStartReadBook), Type.EmptyTypes, nameof(ReadBookTaskStartPrefix), null);
+        PatchMethod(typeof(ReadBookController), nameof(ReadBookController.FinishRead), Type.EmptyTypes, null, nameof(ReadBookFinishPostfix));
+        PatchMethod(typeof(BookWriterUIController), nameof(BookWriterUIController.SureButtonClicked), new[] { typeof(GameObject) }, nameof(BookWriterSureButtonPrefix), nameof(BookWriterSureButtonPostfix));
+        PatchMethod(typeof(BookWriterData), nameof(BookWriterData.GetTotalTimeCost), Type.EmptyTypes, null, nameof(BookWriterTotalTimeCostPostfix));
+        PatchMethod(typeof(BookWriterData), nameof(BookWriterData.GetEachDayWorkPercent), Type.EmptyTypes, null, nameof(BookWriterEachDayWorkPercentPostfix));
+        PatchMethod(typeof(StudySkillController), nameof(StudySkillController.SureStartStudySkill), Type.EmptyTypes, nameof(RealStartStudySkillPrefix), null);
+        PatchMethod(typeof(StudySkillController), "PlayerStudySkill", Type.EmptyTypes, nameof(StudySkillTracePrefix), null);
+        PatchMethod(typeof(StudySkillController), "StartStudySkill", new[] { typeof(StudySkillType), typeof(KungfuSkillLvData), typeof(string), typeof(AreaBuildingData), typeof(bool) }, nameof(StudySkillTracePrefix), null);
+        PatchMethod(typeof(StudySkillController), nameof(StudySkillController.GetAutoPracticeCost), Type.EmptyTypes, null, nameof(GetAutoPracticeCostPostfix));
+        PatchMethod(typeof(KungfuSkillLvData), nameof(KungfuSkillLvData.StudyMoneyCost), Type.EmptyTypes, null, nameof(StudyMoneyCostPostfix));
+        PatchMethod(typeof(KungfuSkillLvData), nameof(KungfuSkillLvData.StudyDayCost), Type.EmptyTypes, null, nameof(StudyDayCostPostfix));
+        PatchMethod(typeof(StudyAttackSkillController), "StartStudyFightSkill", new[] { typeof(KungfuSkillLvData) }, nameof(StudySkillTracePrefix), null);
+        PatchMethod(typeof(StudyDodgeSkillController), "StartStudyDodgeSkill", new[] { typeof(KungfuSkillLvData) }, nameof(StudySkillTracePrefix), null);
+        PatchMethod(typeof(StudyInternalSkillController), "StartStudyInternalSkill", new[] { typeof(KungfuSkillLvData) }, nameof(StudySkillTracePrefix), null);
+        PatchMethod(typeof(StudyUniqueSkillController), "StartStudyUniqueSkill", new[] { typeof(KungfuSkillLvData) }, nameof(StudySkillTracePrefix), null);
+        PatchMethod(typeof(MailData), ".ctor", new[] { typeof(string), typeof(string), typeof(TimeData), typeof(bool), typeof(bool) }, null, nameof(MailDataCtorPostfix));
+        PatchMethod(typeof(GameController), nameof(GameController.GetNewMail), new[] { typeof(MailData), typeof(HeroData) }, null, nameof(GetNewMailPostfix));
+        PatchMethod(typeof(StudySkillController), nameof(StudySkillController.RealStartStudySkill), Type.EmptyTypes, nameof(RealStartStudySkillPrefix), null);
+        PatchMethod(typeof(StudySkillController), nameof(StudySkillController.FinishStudySkill), new[] { typeof(float) }, null, nameof(FinishStudySkillPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.CraftResultChoosen), new[] { typeof(ItemData) }, nameof(CraftResultChoosenPrefix), nameof(CraftResultChoosenPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.SetPlotItem), new[] { typeof(ItemData), typeof(bool) }, null, nameof(SetPlotItemPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.PlayerGetPlotItem), Type.EmptyTypes, nameof(PlayerGetPlotItemPrefix), nameof(PlayerGetPlotItemPostfix));
@@ -594,6 +640,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             $"and highest-value auto-pick {(_treasureChestAutoPickMostValuable.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Exploration treasure chest rewards start at x{Math.Max(1, _treasureChestTotalItems.Value)} total items when choice mode is OFF.");
         Log.LogInfo($"Read-book EXP multiplier starts at x{Mathf.Max(1, _bookExpMultiplier.Value)}.");
+        Log.LogInfo($"Book-writing cost multiplier starts at x{FormatConfigFloat(Math.Max(0f, _studySkillCostMultiplier.Value))}.");
         Log.LogInfo(
             $"Threshold talent prototype starts {(_thresholdTalentEnabled.Value ? "ON" : "OFF")}: " +
             $"{GetConfiguredThresholdTalentName()} on {_thresholdTalentRequirementAttribute.Value} >= {SafeFormatValue(_thresholdTalentRequirementValue.Value)} " +
@@ -646,7 +693,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private void PatchMethod(Type type, string methodName, Type[] parameterTypes, string? prefixName, string? postfixName)
     {
-        var target = AccessTools.Method(type, methodName, parameterTypes);
+        MethodBase? target = string.Equals(methodName, ".ctor", StringComparison.Ordinal)
+            ? AccessTools.Constructor(type, parameterTypes)
+            : AccessTools.Method(type, methodName, parameterTypes);
         var prefix = prefixName == null ? null : AccessTools.Method(typeof(LongYinStaminaLockPlugin), prefixName);
         var postfix = postfixName == null ? null : AccessTools.Method(typeof(LongYinStaminaLockPlugin), postfixName);
 
@@ -3035,6 +3084,392 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         num *= multiplier;
     }
 
+    private static void RealStartStudySkillPrefix()
+    {
+        BeginStudyTaskScaling("RealStartStudySkill");
+    }
+
+    private static void ReadBookTaskStartPrefix()
+    {
+        ArmReadBookCountdownOverride("RealStartReadBook");
+    }
+
+    private static bool BookWriterSureButtonPrefix(MethodBase __originalMethod, object[] __args)
+    {
+        ArmBookWriterTaskScaling("BookWriterUIController.SureButtonClicked");
+        return true;
+    }
+
+    private static void BookWriterSureButtonPostfix()
+    {
+    }
+
+    private static void BookWriterTotalTimeCostPostfix(BookWriterData __instance, ref int __result)
+    {
+        if (__instance == null)
+        {
+            return;
+        }
+
+        if (TryApplyBookWriterStatScaling(__instance, __result, "GetTotalTimeCost", out var sourceHero, out var inte, out var agl, out var wil, out var x, out var y, out var scaledDays))
+        {
+            __result = scaledDays;
+        }
+    }
+
+    private static void BookWriterEachDayWorkPercentPostfix(BookWriterData __instance, ref float __result)
+    {
+        if (__instance == null)
+        {
+            return;
+        }
+
+        var baseDays = __result <= 0.01f
+            ? 1
+            : Math.Max(1, Mathf.CeilToInt(100f / __result));
+
+        if (TryApplyBookWriterStatScaling(__instance, baseDays, "GetEachDayWorkPercent", out var sourceHero, out var inte, out var agl, out var wil, out var x, out var y, out var scaledDays))
+        {
+            __result = Mathf.Max(1f, 100f / scaledDays);
+        }
+    }
+
+    private static void ArmBookWriterTaskScaling(string source)
+    {
+        var writerUI = SafeGetBookWriterUI();
+        if (writerUI == null)
+        {
+            ClearBookWriterTaskScaling($"{source}:no-ui");
+            return;
+        }
+
+        var writerList = writerUI.targetBookWriterList;
+        var count = TryGetCollectionCount(writerList);
+        if (writerList == null || count <= 0)
+        {
+            ClearBookWriterTaskScaling($"{source}:no-list");
+            return;
+        }
+
+        var activeWriter = ResolveActiveBookWriterData(writerUI, writerList, count);
+        if (activeWriter == null)
+        {
+            ClearBookWriterTaskScaling($"{source}:no-active");
+            return;
+        }
+
+        try
+        {
+            _bookWriterTaskTargetDays = Math.Max(1, activeWriter.GetTotalTimeCost());
+            _bookWriterTaskData = activeWriter;
+            _bookWriterTaskStartDate = TryGetWorldDateSnapshot();
+            _bookWriterTaskScalingActive = true;
+            _bookWriterCountdownOverrideArmed = true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to arm book writer scaling from {source}: {ex.Message}");
+            ClearBookWriterTaskScaling($"{source}:arm-failed");
+        }
+    }
+
+    private static BookWriterUIController? SafeGetBookWriterUI()
+    {
+        try
+        {
+            return BookWriterUIController.Instance;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool TryApplyBookWriterStatScaling(BookWriterData? writerData, int baseDays, string source, out HeroData? sourceHero, out float inte, out float agl, out float wil, out float x, out float y, out int scaledDays)
+    {
+        sourceHero = null;
+        inte = 0f;
+        agl = 0f;
+        wil = 0f;
+        x = 0f;
+        y = 100f;
+        scaledDays = Math.Max(1, baseDays);
+
+        if (writerData == null)
+        {
+            return false;
+        }
+
+        sourceHero = TryResolveBookWriterHero(writerData);
+
+        if (sourceHero == null)
+        {
+            return false;
+        }
+
+        inte = TryReadHeroAttribute(sourceHero, BaseAttriType.Inte) ?? 0f;
+        agl = TryReadHeroAttribute(sourceHero, BaseAttriType.Agl) ?? 0f;
+        wil = TryReadHeroAttribute(sourceHero, BaseAttriType.Wil) ?? 0f;
+        x = (inte * 0.5f) + ((agl + wil) * 0.25f);
+        y = Math.Max(1f, 100f - x);
+        scaledDays = Math.Max(1, Mathf.RoundToInt(baseDays * (y / 100f)));
+
+        return true;
+    }
+
+    private static HeroData? TryResolveBookWriterHero(BookWriterData writerData)
+    {
+        try
+        {
+            var hero = writerData.GetBookWriterHero();
+            if (hero != null)
+            {
+                return hero;
+            }
+        }
+        catch
+        {
+        }
+
+        var heroIdValue = SafeProperty(writerData, "bookWriterHeroID") ?? SafeField(writerData, "bookWriterHeroID");
+        var heroId = TryConvertToInt(heroIdValue);
+        if (!heroId.HasValue || heroId.Value < 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return GameController.Instance?.worldData?.GetHero(heroId.Value);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool ReadBookTracePrefix(MethodBase __originalMethod, object[] __args)
+    {
+        if (IsReadBookCountdownStartMethod(__originalMethod))
+        {
+            ArmReadBookCountdownOverride(DescribeMethod(__originalMethod));
+        }
+
+        return true;
+    }
+
+    private static void ArmReadBookCountdownOverride(string source)
+    {
+        _readBookCountdownOverrideArmed = true;
+        _readBookCountdownStartDate = TryGetWorldDateSnapshot();
+    }
+
+    private static void ReadBookFinishPostfix()
+    {
+        _readBookCountdownOverrideArmed = false;
+        _readBookCountdownStartDate = null;
+    }
+
+    private static bool IsReadBookCountdownStartMethod(MethodBase originalMethod)
+    {
+        return string.Equals(originalMethod.Name, nameof(ReadBookController.StartReadBook), StringComparison.Ordinal) ||
+            string.Equals(originalMethod.Name, nameof(ReadBookController.SureStartReadBook), StringComparison.Ordinal) ||
+            string.Equals(originalMethod.Name, nameof(ReadBookController.RealStartReadBook), StringComparison.Ordinal) ||
+            string.Equals(originalMethod.Name, nameof(PlotController.RealStartReadBook), StringComparison.Ordinal);
+    }
+
+    private static void TryForceReadBookCountdown(MailData mailData, string? mailTitle, string? mailText, string source)
+    {
+        if (!_readBookCountdownOverrideArmed)
+        {
+            return;
+        }
+
+        var startDate = _readBookCountdownStartDate ?? TryGetWorldDateSnapshot();
+        if (startDate == null)
+        {
+            return;
+        }
+
+        var targetDate = TryBuildDateFromDelta(startDate, 1);
+        if (targetDate == null)
+        {
+            return;
+        }
+
+        var originalDate = mailData.mailTime;
+        mailData.mailTime = targetDate;
+        _readBookCountdownOverrideArmed = false;
+        _readBookCountdownStartDate = null;
+    }
+
+    private static void ReadBookUpdatePostfix(ReadBookController __instance)
+    {
+        if (__instance == null)
+        {
+            return;
+        }
+
+        TraceReadBookState(__instance, "Update");
+    }
+
+    private static void TraceReadBookState(ReadBookController __instance, string source)
+    {
+    }
+
+    private static void FinishStudySkillPostfix(float expNum)
+    {
+        if (!_studySkillTimeScalingActive)
+        {
+            return;
+        }
+
+        _studySkillTaskScalingActive = false;
+        _studySkillTaskStartDate = null;
+        _studySkillTimeScalingActive = false;
+        _studySkillInjectingExtraDay = false;
+        _studySkillUnitDayBudget = 0f;
+        _studySkillExtraDayCarry = 0f;
+    }
+
+    private static void GetAutoPracticeCostPostfix(ref int __result)
+    {
+        ScaleStudySkillCostResult(ref __result, "Martial-skill transcription auto practice cost");
+    }
+
+    private static void StudyMoneyCostPostfix(ref int __result)
+    {
+        ScaleStudySkillCostResult(ref __result, "Martial-skill transcription money cost");
+    }
+
+    private static void StudyDayCostPostfix(ref int __result)
+    {
+        ScaleStudySkillCostResult(ref __result, "Martial-skill transcription day cost");
+    }
+
+    private static bool StudySkillTracePrefix(MethodBase __originalMethod, object[] __args)
+    {
+        if (IsStudyTaskCreationMethod(__originalMethod))
+        {
+            BeginStudyTaskScaling(DescribeMethod(__originalMethod));
+        }
+
+        return true;
+    }
+
+    private static bool IsStudyTaskCreationMethod(MethodBase originalMethod)
+    {
+        return string.Equals(originalMethod.Name, "PlayerStudySkill", StringComparison.Ordinal) ||
+            string.Equals(originalMethod.Name, "StartStudySkill", StringComparison.Ordinal) ||
+            string.Equals(originalMethod.Name, "StartStudyFightSkill", StringComparison.Ordinal) ||
+            string.Equals(originalMethod.Name, "StartStudyDodgeSkill", StringComparison.Ordinal) ||
+            string.Equals(originalMethod.Name, "StartStudyInternalSkill", StringComparison.Ordinal) ||
+            string.Equals(originalMethod.Name, "StartStudyUniqueSkill", StringComparison.Ordinal);
+    }
+
+    private static void BeginStudyTaskScaling(string source)
+    {
+        if (_studySkillTaskScalingActive)
+        {
+            return;
+        }
+
+        _studySkillTaskScalingActive = true;
+        _studySkillTaskStartDate = TryGetWorldDateSnapshot();
+    }
+
+    private static void MailDataCtorPostfix(MailData __instance)
+    {
+        var mailTitle = SafeProperty(__instance, "mailTitle") as string;
+        var mailText = SafeProperty(__instance, "mailText") as string;
+        var mailTime = SafeProperty(__instance, "mailTime") as TimeData;
+
+        TryForceReadBookCountdown(__instance, mailTitle, mailText, "MailData..ctor");
+    }
+
+    private static void GetNewMailPostfix(MailData targetMail, HeroData sourceHero)
+    {
+        TryForceReadBookCountdown(targetMail, targetMail?.mailTitle, targetMail?.mailText, "GameController.GetNewMail");
+    }
+
+    private static TimeData? TryBuildDateFromDelta(TimeData startDate, int deltaDays)
+    {
+        if (deltaDays <= 0)
+        {
+            return new TimeData(startDate.year, startDate.month, startDate.day);
+        }
+
+        var monthLengths = new[] { 30, 31, 29, 28 };
+        foreach (var monthLength in monthLengths)
+        {
+            var year = startDate.year;
+            var month = startDate.month;
+            var day = startDate.day + deltaDays;
+
+            while (day > monthLength)
+            {
+                day -= monthLength;
+                month++;
+                if (month > 12)
+                {
+                    month = 1;
+                    year++;
+                }
+            }
+
+            try
+            {
+                var candidate = new TimeData(year, month, day);
+                if (GetElapsedDayCount(startDate, candidate) == deltaDays)
+                {
+                    return candidate;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return null;
+    }
+
+    private static void StudySkillGetTimeNeedPostfix(MethodBase __originalMethod, object[] __args, object __result)
+    {
+        TraceStudySkillResult("GetTimeNeed", __originalMethod, __args, __result);
+    }
+
+    private static void StudySkillTimePostfix(MethodBase __originalMethod, object[] __args, object __result)
+    {
+        TraceStudySkillResult("StudySkillTime", __originalMethod, __args, __result);
+    }
+
+    private static void BuildingStudySkillCostRatePostfix(MethodBase __originalMethod, object[] __args, object __result)
+    {
+        TraceStudySkillResult("BuildingStudySkillCostRate", __originalMethod, __args, __result);
+    }
+
+    private static void TraceStudySkillResult(string label, MethodBase __originalMethod, object[] __args, object __result)
+    {
+    }
+
+    private static void ScaleStudySkillCostResult(ref int __result, string traceLabel)
+    {
+        var multiplier = Math.Max(0f, _studySkillCostMultiplier.Value);
+        if (Math.Abs(multiplier - 1f) < 0.001f || __result <= 0)
+        {
+            return;
+        }
+
+        var original = __result;
+        __result = Math.Max(0, Mathf.RoundToInt(original * multiplier));
+
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo(
+                $"{traceLabel} scaled: {SafeFormatValue(original)} -> {SafeFormatValue(__result)} with x{FormatConfigFloat(multiplier)}.");
+        }
+    }
+
     private static void BattleChangeSkillFightExpPrefix(HeroData __instance, ref float num, KungfuSkillLvData targetSkill, bool showInfo)
     {
         var originalExp = num;
@@ -3609,6 +4044,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return false;
         }
 
+        if (TryApplyStudySkillTimeScaling(__originalMethod, __args, out var skipOriginalCall))
+        {
+            if (skipOriginalCall)
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -3622,6 +4065,34 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         HandleDailySkillInsightDateProgress(__state.BeforeDate, TryGetWorldDateSnapshot(), DescribeMethod(__originalMethod));
         HandleTeamAutoFavorDateProgress(__state.BeforeDate, TryGetWorldDateSnapshot(), DescribeMethod(__originalMethod));
+
+        if (_studySkillTimeScalingActive && !_studySkillInjectingExtraDay)
+        {
+            var multiplier = Math.Max(0f, _studySkillCostMultiplier.Value);
+            if (multiplier > 1f && IsStudyDayChangeMethod(__originalMethod) && __args.Length == 0)
+            {
+                _studySkillExtraDayCarry += multiplier - 1f;
+                while (_studySkillExtraDayCarry >= 1f)
+                {
+                    _studySkillExtraDayCarry -= 1f;
+                    try
+                    {
+                        _studySkillInjectingExtraDay = true;
+                        GameController.Instance?.ChangeDay();
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggerInstance.LogWarning($"Failed to apply study skill extra day scaling: {ex.Message}");
+                        _studySkillExtraDayCarry = 0f;
+                        break;
+                    }
+                    finally
+                    {
+                        _studySkillInjectingExtraDay = false;
+                    }
+                }
+            }
+        }
     }
 
     private static bool HourChangePrefix(MethodBase __originalMethod, object[] __args, out string __state)
@@ -3632,6 +4103,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             LoggerInstance.LogInfo($"TRACE TIME ENTER {DescribeMethod(__originalMethod)} dateBefore={__state} args={DescribeArgs(__args)}");
         }
+
+        TryApplyStudyHourScaling(__originalMethod, __args);
 
         return true;
     }
@@ -3647,11 +4120,140 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static void ShowStartMenuPostfix()
     {
         ClearShopOwnershipRuntimeState("StartMenu.ShowStartMenu");
+        ResetStudySkillTimeScalingState("StartMenu.ShowStartMenu");
     }
 
     private static void ShowMainMenuPostfix()
     {
         ClearShopOwnershipRuntimeState("GameTitle.ShowMainMenu");
+        ResetStudySkillTimeScalingState("GameTitle.ShowMainMenu");
+    }
+
+    private static bool TryApplyStudySkillTimeScaling(MethodBase originalMethod, object[] args, out bool skipOriginalCall)
+    {
+        skipOriginalCall = false;
+
+        if (!_studySkillTimeScalingActive || _studySkillInjectingExtraDay)
+        {
+            return false;
+        }
+
+        var multiplier = Math.Max(0f, _studySkillCostMultiplier.Value);
+        if (Math.Abs(multiplier - 1f) < 0.001f || multiplier <= 0f)
+        {
+            return false;
+        }
+
+        if (!IsStudyDayChangeMethod(originalMethod))
+        {
+            return false;
+        }
+
+        if (args.Length == 0)
+        {
+            if (multiplier < 1f)
+            {
+                _studySkillUnitDayBudget += multiplier;
+                if (_studySkillUnitDayBudget < 1f)
+                {
+                    skipOriginalCall = true;
+                }
+                else
+                {
+                    _studySkillUnitDayBudget -= 1f;
+                }
+            }
+
+            return true;
+        }
+
+        var originalDelta = TryConvertToInt(args[0]) ?? 0;
+        if (originalDelta <= 0)
+        {
+            return false;
+        }
+
+        if (multiplier < 1f && originalDelta == 1)
+        {
+            _studySkillUnitDayBudget += multiplier;
+            if (_studySkillUnitDayBudget < 1f)
+            {
+                skipOriginalCall = true;
+                return true;
+            }
+
+            _studySkillUnitDayBudget -= 1f;
+            return true;
+        }
+
+        var scaled = multiplier < 1f
+            ? Mathf.FloorToInt(originalDelta * multiplier)
+            : Mathf.CeilToInt(originalDelta * multiplier);
+        if (scaled <= 0)
+        {
+            skipOriginalCall = true;
+            return true;
+        }
+
+        if (scaled != originalDelta)
+        {
+            args[0] = scaled;
+        }
+
+        return true;
+    }
+
+    private static bool TryApplyStudyHourScaling(MethodBase originalMethod, object[] args)
+    {
+        if (!_studySkillTimeScalingActive || _studySkillInjectingExtraDay)
+        {
+            return false;
+        }
+
+        var multiplier = Math.Max(0f, _studySkillCostMultiplier.Value);
+        if (Math.Abs(multiplier - 1f) < 0.001f || multiplier <= 0f)
+        {
+            return false;
+        }
+
+        if (!string.Equals(originalMethod.Name, nameof(GameController.ChangeHour), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (args.Length == 0)
+        {
+            return false;
+        }
+
+        var originalHours = TryConvertToFloat(args[0]) ?? 0f;
+        if (originalHours <= 0f)
+        {
+            return false;
+        }
+
+        args[0] = originalHours * multiplier;
+
+        return true;
+    }
+
+    private static bool IsStudyDayChangeMethod(MethodBase originalMethod)
+    {
+        return string.Equals(originalMethod.Name, nameof(GameController.ChangeDay), StringComparison.Ordinal) ||
+            string.Equals(originalMethod.Name, nameof(GameController.ChangeDayDirect), StringComparison.Ordinal);
+    }
+
+    private static void ResetStudySkillTimeScalingState(string source)
+    {
+        if (!_studySkillTimeScalingActive && Math.Abs(_studySkillUnitDayBudget) < 0.001f && Math.Abs(_studySkillExtraDayCarry) < 0.001f)
+        {
+            return;
+        }
+
+        _studySkillTimeScalingActive = false;
+        _studySkillInjectingExtraDay = false;
+        _studySkillUnitDayBudget = 0f;
+        _studySkillExtraDayCarry = 0f;
     }
 
     private static void SaveSlotButtonClickedPrefix(int saveID)
@@ -4072,6 +4674,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         TryRunRealtimeSkillInsight();
         TryEvaluateCustomTalents();
         TryEvaluateThresholdTalent();
+        TryUpdateBookWriterScaling("GameController.Update");
         UpdateTreasureChestChoiceSession();
         UpdateDialogFastForwardAssist();
         KeepPlayerHorseTurboReady("Update");
@@ -4100,6 +4703,121 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             ApplyViewedHeroFavorTest();
         }
 
+    }
+
+    private static void TryUpdateBookWriterScaling(string source)
+    {
+        BookWriterUIController? writerUI;
+        try
+        {
+            writerUI = BookWriterUIController.Instance;
+        }
+        catch
+        {
+            return;
+        }
+
+        if (writerUI == null)
+        {
+            return;
+        }
+
+        var writerList = writerUI.targetBookWriterList;
+        if (writerList == null)
+        {
+            return;
+        }
+
+        var count = TryGetCollectionCount(writerList);
+        if (count <= 0)
+        {
+            return;
+        }
+
+        var activeWriter = ResolveActiveBookWriterData(writerUI, writerList, count);
+        if (activeWriter == null)
+        {
+            return;
+        }
+
+        if (!_bookWriterTaskScalingActive)
+        {
+            return;
+        }
+
+        if (!_bookWriterCountdownOverrideArmed || !ReferenceEquals(activeWriter, _bookWriterTaskData))
+        {
+            _bookWriterTaskData = activeWriter;
+            _bookWriterCountdownOverrideArmed = true;
+            _bookWriterTaskStartDate = _bookWriterTaskStartDate ?? TryGetWorldDateSnapshot();
+        }
+
+        var started = activeWriter.workStarted;
+        var progress = activeWriter.workPercent;
+        if (!started)
+        {
+            return;
+        }
+
+        var currentDate = TryGetWorldDateSnapshot();
+        var startDate = _bookWriterTaskStartDate;
+        if (startDate == null || currentDate == null)
+        {
+            return;
+        }
+
+        var elapsedDays = GetElapsedDayCount(startDate, currentDate);
+        if (elapsedDays < _bookWriterTaskTargetDays)
+        {
+            return;
+        }
+
+        activeWriter.workPercent = 1f;
+
+        ClearBookWriterTaskScaling($"{source}:completed");
+    }
+
+    private static void ClearBookWriterTaskScaling(string source)
+    {
+        if (!_bookWriterTaskScalingActive && !_bookWriterCountdownOverrideArmed && _bookWriterTaskData == null)
+        {
+            return;
+        }
+
+        _bookWriterTaskScalingActive = false;
+        _bookWriterCountdownOverrideArmed = false;
+        _bookWriterTaskStartDate = null;
+        _bookWriterTaskTargetDays = 0;
+        _bookWriterTaskData = null;
+    }
+
+    private static BookWriterData? ResolveActiveBookWriterData(BookWriterUIController writerUI, object writerList, int count)
+    {
+        var activeId = SafeProperty(writerUI, "activeID") ?? SafeField(writerUI, "activeID");
+        var activeIndex = TryConvertToInt(activeId) ?? -1;
+
+        if (activeIndex >= 0 && activeIndex < count)
+        {
+            return TryGetIndexedValue(writerList, activeIndex) as BookWriterData;
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            if (TryGetIndexedValue(writerList, i) is BookWriterData writerData && writerData.workStarted)
+            {
+                return writerData;
+            }
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            if (TryGetIndexedValue(writerList, i) is BookWriterData writerData)
+            {
+                return writerData;
+            }
+        }
+
+        return null;
     }
 
     private static void LoadAllGameDataPostfix()

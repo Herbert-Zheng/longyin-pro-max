@@ -116,13 +116,18 @@ function Sync-LongYinStaminaLockPayload {
   }
 
   Write-Step '构建 LongYinStaminaLock 插件'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $buildScript `
+  $buildOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $buildScript `
     -Source $pluginSource `
     -Output $pluginArtifact `
     -StagedPluginOutput $pluginStaged `
-    -LoaderRoot $loaderRoot
+    -LoaderRoot $loaderRoot 2>&1
 
-  if ($LASTEXITCODE -ne 0) {
+  $buildExitCode = $LASTEXITCODE
+  if ($buildOutput) {
+    $buildOutput | ForEach-Object { Write-Host $_ }
+  }
+
+  if ($buildExitCode -ne 0) {
     throw 'LongYinStaminaLock 插件构建失败。'
   }
 

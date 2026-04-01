@@ -72,6 +72,115 @@ function Assert-BuildPrereqs {
   }
 }
 
+function Assert-FileExists {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [Parameter(Mandatory = $true)]
+    [string]$Label
+  )
+
+  if (-not (Test-Path $Path)) {
+    throw "未找到 $Label：$Path"
+  }
+}
+
+function Get-Sha256Lower {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  Assert-FileExists -Path $Path -Label '文件'
+  return (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Sync-LongYinStaminaLockPayload {
+  $pluginSource = Join-Path $RepoRoot 'mod-src\LongYinStaminaLock\LongYinStaminaLock.cs'
+  $pluginArtifact = Join-Path $RepoRoot 'mod-src\LongYinStaminaLock\artifacts\LongYinStaminaLock.dll'
+  $pluginStaged = Join-Path $RepoRoot 'mod-src\LongYinStaminaLock\artifacts\LongYinStaminaLock.staged.dll'
+  $distPlugin = Join-Path $RepoRoot 'dist\BepInEx\plugins\LongYinStaminaLock.dll'
+  $buildScript = Join-Path $RepoRoot 'mod-src\build-il2cpp-plugin.ps1'
+  $loaderRoot = 'G:\Steam\steamapps\common\LongYinLiZhiZhuan'
+
+  Assert-FileExists -Path $pluginSource -Label 'LongYinStaminaLock 源文件'
+  Assert-FileExists -Path $buildScript -Label 'IL2CPP 插件构建脚本'
+
+  $artifactDir = Split-Path -Parent $pluginArtifact
+  $distDir = Split-Path -Parent $distPlugin
+  if (-not (Test-Path $artifactDir)) {
+    New-Item -ItemType Directory -Path $artifactDir | Out-Null
+  }
+  if (-not (Test-Path $distDir)) {
+    New-Item -ItemType Directory -Path $distDir | Out-Null
+  }
+
+  Write-Step '构建 LongYinStaminaLock 插件'
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $buildScript `
+    -Source $pluginSource `
+    -Output $pluginArtifact `
+    -StagedPluginOutput $pluginStaged `
+    -LoaderRoot $loaderRoot
+
+  if ($LASTEXITCODE -ne 0) {
+    throw 'LongYinStaminaLock 插件构建失败。'
+  }
+
+  Write-Step '同步 LongYinStaminaLock 到 OTA payload(dist)'
+  Copy-Item -Path $pluginArtifact -Destination $distPlugin -Force
+
+  $artifactHash = Get-Sha256Lower -Path $pluginArtifact
+  $distHash = Get-Sha256Lower -Path $distPlugin
+  if ($artifactHash -ne $distHash) {
+    throw "LongYinStaminaLock 构建产物与 dist payload 不一致：$artifactHash vs $distHash"
+  }
+
+  Write-Step "LongYinStaminaLock payload 已同步: $artifactHash"
+  return [pscustomobject]@{
+    ArtifactPath = $pluginArtifact
+    DistPath     = $distPlugin
+    ArtifactHash = $artifactHash
+    DistHash     = $distHash
+  }
+}
+
+function Get-ZipEntrySha256 {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ZipPath,
+    [Parameter(Mandatory = $true)]
+    [string]$EntrySuffix
+  )
+
+  Add-Type -AssemblyName System.IO.Compression
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    $entry = $zip.Entries | Where-Object { $_.FullName.Replace('/', '\').EndsWith($EntrySuffix, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
+    if (-not $entry) {
+      throw "ZIP 内未找到目标条目：$EntrySuffix"
+    }
+
+    $stream = $entry.Open()
+    try {
+      $sha = [System.Security.Cryptography.SHA256]::Create()
+      try {
+        return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+      }
+      finally {
+        $sha.Dispose()
+      }
+    }
+    finally {
+      $stream.Dispose()
+    }
+  }
+  finally {
+    $zip.Dispose()
+  }
+}
+
 function Get-GitHubToken {
   if ($env:GITHUB_TOKEN) {
     return $env:GITHUB_TOKEN
@@ -224,6 +333,7 @@ $releaseName = "龙胤立志传 Pro Max $tagName"
 $zipName = "LongYinProMaxApp-$version-win-x64.zip"
 $zipPath = Join-Path $ReleaseRoot $zipName
 $manifestPath = Join-Path $ReleaseRoot 'update-manifest.json'
+$payloadPluginRelativePath = 'resources\payload\BepInEx\plugins\LongYinStaminaLock.dll'
 $branch = Invoke-Git @('branch', '--show-current')
 $statusPorcelain = Invoke-Git @('status', '--porcelain')
 $tagList = Invoke-GitAllowFailure @('tag', '--sort=-creatordate')
@@ -251,6 +361,7 @@ if ($statusPorcelain -and -not $AllowDirty) {
 
 if (-not $SkipBuild) {
   Assert-BuildPrereqs
+  $payloadSync = Sync-LongYinStaminaLockPayload
   Write-Step '执行 npm run typecheck'
   Invoke-Npm @('run', 'typecheck')
   Write-Step '执行 npm run build'
@@ -280,6 +391,18 @@ if ([string]$manifest.zipAsset -ne $zipName) {
 $zipHash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ([string]$manifest.sha256 -ne $zipHash) {
   throw "manifest.sha256 与 ZIP 实际 SHA256 不一致。"
+}
+
+$distPluginPath = Join-Path $RepoRoot 'dist\BepInEx\plugins\LongYinStaminaLock.dll'
+Assert-FileExists -Path $distPluginPath -Label 'dist payload 插件'
+$distPluginHash = Get-Sha256Lower -Path $distPluginPath
+$zipPluginHash = Get-ZipEntrySha256 -ZipPath $zipPath -EntrySuffix $payloadPluginRelativePath
+if ($distPluginHash -ne $zipPluginHash) {
+  throw "ZIP 内 LongYinStaminaLock.dll 与 dist payload 不一致：$distPluginHash vs $zipPluginHash"
+}
+
+if ($payloadSync -and $payloadSync.ArtifactHash -ne $zipPluginHash) {
+  throw "ZIP 内 LongYinStaminaLock.dll 与本次构建产物不一致：$($payloadSync.ArtifactHash) vs $zipPluginHash"
 }
 
 Write-Step "已校验 OTA 资产: $zipName + update-manifest.json"

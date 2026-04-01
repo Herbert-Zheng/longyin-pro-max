@@ -1105,16 +1105,10 @@ export function App() {
                       max={999}
                       step={1}
                     />
-                    <NumberField
-                      label="武学写书消耗倍率"
-                      value={settings.studySkillCostMultiplier}
-                      onChange={(value) => updateSetting('studySkillCostMultiplier', value)}
-                      min={0}
-                      max={999}
-                      step={0.1}
-                      hint="同时缩放抄录/默写武学时的银两消耗和时间消耗。"
-                    />
                   </div>
+                  <p className="body-copy body-copy--muted">
+                    武学写书现在直接按角色属性结算消耗，不再提供独立倍率开关。
+                  </p>
                 </Card>
 
                 <Card title="心悟机制" eyebrow="Insight">

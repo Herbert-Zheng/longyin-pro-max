@@ -8,6 +8,7 @@ import { RELEASE_MANIFEST_NAME, ReleaseHistoryItem, UpdateCheckResult, UpdateMan
 
 const GITHUB_OWNER = 'Zhihong0321';
 const GITHUB_REPO = 'longyin_plus';
+const DEFAULT_PRESERVE_PATHS = ['user-data/**', 'BepInEx/config/**'];
 
 function compareVersionParts(left: string, right: string): number {
   const leftParts = left.split('.').map((value) => Number.parseInt(value, 10) || 0);
@@ -279,7 +280,7 @@ export async function stageGitHubUpdate(
   onProgress?.('校验通过，正在准备暂存目录...', 100);
   await writeBuffer(zipPath, zipBuffer);
   onProgress?.('正在解压更新包并准备替换文件...', 100);
-  await extractFilteredZip(zipPath, stageRoot, manifest.preservePaths ?? ['user-data/**']);
+  await extractFilteredZip(zipPath, stageRoot, manifest.preservePaths ?? DEFAULT_PRESERVE_PATHS);
   await fs.rm(zipPath, { force: true });
   onProgress?.('更新文件已准备完成，正在启动后台替换程序...', 100);
   return { stageRoot, manifest };

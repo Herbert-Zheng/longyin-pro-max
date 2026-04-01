@@ -29,7 +29,7 @@ const manifest = {
   version: packageJson.version,
   zipAsset: zipFile,
   sha256,
-  preservePaths: ['user-data/**']
+  preservePaths: ['user-data/**', 'BepInEx/config/**']
 };
 
 await writeFile(

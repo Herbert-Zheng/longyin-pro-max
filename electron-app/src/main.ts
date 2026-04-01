@@ -58,7 +58,6 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   expMultiplier: 1,
   battleSkillExpMultiplier: 1,
   creationPointMultiplier: 1,
-  studySkillCostMultiplier: 1,
   horseBaseSpeedMultiplier: 1,
   horseTurboSpeedMultiplier: 1,
   horseTurboDurationMultiplier: 1,

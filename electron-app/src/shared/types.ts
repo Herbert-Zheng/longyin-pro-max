@@ -259,7 +259,6 @@ export interface VisibleSettings {
   expMultiplier: number;
   battleSkillExpMultiplier: number;
   creationPointMultiplier: number;
-  studySkillCostMultiplier: number;
   horseBaseSpeedMultiplier: number;
   horseTurboSpeedMultiplier: number;
   horseTurboDurationMultiplier: number;

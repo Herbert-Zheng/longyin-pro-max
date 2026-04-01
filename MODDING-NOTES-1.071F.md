@@ -248,7 +248,7 @@ Confirmed team-stat path used by custom talents:
 Bookwriter implementation note:
 
 - the manuscript-copy flow is a separate subsystem from the normal read-book EXP flow
-- the correct bookwriter hooks are `BookWriterUIController.SureButtonClicked`, `BookWriterData.GetTotalTimeCost`, and `BookWriterData.GetEachDayWorkPercent`
+- the correct bookwriter hooks are `BookWriterUIController.SureButtonClicked`, `BookWriterData.GetTotalTimeCost`, `BookWriterData.GetEachDayWorkPercent`, and `GameController.ManageBookWriter`
 - if `BookWriterData.GetBookWriterHero()` ever returns null, fall back to `bookWriterHeroID` and resolve the hero through `GameController.Instance.worldData.GetHero(...)`
 - the stat-based time formula being tested is:
   - `X = Inte * 0.5 + ((Agl + Wil) * 0.25)`
@@ -256,6 +256,12 @@ Bookwriter implementation note:
   - clamp `Y` to a minimum of `1`
   - scale the time cost by `Y / 100`
   - round the final day cost to the nearest whole day, with a minimum of `1`
+- the extra finished-book quantity can be granted cleanly from the completion manager instead of tracing UI display code:
+  - when `GameController.ManageBookWriter(...)` advances a working task into completion, call `BookWriterData.GetWorkResult()`
+  - keep the vanilla reward as the first copy
+  - for validation, the current implementation grants a fixed `+1` extra cloned book
+  - the correct destination for all writers is the force book storage, using `ForceData.BookStorageAddBook(clonedResult, false)`
+  - this applies to any character / any book-writing event, not only the player inventory path
 
 Practical mapping:
 

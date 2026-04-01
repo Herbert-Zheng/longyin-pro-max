@@ -73,7 +73,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<int> _treasureChestChoiceOptions = null!;
     private static ConfigEntry<int> _treasureChestTotalItems = null!;
     private static ConfigEntry<int> _bookExpMultiplier = null!;
-    private static ConfigEntry<float> _studySkillCostMultiplier = null!;
     private static ConfigEntry<int> _battleSkillExpMultiplier = null!;
     private static ConfigEntry<int> _creationPointMultiplier = null!;
     private static ConfigEntry<int> _battleSpeedMultiplier = null!;
@@ -146,6 +145,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool _bookWriterCountdownOverrideArmed;
     private static bool _bookWriterTaskScalingActive;
     private static bool _readBookCountdownOverrideArmed;
+    private static bool _grantingBookWriterBonusItems;
     private static bool _grantingCraftBonusItems;
     private static bool _repeatingCraftChoiceReward;
     private static bool _exploreFullRevealConsumed;
@@ -399,6 +399,18 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         public bool Consumed { get; set; }
     }
 
+    private sealed class BookWriterCompletionState
+    {
+        public bool WasWorking { get; init; }
+        public float WorkPercentBefore { get; init; }
+        public ItemData? ResultItemBefore { get; init; }
+        public HeroData? WriterHeroBefore { get; init; }
+        public int ResultRareLv { get; init; }
+        public int TargetSkillId { get; init; }
+        public ItemData? TargetBookDataBefore { get; init; }
+        public ItemData? CombineBookDataBefore { get; init; }
+    }
+
     private sealed class PlotItemGrantState
     {
         public ItemData? ItemBefore { get; init; }
@@ -441,7 +453,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _treasureChestChoiceOptions = Config.Bind("Exploration", "TreasureChestChoiceOptions", 3, "How many reward options each exploration treasure chest should show when choice mode is enabled.");
         _treasureChestTotalItems = Config.Bind("Exploration", "TreasureChestTotalItems", 2, "Total item rewards to grant from exploration treasure chests. Set to 1 for vanilla behavior.");
         _bookExpMultiplier = Config.Bind("ReadBook", "ExpMultiplier", 1, "Multiplies EXP gained from reading books.");
-        _studySkillCostMultiplier = Config.Bind("StudySkill", "CostMultiplier", 1f, "Multiplies both silver and time costs for martial-skill book writing / transcription.");
         _battleSkillExpMultiplier = Config.Bind("Battle", "SkillExpMultiplier", 1, "Multiplies martial-skill EXP gained from battle actions for every combatant, including enemies.");
         _creationPointMultiplier = Config.Bind("CharacterCreation", "PointMultiplier", 1, "Multiplies the remaining point pools during character creation.");
         _battleSpeedMultiplier = Config.Bind("Battle", "SpeedMultiplier", 2, "Multiplies the selected in-battle speed option.");
@@ -590,6 +601,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(BookWriterUIController), nameof(BookWriterUIController.SureButtonClicked), new[] { typeof(GameObject) }, nameof(BookWriterSureButtonPrefix), nameof(BookWriterSureButtonPostfix));
         PatchMethod(typeof(BookWriterData), nameof(BookWriterData.GetTotalTimeCost), Type.EmptyTypes, null, nameof(BookWriterTotalTimeCostPostfix));
         PatchMethod(typeof(BookWriterData), nameof(BookWriterData.GetEachDayWorkPercent), Type.EmptyTypes, null, nameof(BookWriterEachDayWorkPercentPostfix));
+        PatchMethod(typeof(GameController), nameof(GameController.ManageBookWriter), new[] { typeof(BookWriterData), typeof(ForceData) }, nameof(ManageBookWriterPrefix), nameof(ManageBookWriterPostfix));
+        PatchMethod(typeof(ForceData), nameof(ForceData.BookStorageAddBook), new[] { typeof(ItemData), typeof(bool) }, null, nameof(BookStorageAddBookPostfix));
         PatchMethod(typeof(StudySkillController), nameof(StudySkillController.SureStartStudySkill), Type.EmptyTypes, nameof(RealStartStudySkillPrefix), null);
         PatchMethod(typeof(StudySkillController), "PlayerStudySkill", Type.EmptyTypes, nameof(StudySkillTracePrefix), null);
         PatchMethod(typeof(StudySkillController), "StartStudySkill", new[] { typeof(StudySkillType), typeof(KungfuSkillLvData), typeof(string), typeof(AreaBuildingData), typeof(bool) }, nameof(StudySkillTracePrefix), null);
@@ -641,7 +654,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             $"and highest-value auto-pick {(_treasureChestAutoPickMostValuable.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Exploration treasure chest rewards start at x{Math.Max(1, _treasureChestTotalItems.Value)} total items when choice mode is OFF.");
         Log.LogInfo($"Read-book EXP multiplier starts at x{Mathf.Max(1, _bookExpMultiplier.Value)}.");
-        Log.LogInfo($"Book-writing cost multiplier starts at x{FormatConfigFloat(Math.Max(0f, _studySkillCostMultiplier.Value))}.");
         if (IsThresholdTalentFeatureActive())
         {
             Log.LogInfo(
@@ -3105,6 +3117,21 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool BookWriterSureButtonPrefix(MethodBase __originalMethod, object[] __args)
     {
         ArmBookWriterTaskScaling("BookWriterUIController.SureButtonClicked");
+
+        if (_traceMode.Value)
+        {
+            var writerUI = SafeGetBookWriterUI();
+            var writerList = writerUI?.targetBookWriterList;
+            var count = TryGetCollectionCount(writerList);
+            var activeWriter = writerUI != null && writerList != null && count > 0
+                ? ResolveActiveBookWriterData(writerUI, writerList, count)
+                : null;
+            var resultItem = TryGetBookWriterResultItem(activeWriter);
+            var sourceHero = activeWriter == null ? null : TryResolveBookWriterHero(activeWriter);
+            LoggerInstance.LogInfo(
+                $"[BookWriterTrace] SureButtonClicked activeWriter={SafeFormatValue(activeWriter != null)} writer={TryGetHeroName(sourceHero)} result={DescribeItemSummary(resultItem)} totalDays={SafeFormatValue(activeWriter?.GetTotalTimeCost())}");
+        }
+
         return true;
     }
 
@@ -3140,6 +3167,40 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             __result = Mathf.Max(1f, 100f / scaledDays);
         }
+    }
+
+    private static void ManageBookWriterPrefix(BookWriterData targetBookWriter, ForceData targetForce, out BookWriterCompletionState __state)
+    {
+        var sourceHero = targetBookWriter == null ? null : TryResolveBookWriterHero(targetBookWriter);
+        var resultItem = targetBookWriter == null ? null : TryGetBookWriterResultItem(targetBookWriter);
+        __state = new BookWriterCompletionState
+        {
+            WasWorking = targetBookWriter != null && targetBookWriter.workStarted,
+            WorkPercentBefore = targetBookWriter?.workPercent ?? 0f,
+            ResultItemBefore = resultItem,
+            WriterHeroBefore = sourceHero,
+            ResultRareLv = resultItem?.rareLv ?? 0,
+            TargetSkillId = targetBookWriter?.targetSkillData?.skillID ?? 0,
+            TargetBookDataBefore = targetBookWriter?.targetBookData,
+            CombineBookDataBefore = targetBookWriter?.combineBookData
+        };
+
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo(
+                $"[BookWriterTrace] ManageBookWriter enter force={TryGetForceName(targetForce)} writer={TryGetHeroName(sourceHero)} startedBefore={SafeFormatValue(__state.WasWorking)} progressBefore={SafeFormatValue(__state.WorkPercentBefore)} result={DescribeItemSummary(resultItem)}");
+        }
+    }
+
+    private static void ManageBookWriterPostfix(BookWriterData targetBookWriter, ForceData targetForce, BookWriterCompletionState __state)
+    {
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo(
+                $"[BookWriterTrace] ManageBookWriter exit force={TryGetForceName(targetForce)} writer={TryGetHeroName(TryResolveBookWriterHero(targetBookWriter))} startedAfter={SafeFormatValue(targetBookWriter?.workStarted)} progressAfter={SafeFormatValue(targetBookWriter?.workPercent)} result={DescribeItemSummary(TryGetBookWriterResultItem(targetBookWriter))}");
+        }
+
+        TryGrantBookWriterBonusCopies(targetBookWriter, targetForce, __state);
     }
 
     private static void ArmBookWriterTaskScaling(string source)
@@ -3254,6 +3315,265 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             return null;
         }
+    }
+
+    private static void TryGrantBookWriterBonusCopies(BookWriterData? writerData, ForceData? targetForce, BookWriterCompletionState? state)
+    {
+        if (writerData == null || state == null || _grantingBookWriterBonusItems)
+        {
+            return;
+        }
+
+        if (!state.WasWorking || state.WorkPercentBefore >= 0.999f)
+        {
+            return;
+        }
+
+        var workCompleted = !writerData.workStarted || writerData.workPercent >= 0.999f;
+        if (!workCompleted)
+        {
+            return;
+        }
+
+        var sourceHero = state.WriterHeroBefore ?? TryResolveBookWriterHero(writerData);
+        var resultItem = state.ResultItemBefore ?? TryGetBookWriterResultItem(writerData);
+        if (resultItem == null)
+        {
+            if (_traceMode.Value)
+            {
+                LoggerInstance.LogInfo(
+                    $"[BookWriterTrace] Bonus grant skipped because result item was null in postfix for force={TryGetForceName(targetForce)} writer={TryGetHeroName(sourceHero)}");
+            }
+            return;
+        }
+
+        var player = TryGetPlayerHero();
+        if (player == null)
+        {
+            if (_traceMode.Value)
+            {
+                LoggerInstance.LogInfo(
+                    $"[BookWriterTrace] Bonus grant skipped because player hero was unavailable for force={TryGetForceName(targetForce)} writer={TryGetHeroName(sourceHero)}");
+            }
+            return;
+        }
+
+        var extraCopies = RollBookWriterExtraCopies(sourceHero);
+        if (extraCopies <= 0)
+        {
+            return;
+        }
+
+        var grantedCount = 0;
+        _grantingBookWriterBonusItems = true;
+
+        try
+        {
+            for (var i = 0; i < extraCopies; i++)
+            {
+                var bonusItem = TryCreateBookWriterBonusItem(resultItem, state);
+                if (bonusItem == null)
+                {
+                    if (_traceMode.Value)
+                    {
+                        LoggerInstance.LogInfo($"[BookWriterTrace] Bonus clone failed for result={DescribeItemSummary(resultItem)}");
+                    }
+                    continue;
+                }
+
+                player.GetItem(bonusItem, true, true, 0, false);
+                grantedCount++;
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to grant extra bookwriter copies: {ex.Message}");
+        }
+        finally
+        {
+            _grantingBookWriterBonusItems = false;
+        }
+
+        if (grantedCount <= 0)
+        {
+            return;
+        }
+
+        var writerName = TryGetHeroName(sourceHero);
+        var itemName = TryGetItemDisplayName(resultItem);
+        PushPlayerLog($"【文思泉涌】：{writerName} 默写【{itemName}】时额外完成 {grantedCount} 本。");
+
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo(
+                $"[BookWriterTrace] Bonus grant applied force={TryGetForceName(targetForce)} writer={writerName} item={DescribeItemSummary(resultItem)} extra={grantedCount} target=player-inventory");
+        }
+    }
+
+    private static int RollBookWriterExtraCopies(HeroData? writerHero)
+    {
+        if (writerHero == null)
+        {
+            return 0;
+        }
+
+        var inte = Math.Max(0f, TryReadHeroAttribute(writerHero, BaseAttriType.Inte) ?? 0f);
+        var agl = Math.Max(0f, TryReadHeroAttribute(writerHero, BaseAttriType.Agl) ?? 0f);
+        var maxExtraCopies = Mathf.FloorToInt((inte + agl) / 40f);
+        if (maxExtraCopies <= 0)
+        {
+            return 0;
+        }
+
+        var rolled = UnityEngine.Random.Range(0, maxExtraCopies + 1);
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo(
+                $"[BookWriterTrace] Bonus roll writer={TryGetHeroName(writerHero)} inte={inte:0.##} agl={agl:0.##} maxExtra={maxExtraCopies} rolled={rolled}");
+        }
+
+        return rolled;
+    }
+
+    private static void BookStorageAddBookPostfix(ForceData __instance, ItemData book, bool showInfo)
+    {
+        if (!_traceMode.Value)
+        {
+            return;
+        }
+
+        LoggerInstance.LogInfo(
+            $"[BookWriterTrace] BookStorageAddBook force={TryGetForceName(__instance)} showInfo={showInfo} item={DescribeItemSummary(book)}");
+    }
+
+    private static ItemData? TryCreateBookWriterBonusItem(ItemData resultItem, BookWriterCompletionState state)
+    {
+        var rareLv = Math.Max(0, resultItem?.rareLv ?? state.ResultRareLv);
+        var skillId = state.TargetSkillId;
+
+        if (skillId > 0)
+        {
+            try
+            {
+                var rebuilt = new ItemData(ItemType.Book).SetBookData(skillId, rareLv);
+                if (rebuilt != null)
+                {
+                    try
+                    {
+                        rebuilt.RecountRareLv();
+                    }
+                    catch
+                    {
+                    }
+
+                    try
+                    {
+                        rebuilt.CountValueAndWeight();
+                    }
+                    catch
+                    {
+                    }
+
+                    return rebuilt;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (_traceMode.Value)
+                {
+                    LoggerInstance.LogInfo(
+                        $"[BookWriterTrace] Bonus rebuild via SetBookData failed skillId={skillId} rare={rareLv}: {ex.Message}");
+                }
+            }
+        }
+
+        var cloned = TryCloneItem(resultItem);
+        if (cloned != null)
+        {
+            return cloned;
+        }
+
+        var targetBookClone = TryCloneItem(state.TargetBookDataBefore);
+        if (targetBookClone != null)
+        {
+            return targetBookClone;
+        }
+
+        var combineBookClone = TryCloneItem(state.CombineBookDataBefore);
+        if (combineBookClone != null)
+        {
+            return combineBookClone;
+        }
+
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo(
+                $"[BookWriterTrace] Bonus template rebuild failed result={DescribeItemSummary(resultItem)} targetBook={DescribeItemSummary(state.TargetBookDataBefore)} combineBook={DescribeItemSummary(state.CombineBookDataBefore)} skillId={state.TargetSkillId} rare={state.ResultRareLv}");
+        }
+
+        return null;
+    }
+
+    private static ItemData? TryGetBookWriterResultItem(BookWriterData writerData)
+    {
+        try
+        {
+            var item = writerData.GetWorkResult();
+            if (item != null)
+            {
+                return item;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (writerData.targetBookData != null)
+            {
+                return writerData.targetBookData;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (writerData.combineBookData != null)
+            {
+                return writerData.combineBookData;
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static string TryGetForceName(ForceData? force)
+    {
+        if (force == null)
+        {
+            return "unknown";
+        }
+
+        try
+        {
+            var name = force.GetForceName();
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                return name;
+            }
+        }
+        catch
+        {
+        }
+
+        var value = SafeProperty(force, "forceName") ?? SafeField(force, "forceName") ?? SafeProperty(force, "ForceName") ?? SafeField(force, "ForceName");
+        return string.IsNullOrWhiteSpace(value?.ToString()) ? $"force-{SafeFormatValue(SafeProperty(force, "forceID") ?? SafeField(force, "forceID"))}" : value.ToString()!;
     }
 
     private static bool ReadBookTracePrefix(MethodBase __originalMethod, object[] __args)
@@ -3462,20 +3782,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void ScaleStudySkillCostResult(ref int __result, string traceLabel)
     {
-        var multiplier = Math.Max(0f, _studySkillCostMultiplier.Value);
-        if (Math.Abs(multiplier - 1f) < 0.001f || __result <= 0)
-        {
-            return;
-        }
-
-        var original = __result;
-        __result = Math.Max(0, Mathf.RoundToInt(original * multiplier));
-
-        if (_traceMode.Value)
-        {
-            LoggerInstance.LogInfo(
-                $"{traceLabel} scaled: {SafeFormatValue(original)} -> {SafeFormatValue(__result)} with x{FormatConfigFloat(multiplier)}.");
-        }
     }
 
     private static void BattleChangeSkillFightExpPrefix(HeroData __instance, ref float num, KungfuSkillLvData targetSkill, bool showInfo)
@@ -4074,33 +4380,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         HandleDailySkillInsightDateProgress(__state.BeforeDate, TryGetWorldDateSnapshot(), DescribeMethod(__originalMethod));
         HandleTeamAutoFavorDateProgress(__state.BeforeDate, TryGetWorldDateSnapshot(), DescribeMethod(__originalMethod));
 
-        if (_studySkillTimeScalingActive && !_studySkillInjectingExtraDay)
-        {
-            var multiplier = Math.Max(0f, _studySkillCostMultiplier.Value);
-            if (multiplier > 1f && IsStudyDayChangeMethod(__originalMethod) && __args.Length == 0)
-            {
-                _studySkillExtraDayCarry += multiplier - 1f;
-                while (_studySkillExtraDayCarry >= 1f)
-                {
-                    _studySkillExtraDayCarry -= 1f;
-                    try
-                    {
-                        _studySkillInjectingExtraDay = true;
-                        GameController.Instance?.ChangeDay();
-                    }
-                    catch (Exception ex)
-                    {
-                        LoggerInstance.LogWarning($"Failed to apply study skill extra day scaling: {ex.Message}");
-                        _studySkillExtraDayCarry = 0f;
-                        break;
-                    }
-                    finally
-                    {
-                        _studySkillInjectingExtraDay = false;
-                    }
-                }
-            }
-        }
     }
 
     private static bool HourChangePrefix(MethodBase __originalMethod, object[] __args, out string __state)
@@ -4140,109 +4419,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool TryApplyStudySkillTimeScaling(MethodBase originalMethod, object[] args, out bool skipOriginalCall)
     {
         skipOriginalCall = false;
-
-        if (!_studySkillTimeScalingActive || _studySkillInjectingExtraDay)
-        {
-            return false;
-        }
-
-        var multiplier = Math.Max(0f, _studySkillCostMultiplier.Value);
-        if (Math.Abs(multiplier - 1f) < 0.001f || multiplier <= 0f)
-        {
-            return false;
-        }
-
-        if (!IsStudyDayChangeMethod(originalMethod))
-        {
-            return false;
-        }
-
-        if (args.Length == 0)
-        {
-            if (multiplier < 1f)
-            {
-                _studySkillUnitDayBudget += multiplier;
-                if (_studySkillUnitDayBudget < 1f)
-                {
-                    skipOriginalCall = true;
-                }
-                else
-                {
-                    _studySkillUnitDayBudget -= 1f;
-                }
-            }
-
-            return true;
-        }
-
-        var originalDelta = TryConvertToInt(args[0]) ?? 0;
-        if (originalDelta <= 0)
-        {
-            return false;
-        }
-
-        if (multiplier < 1f && originalDelta == 1)
-        {
-            _studySkillUnitDayBudget += multiplier;
-            if (_studySkillUnitDayBudget < 1f)
-            {
-                skipOriginalCall = true;
-                return true;
-            }
-
-            _studySkillUnitDayBudget -= 1f;
-            return true;
-        }
-
-        var scaled = multiplier < 1f
-            ? Mathf.FloorToInt(originalDelta * multiplier)
-            : Mathf.CeilToInt(originalDelta * multiplier);
-        if (scaled <= 0)
-        {
-            skipOriginalCall = true;
-            return true;
-        }
-
-        if (scaled != originalDelta)
-        {
-            args[0] = scaled;
-        }
-
-        return true;
+        return false;
     }
 
     private static bool TryApplyStudyHourScaling(MethodBase originalMethod, object[] args)
     {
-        if (!_studySkillTimeScalingActive || _studySkillInjectingExtraDay)
-        {
-            return false;
-        }
-
-        var multiplier = Math.Max(0f, _studySkillCostMultiplier.Value);
-        if (Math.Abs(multiplier - 1f) < 0.001f || multiplier <= 0f)
-        {
-            return false;
-        }
-
-        if (!string.Equals(originalMethod.Name, nameof(GameController.ChangeHour), StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        if (args.Length == 0)
-        {
-            return false;
-        }
-
-        var originalHours = TryConvertToFloat(args[0]) ?? 0f;
-        if (originalHours <= 0f)
-        {
-            return false;
-        }
-
-        args[0] = originalHours * multiplier;
-
-        return true;
+        return false;
     }
 
     private static bool IsStudyDayChangeMethod(MethodBase originalMethod)

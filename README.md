@@ -39,7 +39,7 @@
 
 稳定版会发布在 GitHub Releases：
 
-- [最新稳定版下载](https://github.com/Zhihong0321/longyin_plus/releases/latest)
+- [最新稳定版下载](https://github.com/Herbert-Zheng/longyin_plus/releases/latest)
 
 下载 Release ZIP 后，解压到任意位置，然后运行 `LongYinProMax.exe`。
 同一个包里也包含 `Uninstall.cmd`，方便后续干净卸载。

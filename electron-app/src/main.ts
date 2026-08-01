@@ -15,6 +15,7 @@ import {
   saveVisibleSettings
 } from './shared/config';
 import { detectSteamGameRoot, isValidGameRoot } from './shared/steam';
+import { installOwnedPayload, uninstallOwnedPayload } from './shared/payload';
 import {
   checkGitHubRelease,
   fetchReleaseHistory,
@@ -28,9 +29,11 @@ import {
   GAME_EXE_NAME,
   GameHealth,
   GameSnapshot,
+  LauncherPreferences,
   LogFileKind,
   OperationResult,
   ReleaseHistoryItem,
+  SaveAndLaunchRequest,
   UpdateCheckResult,
   UpdateProgressEvent,
   VisibleSettings
@@ -49,9 +52,11 @@ const USER_DATA_ROOT = process.env.LONGYIN_USER_DATA_ROOT ?? path.join(APP_ROOT,
 const SETTINGS_PATH = path.join(USER_DATA_ROOT, 'settings.json');
 const STARTUP_LOG_PATH = path.join(USER_DATA_ROOT, 'startup.log');
 const OTA_LOG_PATH = path.join(USER_DATA_ROOT, 'ota-update.log');
+const OTA_COMPLETION_PATH = path.join(USER_DATA_ROOT, 'ota-update-complete.json');
 const OTA_UPDATER_PATH = IS_PACKAGED
   ? path.join(process.resourcesPath, 'updater', 'LongYinUpdater.exe')
   : path.resolve(APP_CONTENT_ROOT, 'updater-dist', 'LongYinUpdater.exe');
+const OVERLAY_EXE_NAME = 'LongYinOverlay.exe';
 
 const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   lockStamina: true,
@@ -102,6 +107,11 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
 
 type AppSettings = {
   gameRoot?: string;
+  launchOverlayWithGame?: boolean;
+};
+
+const DEFAULT_LAUNCHER_PREFERENCES: LauncherPreferences = {
+  launchOverlayWithGame: false
 };
 
 let mainWindow: BrowserWindow | null = null;
@@ -114,11 +124,15 @@ let cachedUpdate: UpdateCheckResult = {
 };
 let cachedReleaseHistory: ReleaseHistoryItem[] = [];
 let lastLaunchAt = 0;
+let overlayChild: ReturnType<typeof spawn> | null = null;
+let overlayStartedForGame = false;
+let gameLifecycleMonitor: Promise<void> | null = null;
 
 function createEmptyHealth(summary: string): GameHealth {
   return {
     healthy: false,
     needsRepair: false,
+    launchBlocked: false,
     summary,
     driftedFiles: [],
     checks: []
@@ -174,6 +188,27 @@ async function ensureAppDirectories(): Promise<void> {
   await fs.mkdir(USER_DATA_ROOT, { recursive: true });
 }
 
+async function consumeUpdateCompletion(): Promise<void> {
+  const raw = await fs.readFile(OTA_COMPLETION_PATH, 'utf8').catch(() => undefined);
+  if (!raw) {
+    return;
+  }
+
+  try {
+    const marker = JSON.parse(raw) as { version?: unknown; completedAtUtc?: unknown };
+    const version = typeof marker.version === 'string' && marker.version.trim()
+      ? marker.version.trim()
+      : app.getVersion();
+    await fs.rm(OTA_COMPLETION_PATH, { force: true });
+    emitUpdateProgress('complete', `更新 ${version} 已完成并通过后台替换流程，应用已重新启动。`, 100);
+  }
+  catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    await writeStartupLog(`OTA 完成标记无效：${detail}`);
+    await fs.rm(OTA_COMPLETION_PATH, { force: true });
+  }
+}
+
 async function isGameProcessRunning(): Promise<boolean> {
   if (process.platform !== 'win32') {
     return false;
@@ -183,8 +218,136 @@ async function isGameProcessRunning(): Promise<boolean> {
     const { stdout } = await execFileAsync('tasklist', ['/FI', `IMAGENAME eq ${GAME_EXE_NAME}`, '/FO', 'CSV', '/NH']);
     return stdout.toLowerCase().includes(GAME_EXE_NAME.toLowerCase());
   }
-  catch {
+  catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`无法确认游戏进程状态；为避免运行中改写文件，已停止操作。${detail}`);
+  }
+}
+
+async function isProcessRunning(imageName: string): Promise<boolean> {
+  if (process.platform !== 'win32') {
     return false;
+  }
+
+  try {
+    const { stdout } = await execFileAsync('tasklist', ['/FI', `IMAGENAME eq ${imageName}`, '/FO', 'CSV', '/NH']);
+    return stdout.toLowerCase().includes(imageName.toLowerCase());
+  }
+  catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`无法确认 ${imageName} 进程状态；已停止操作。${detail}`);
+  }
+}
+
+async function getLauncherPreferences(): Promise<LauncherPreferences> {
+  const settings = await readSettings();
+  return {
+    launchOverlayWithGame: settings.launchOverlayWithGame ?? DEFAULT_LAUNCHER_PREFERENCES.launchOverlayWithGame
+  };
+}
+
+async function ensureGameStopped(actionLabel: string): Promise<void> {
+  if (await isGameProcessRunning()) {
+    throw new Error(`检测到游戏正在运行。请先关闭游戏，再执行“${actionLabel}”。`);
+  }
+}
+
+function getOverlayExecutablePath(gameRoot: string): string {
+  return path.join(gameRoot, 'LongYinOverlay', OVERLAY_EXE_NAME);
+}
+
+async function startOverlay(gameRoot: string, forGame = false): Promise<{ started: boolean; message: string }> {
+  if (await isProcessRunning(OVERLAY_EXE_NAME)) {
+    return { started: false, message: 'Overlay 已在运行，未重复启动。' };
+  }
+
+  const overlayExePath = getOverlayExecutablePath(gameRoot);
+  const overlayStat = await fs.stat(overlayExePath).catch(() => undefined);
+  if (!overlayStat?.isFile()) {
+    throw new Error(`未找到游戏目录内的 Overlay 可执行文件：${overlayExePath}`);
+  }
+
+  const child = spawn(overlayExePath, [], {
+    cwd: path.dirname(overlayExePath),
+    detached: true,
+    stdio: 'ignore'
+  });
+  overlayChild = child;
+  overlayStartedForGame = forGame;
+  await new Promise<void>((resolve, reject) => {
+    child.once('spawn', resolve);
+    child.once('error', reject);
+  }).catch((error) => {
+    overlayChild = null;
+    overlayStartedForGame = false;
+    throw error;
+  });
+  child.once('exit', () => {
+    if (overlayChild?.pid === child.pid) {
+      overlayChild = null;
+      overlayStartedForGame = false;
+    }
+  });
+  child.unref();
+  await writeStartupLog(`已启动 Overlay，PID=${child.pid ?? 'unknown'}${forGame ? '（随游戏启动）' : ''}。`);
+  return { started: true, message: 'Overlay 已启动。' };
+}
+
+async function stopOverlay(includeUnowned = false): Promise<{ stopped: boolean; message: string }> {
+  const ownedPid = overlayChild?.pid;
+  if (!ownedPid && !includeUnowned) {
+    return { stopped: false, message: '没有需要随游戏关闭的 Overlay 实例。' };
+  }
+
+  if (process.platform === 'win32') {
+    const args = ownedPid ? ['/PID', String(ownedPid), '/T', '/F'] : ['/IM', OVERLAY_EXE_NAME, '/T', '/F'];
+    await execFileAsync('taskkill', args).catch(() => undefined);
+  }
+  else if (overlayChild) {
+    overlayChild.kill();
+  }
+
+  overlayChild = null;
+  overlayStartedForGame = false;
+  const stillRunning = await isProcessRunning(OVERLAY_EXE_NAME);
+  await writeStartupLog(stillRunning ? 'Overlay 关闭请求已发送，但进程仍在运行。' : 'Overlay 已关闭。');
+  return stillRunning
+    ? { stopped: false, message: 'Overlay 仍在运行，请稍后重试。' }
+    : { stopped: true, message: 'Overlay 已关闭。' };
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function monitorGameExitAndCleanup(launchStartedAt: number): Promise<void> {
+  let observedRunning = false;
+  try {
+    while (overlayStartedForGame) {
+      try {
+        const running = await isGameProcessRunning();
+        if (running) {
+          observedRunning = true;
+        }
+        else if (observedRunning || Date.now() - launchStartedAt >= LAUNCH_GRACE_MS) {
+          break;
+        }
+      }
+      catch (error) {
+        await writeStartupLog(`游戏退出监视暂时无法读取进程状态：${error instanceof Error ? error.message : String(error)}`);
+      }
+      await delay(2_000);
+    }
+
+    if (overlayStartedForGame) {
+      await stopOverlay(false);
+    }
+  }
+  finally {
+    gameLifecycleMonitor = null;
+    if (BrowserWindow.getAllWindows().length === 0 && process.platform !== 'darwin') {
+      app.quit();
+    }
   }
 }
 
@@ -230,7 +393,8 @@ async function readSettings(): Promise<AppSettings> {
 
 async function writeSettings(nextSettings: AppSettings): Promise<void> {
   await fs.mkdir(path.dirname(SETTINGS_PATH), { recursive: true });
-  await fs.writeFile(SETTINGS_PATH, `${JSON.stringify(nextSettings, null, 2)}\n`, 'utf8');
+  const currentSettings = await readSettings();
+  await fs.writeFile(SETTINGS_PATH, `${JSON.stringify({ ...currentSettings, ...nextSettings }, null, 2)}\n`, 'utf8');
 }
 
 async function inferInstalledGameRoot(): Promise<string | undefined> {
@@ -303,7 +467,7 @@ async function selectGameRoot(): Promise<string | undefined> {
 
 async function isGameInstalled(gameRoot: string): Promise<boolean> {
   const health = await inspectGameHealth(gameRoot, PAYLOAD_ROOT);
-  return health.healthy;
+  return !health.needsRepair;
 }
 
 async function repairGameInstallationIfNeeded(
@@ -315,80 +479,50 @@ async function repairGameInstallationIfNeeded(
     return { repaired: false, health: currentHealth };
   }
 
-  if (await isGameProcessRunning()) {
-    throw new Error(`检测到模组安装不完整或版本已漂移，且游戏正在运行。请先关闭游戏，再执行“${actionLabel}”。`);
-  }
-
-  await installPayload(gameRoot);
-  const repairedHealth = await inspectGameHealth(gameRoot, PAYLOAD_ROOT);
-  if (!repairedHealth.healthy) {
-    throw new Error(`自动修复后仍未通过自检：${repairedHealth.summary}`);
-  }
+  const repairedHealth = await installPayload(gameRoot, actionLabel);
 
   return { repaired: true, health: repairedHealth };
 }
 
-async function installPayload(gameRoot: string): Promise<void> {
+async function installPayload(gameRoot: string, actionLabel = '安装或修复模组'): Promise<GameHealth> {
+  await ensureGameStopped(actionLabel);
   const payloadExists = await fs.stat(PAYLOAD_ROOT).then((stat) => stat.isDirectory()).catch(() => false);
   if (!payloadExists) {
     throw new Error(`未找到模组载荷目录：${PAYLOAD_ROOT}`);
   }
 
-  const entries = await fs.readdir(PAYLOAD_ROOT, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.name.toLowerCase().endsWith('.zip')) {
-      continue;
-    }
-
-    const source = path.join(PAYLOAD_ROOT, entry.name);
-    const target = path.join(gameRoot, entry.name);
-    if (entry.isDirectory()) {
-      await fs.cp(source, target, { recursive: true, force: true });
-    }
-    else {
-      await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.copyFile(source, target);
-    }
-  }
-
+  await installOwnedPayload(gameRoot, PAYLOAD_ROOT);
   await ensureGameFiles(gameRoot);
   await ensureDoorstopEnabled(gameRoot);
   await ensureSteamAppId(gameRoot);
+
+  const health = await inspectGameHealth(gameRoot, PAYLOAD_ROOT);
+  if (health.needsRepair) {
+    throw new Error(`安装后仍未通过自检：${health.summary}`);
+  }
+  return health;
 }
 
 async function uninstallPayload(gameRoot: string): Promise<void> {
-  const entries = await fs.readdir(PAYLOAD_ROOT, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.name.toLowerCase().endsWith('.zip')) {
-      continue;
-    }
-
-    const target = path.join(gameRoot, entry.name);
-    await fs.rm(target, { recursive: true, force: true }).catch(() => undefined);
-  }
+  await ensureGameStopped('卸载模组');
+  const uninstallResult = await uninstallOwnedPayload(gameRoot, PAYLOAD_ROOT);
 
   const steamAppIdPath = path.join(gameRoot, 'steam_appid.txt');
   const backupPath = `${steamAppIdPath}.bak`;
-  if (await fs.stat(backupPath).then(() => true).catch(() => false)) {
+  if (!uninstallResult.usedManifest && await fs.stat(backupPath).then(() => true).catch(() => false)) {
     await fs.copyFile(backupPath, steamAppIdPath);
     await fs.rm(backupPath, { force: true });
   }
-  else {
-    await fs.rm(steamAppIdPath, { force: true });
-  }
-}
-
-async function ensureLaunchPrereqs(gameRoot: string): Promise<void> {
-  await ensureGameFiles(gameRoot);
-  await ensureDoorstopEnabled(gameRoot);
-  await ensureSteamAppId(gameRoot);
 }
 
 async function launchGame(gameRoot: string): Promise<void> {
   const paths = getGamePaths(gameRoot);
   const repairResult = await repairGameInstallationIfNeeded(gameRoot, '启动游戏');
-  if (!repairResult.health.healthy) {
+  if (repairResult.health.needsRepair) {
     throw new Error(repairResult.health.summary);
+  }
+  if (repairResult.health.launchBlocked) {
+    throw new Error(`当前插件运行日志包含阻断性兼容错误：${repairResult.health.summary}`);
   }
 
   const gameRunning = await isGameProcessRunning();
@@ -397,20 +531,39 @@ async function launchGame(gameRoot: string): Promise<void> {
     throw new Error(launchState.launchNote);
   }
 
-  await ensureLaunchPrereqs(gameRoot);
   await fs.stat(paths.gameExePath).catch(() => {
     throw new Error(`未找到游戏可执行文件：${paths.gameExePath}`);
   });
   await writeStartupLog(`准备启动游戏：${paths.gameExePath}`);
+
+  const launcherPreferences = await getLauncherPreferences();
+  if (launcherPreferences.launchOverlayWithGame) {
+    const overlayResult = await startOverlay(gameRoot, true);
+    await writeStartupLog(overlayResult.message);
+  }
 
   const child = spawn(paths.gameExePath, [], {
     cwd: gameRoot,
     detached: true,
     stdio: 'ignore'
   });
+  await new Promise<void>((resolve, reject) => {
+    child.once('spawn', resolve);
+    child.once('error', reject);
+  }).catch(async (error) => {
+    if (overlayStartedForGame) {
+      await stopOverlay(false);
+    }
+    throw error;
+  });
   child.unref();
   await writeStartupLog(`已发送游戏启动请求，PID=${child.pid ?? 'unknown'}`);
   lastLaunchAt = Date.now();
+  if (overlayStartedForGame && !gameLifecycleMonitor) {
+    gameLifecycleMonitor = monitorGameExitAndCleanup(lastLaunchAt).catch(async (error) => {
+      await writeStartupLog(`游戏退出后的 Overlay 清理失败：${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
 }
 
 async function buildSnapshot(status = '准备就绪'): Promise<GameSnapshot> {
@@ -422,11 +575,13 @@ async function buildSnapshot(status = '准备就绪'): Promise<GameSnapshot> {
   let health = createEmptyHealth(gameRoot ? '尚未检查安装状态。' : '未选择游戏目录。');
   const gameRunning = await isGameProcessRunning();
   const launchState = getLaunchState(gameRunning);
+  const launcherPreferences = await getLauncherPreferences();
+  const overlayRunning = await isProcessRunning(OVERLAY_EXE_NAME);
 
   if (gameRoot) {
     visibleSettings = await readVisibleSettings(gameRoot);
     health = await inspectGameHealth(gameRoot, PAYLOAD_ROOT);
-    gameInstalled = health.healthy;
+    gameInstalled = !health.needsRepair;
   }
 
   const effectiveStatus = status === '准备就绪' && gameRoot && !health.healthy ? health.summary : status;
@@ -442,12 +597,128 @@ async function buildSnapshot(status = '准备就绪'): Promise<GameSnapshot> {
     gameInstalled,
     health,
     gameRunning,
-    launchReady: Boolean(gameRoot) && gameInstalled && launchState.launchReady,
+    launchReady: Boolean(gameRoot) && gameInstalled && !health.launchBlocked && launchState.launchReady,
     launchState: launchState.launchState,
     launchNote: launchState.launchNote,
     visibleSettings,
+    launcherPreferences,
+    overlayRunning,
     status: effectiveStatus,
     update: cachedUpdate
+  };
+}
+
+type SavedPathState = {
+  originalPath: string;
+  backupPath: string;
+  kind: 'absent' | 'file' | 'directory';
+};
+
+async function getSavedPathKind(filePath: string): Promise<SavedPathState['kind']> {
+  try {
+    const stat = await fs.stat(filePath);
+    if (stat.isFile()) {
+      return 'file';
+    }
+    if (stat.isDirectory()) {
+      return 'directory';
+    }
+    throw new Error(`不支持备份此文件类型：${filePath}`);
+  }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return 'absent';
+    }
+    throw error;
+  }
+}
+
+async function beginSettingsTransaction(gameRoot: string): Promise<{
+  commit: () => Promise<void>;
+  rollback: () => Promise<void>;
+}> {
+  const paths = getGamePaths(gameRoot);
+  const protectedPaths = [
+    paths.mainConfigPath,
+    paths.horseConfigPath,
+    paths.questSnapshotConfigPath,
+    paths.skillConfigPath,
+    paths.battleConfigPath,
+    paths.customTalentConfigPath,
+    paths.steamAppIdPath,
+    `${paths.steamAppIdPath}.bak`,
+    paths.doorstopConfigPath,
+    paths.legacyTraceConfigPath,
+    paths.legacySkillConfigPath,
+    ...[
+      'LaunchGame.cmd',
+      'LongYinModControl.cmd',
+      'LongYinModControl.ps1',
+      'Play.cmd',
+      'RecoverGameWindow.cmd',
+      'RecoverGameWindow.ps1',
+      'BepInEx/plugins/LongYinGameplayTest.dll',
+      'BepInEx/plugins/LongYinMoneyProbe.dll.disabled',
+      'BepInEx/plugins/LongYinTraceData.dll',
+      'BepInEx/plugins/LongYinSkillTalentTracer.dll',
+      'BepInEx/config/codex.longyin.gameplaytest.cfg',
+      'BepInEx/config/codex.longyin.moneyprobe.cfg.disabled'
+    ].map((relativePath) => path.join(gameRoot, ...relativePath.split('/')))
+  ];
+  const transactionBase = path.join(USER_DATA_ROOT, 'save-transactions');
+  await fs.mkdir(transactionBase, { recursive: true });
+  const transactionRoot = await fs.mkdtemp(path.join(transactionBase, 'save-and-launch-'));
+  const states: SavedPathState[] = [];
+
+  for (const [index, originalPath] of protectedPaths.entries()) {
+    const kind = await getSavedPathKind(originalPath);
+    const backupPath = path.join(transactionRoot, 'files', String(index));
+    if (kind !== 'absent') {
+      await fs.mkdir(path.dirname(backupPath), { recursive: true });
+      if (kind === 'file') {
+        await fs.copyFile(originalPath, backupPath);
+      }
+      else {
+        await fs.cp(originalPath, backupPath, { recursive: true });
+      }
+    }
+    states.push({ originalPath, backupPath, kind });
+  }
+
+  return {
+    commit: async () => {
+      await fs.rm(transactionRoot, { recursive: true, force: true }).catch(() => undefined);
+    },
+    rollback: async () => {
+      const failures: string[] = [];
+      for (const state of [...states].reverse()) {
+        try {
+          await fs.rm(state.originalPath, { recursive: true, force: true }).catch((error: NodeJS.ErrnoException) => {
+            if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') {
+              throw error;
+            }
+          });
+          if (state.kind !== 'absent') {
+            await fs.mkdir(path.dirname(state.originalPath), { recursive: true });
+            if (state.kind === 'file') {
+              await fs.copyFile(state.backupPath, state.originalPath);
+            }
+            else {
+              await fs.cp(state.backupPath, state.originalPath, { recursive: true });
+            }
+          }
+        }
+        catch (error) {
+          failures.push(`${state.originalPath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      if (failures.length > 0) {
+        throw new Error(`设置事务回滚未完全成功；恢复副本保留在 ${transactionRoot}。${failures.join('；')}`);
+      }
+      await fs.rm(transactionRoot, { recursive: true, force: true });
+    }
   };
 }
 
@@ -514,15 +785,19 @@ async function applyUpdate(): Promise<OperationResult> {
 
   try {
     const update = await checkUpdates();
-    if (!update.updateAvailable || !update.manifest) {
+    if (!update.updateAvailable || !update.manifest || !update.assetUrl) {
       throw new Error(update.status ?? '暂无可用更新。');
     }
 
     emitUpdateProgress('checking', `发现新版本 ${update.latestVersion}，准备下载更新包...`, 5);
     await writeStartupLog(`开始应用 OTA 更新：${update.currentVersion} -> ${update.latestVersion}`);
-    const { stageRoot } = await stageGitHubUpdate(update.manifest, (detail, percent) => {
-      emitUpdateProgress('downloading', detail, percent);
-    });
+    const { stageRoot } = await stageGitHubUpdate(
+      update.manifest,
+      update.assetUrl,
+      (detail, percent) => {
+        emitUpdateProgress('downloading', detail, percent);
+      }
+    );
     await writeStartupLog(`OTA 暂存目录：${stageRoot}`);
     emitUpdateProgress('preparing', '下载和解压已完成，正在启动后台替换程序...', 100);
     await launchUpdaterApp(
@@ -535,13 +810,14 @@ async function applyUpdate(): Promise<OperationResult> {
       update.latestVersion
     );
     emitUpdateProgress('applying', '后台更新器已启动，应用即将退出并自动重启。', 100);
-    void setTimeout(() => app.quit(), 250);
-
-    return {
+    const result: OperationResult = {
       ok: true,
       message: '更新包已下载。应用将退出，后台完成替换后会自动重启。',
       updatedSnapshot: await buildSnapshot('正在下载并应用更新，请等待自动重启。')
     };
+    emitUpdateProgress('applying', '更新包已准备完成，正在退出并交给后台更新器；最终结果将在重启后确认。', 100);
+    void setTimeout(() => app.quit(), 750);
+    return result;
   }
   catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -575,16 +851,40 @@ function registerIpc(): void {
   ipcMain.handle('app:save-settings', async (_event, settings: VisibleSettings) => saveSettingsAndRefresh(settings));
   ipcMain.handle('app:get-custom-talents', async () => getCustomTalents());
   ipcMain.handle('app:save-custom-talents', async (_event, pack: CustomTalentPack) => saveCustomTalents(pack));
+  ipcMain.handle('app:set-launcher-preferences', async (_event, preferences: LauncherPreferences) => {
+    await writeSettings({ launchOverlayWithGame: Boolean(preferences.launchOverlayWithGame) });
+    return buildSnapshot('启动器设置已保存。');
+  });
+  ipcMain.handle('app:start-overlay', async () => {
+    const gameRoot = cachedGameRoot ?? (await loadGameRoot());
+    if (!gameRoot || !(await isValidGameRoot(gameRoot))) {
+      throw new Error('请先选择有效的游戏目录，再启动 Overlay。');
+    }
+    const result = await startOverlay(gameRoot, false);
+    return {
+      ok: true,
+      message: result.message,
+      updatedSnapshot: await buildSnapshot(result.message)
+    } satisfies OperationResult;
+  });
+  ipcMain.handle('app:stop-overlay', async () => {
+    const result = await stopOverlay(true);
+    return {
+      ok: result.stopped,
+      message: result.message,
+      updatedSnapshot: await buildSnapshot(result.message)
+    } satisfies OperationResult;
+  });
   ipcMain.handle('app:install', async () => {
     const gameRoot = cachedGameRoot ?? (await loadGameRoot());
     if (!gameRoot) {
       throw new Error('请先选择游戏目录。');
     }
 
-        await installPayload(gameRoot);
-        return {
-          ok: true,
-          message: '模组载荷已安装，并已完成自检。',
+    await installPayload(gameRoot, '安装模组');
+    return {
+      ok: true,
+      message: '模组载荷已安装，并已完成自检。',
       gameRoot,
       updatedSnapshot: await buildSnapshot('已安装并完成自检。')
     } satisfies OperationResult;
@@ -609,26 +909,51 @@ function registerIpc(): void {
       throw new Error('请先选择游戏目录。');
     }
 
-        await launchGame(gameRoot);
-        return {
-          ok: true,
-          message: '已发送启动请求。BepInEx 载入可能需要 10 到 20 秒，请不要重复点击。',
-          gameRoot,
-          updatedSnapshot: await buildSnapshot('启动中。')
-        } satisfies OperationResult;
-      });
-  ipcMain.handle('app:save-and-launch', async (_event, settings: VisibleSettings) => {
-    const snapshot = await saveSettingsAndRefresh(settings);
-    if (!snapshot.gameRoot) {
+    await launchGame(gameRoot);
+    return {
+      ok: true,
+      message: '已发送启动请求。BepInEx 载入可能需要 10 到 20 秒，请不要重复点击。',
+      gameRoot,
+      updatedSnapshot: await buildSnapshot('启动中。')
+    } satisfies OperationResult;
+  });
+  ipcMain.handle('app:save-and-launch', async (_event, request: SaveAndLaunchRequest) => {
+    const gameRoot = cachedGameRoot ?? (await loadGameRoot());
+    if (!gameRoot) {
       throw new Error('请先选择游戏目录。');
     }
 
-    await launchGame(snapshot.gameRoot);
+    await ensureGameStopped('保存设置并启动游戏');
+    const repairResult = await repairGameInstallationIfNeeded(gameRoot, '保存设置并启动游戏');
+    await ensureGameStopped('保存设置并启动游戏');
+
+    const transaction = await beginSettingsTransaction(gameRoot);
+    let savedTalents: CustomTalentPack;
+    try {
+      await saveVisibleSettings(gameRoot, request.settings);
+      savedTalents = await saveCustomTalentPack(gameRoot, request.customTalents);
+    }
+    catch (error) {
+      try {
+        await transaction.rollback();
+      }
+      catch (rollbackError) {
+        const originalMessage = error instanceof Error ? error.message : String(error);
+        const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+        throw new Error(`设置和自定义天赋保存失败：${originalMessage}；${rollbackMessage}`);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`设置和自定义天赋保存失败，已回滚至写入前状态。${message}`);
+    }
+    await transaction.commit();
+
+    await launchGame(gameRoot);
     return {
       ok: true,
-      message: '设置已保存，并已发送启动请求。BepInEx 载入可能需要 10 到 20 秒。',
-      gameRoot: snapshot.gameRoot,
-      updatedSnapshot: await buildSnapshot('启动中。')
+      message: `设置和 ${savedTalents.talents.length} 个自定义天赋已保存，并已发送启动请求。BepInEx 载入可能需要 10 到 20 秒。`,
+      gameRoot,
+      customTalents: savedTalents,
+      updatedSnapshot: await buildSnapshot(repairResult.repaired ? '已自动修复载荷漂移、保存设置并启动。' : '启动中。')
     } satisfies OperationResult;
   });
   ipcMain.handle('app:check-updates', async () => checkUpdates());
@@ -658,6 +983,9 @@ async function createMainWindow(): Promise<void> {
       nodeIntegration: false,
       sandbox: false
     }
+  });
+  mainWindow.once('closed', () => {
+    mainWindow = null;
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -704,6 +1032,7 @@ app.whenReady().then(async () => {
   cachedGameRoot = await loadGameRoot();
   await writeStartupLog(`游戏目录：${cachedGameRoot ?? '未找到'}`);
   await createMainWindow();
+  await consumeUpdateCompletion();
   void checkUpdates();
   void getReleaseHistory();
 }).catch(async (error: Error) => {
@@ -713,6 +1042,10 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
+    if (gameLifecycleMonitor) {
+      void writeStartupLog('启动器窗口已关闭；主进程继续监视游戏退出并负责清理 Overlay。');
+      return;
+    }
     app.quit();
   }
 });

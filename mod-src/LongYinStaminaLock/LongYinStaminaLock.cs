@@ -181,8 +181,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static float _nextThresholdTalentEvaluationAt = -1f;
     private static float _nextCustomTalentEvaluationAt = -1f;
     private static bool _thresholdTalentRegistrationWarned;
+    private static bool _maxLoverMemberUnavailableWarned;
+    private static string _heroTagDatabaseCompatibilityState = "PENDING";
+    private static string _heroTagDatabaseCompatibilityDetail = "runtime game data has not been probed";
     private static MethodInfo? _heroChangeFameMethod;
     private Harmony? _harmony;
+    private int _patchedMethodCount;
+    private int _skippedMethodCount;
 
     private sealed class MoneyChangeState
     {
@@ -466,7 +471,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _merchantCarryCash = Config.Bind("Commerce", "MerchantCarryCash", 100000, "Minimum cash carried by NPC shop merchants while a Shop trade window is open. Set to 0 to disable.");
         _treasureTradeHelperEnabled = Config.Bind("Commerce", "TreasureTradeHelperEnabled", true, "Shows current treasure resale estimates and skill factors inside trade shops that list treasure items.");
         _treasureAutoTradeEnabled = Config.Bind("Commerce", "TreasureAutoTradeEnabled", true, "Automatically adds profitable unidentified treasure items from the shop sell list into the trade cart when a trade shop opens.");
-        _treasureIdentifyHighlightCorrect = Config.Bind("TreasureIdentify", "HighlightCorrectTreasure", false, "Auto-selects the correct treasure in the identify mini-game without pressing confirm.");
+        _treasureIdentifyHighlightCorrect = Config.Bind("TreasureIdentify", "HighlightCorrectTreasure", false, "Legacy highlight request. The current IL2CPP field accessor is not patchable, so this safely remains inactive unless a compatible gameplay method becomes available.");
         _treasureIdentifyForceCorrectSelection = Config.Bind("TreasureIdentify", "ForceCorrectTreasureSelection", true, "Replaces any clicked treasure with the correct one before the game processes the choice.");
         _luckyMoneyHitChancePercent = Config.Bind("MoneyLuck", "LuckyHitChancePercent", 0, "Chance from 0 to 100 that a player money transaction triggers a lucky bonus.");
         _extraRelationshipGainChancePercent = Config.Bind("Relationship", "ExtraRelationshipGainChancePercent", 0, "Chance from 0 to 100 that positive relationship gain becomes double.");
@@ -546,11 +551,10 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(PlotController), nameof(PlotController.PlotStartLoverResultFightResult), new[] { typeof(string) }, nameof(LoverBattlePlotResultPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.CheckChoiceMeetRequire), new[] { typeof(Il2CppSystem.Collections.Generic.List<PlotChoiceRequirement>), typeof(bool) }, nameof(MaxLoverCountSyncPrefix), nameof(CheckChoiceMeetRequirePostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.CheckMeetRequire), new[] { typeof(ChoiceRequirementType), typeof(float), typeof(bool) }, nameof(MaxLoverCountSyncPrefix), null);
-        PatchMethod(typeof(GlobalData), "get_MaxLoverNum", Type.EmptyTypes, null, nameof(GlobalDataMaxLoverNumPostfix));
         PatchMethod(typeof(GameController), nameof(GameController.MeetLoverResultRequire), Type.EmptyTypes, null, nameof(MeetLoverResultRequirePostfix));
-        PatchMethod(typeof(BattleController), nameof(BattleController.PrepareBattleMap), new[] { typeof(BattleType), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(float), typeof(string), typeof(bool), typeof(bool), typeof(BattleMapTypeData), typeof(int), typeof(float) }, nameof(LoverBattlePrepareBattleMapDirectPrefix), null);
-        PatchMethod(typeof(BattleController), nameof(BattleController.PrepareBattleMap), new[] { typeof(BattleType), typeof(Il2CppSystem.Collections.Generic.List<Il2CppSystem.Collections.Generic.List<HeroData>>), typeof(Il2CppSystem.Collections.Generic.List<Il2CppSystem.Collections.Generic.List<HeroData>>), typeof(float), typeof(string), typeof(bool), typeof(BattleMapTypeData), typeof(int), typeof(float) }, nameof(LoverBattlePrepareBattleMapGroupedPrefix), null);
-        PatchMethod(typeof(BattleController), nameof(BattleController.BattleTeamPrepare), Type.EmptyTypes, nameof(LoverBattleTeamPreparePrefix), null);
+        var battlePrepareDirectPatched = PatchMethod(typeof(BattleController), nameof(BattleController.PrepareBattleMap), new[] { typeof(BattleType), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(float), typeof(string), typeof(bool), typeof(bool), typeof(BattleMapTypeData), typeof(int), typeof(float) }, nameof(LoverBattlePrepareBattleMapDirectPrefix), null);
+        var battlePrepareGroupedPatched = PatchMethod(typeof(BattleController), nameof(BattleController.PrepareBattleMap), new[] { typeof(BattleType), typeof(Il2CppSystem.Collections.Generic.List<Il2CppSystem.Collections.Generic.List<HeroData>>), typeof(Il2CppSystem.Collections.Generic.List<Il2CppSystem.Collections.Generic.List<HeroData>>), typeof(float), typeof(string), typeof(bool), typeof(BattleMapTypeData), typeof(int), typeof(float) }, nameof(LoverBattlePrepareBattleMapGroupedPrefix), null);
+        var battleTeamPreparePatched = PatchMethod(typeof(BattleController), nameof(BattleController.BattleTeamPrepare), Type.EmptyTypes, nameof(LoverBattleTeamPreparePrefix), null);
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.Update), Type.EmptyTypes, null, nameof(DialogChoiceRowPostfix));
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.OnClick), Type.EmptyTypes, nameof(DialogChoiceClickPrefix), null);
         PatchMethod(typeof(BuildChoiceButtonController), nameof(BuildChoiceButtonController.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
@@ -563,11 +567,17 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(HeroData), nameof(HeroData.ChangeFavor), new[] { typeof(float), typeof(bool), typeof(float), typeof(float), typeof(bool) }, nameof(ChangeFavorPrefix), null);
         PatchHeroChangeFameMethod();
         PatchMethod(typeof(PlotController), nameof(PlotController.ManageTeachSkill), new[] { typeof(HeroData), typeof(HeroData), typeof(int), typeof(float), typeof(bool) }, nameof(ManageTeachSkillPrefix), nameof(ManageTeachSkillPostfix));
-        PatchMethod(typeof(BattleController), nameof(BattleController.BattleTimeScaleButtonClicked), new[] { typeof(GameObject) }, null, nameof(BattleTimeScaleButtonClickedPostfix));
+        var battleSpeedPatched = PatchMethod(typeof(BattleController), nameof(BattleController.BattleTimeScaleButtonClicked), new[] { typeof(GameObject) }, null, nameof(BattleTimeScaleButtonClickedPostfix));
         PatchMethod(typeof(HorseData), nameof(HorseData.StartSprint), Type.EmptyTypes, null, nameof(HorseStartSprintPostfix));
         PatchMethod(typeof(HeroData), "GetHorseTravelSpeed", Type.EmptyTypes, null, nameof(GetHorseTravelSpeedPostfix));
         PatchMethod(typeof(HeroData), "GetHorseTravelSpeed", new[] { typeof(bool), typeof(bool) }, null, nameof(GetHorseTravelSpeedWithFlagsPostfix));
-        PatchMethod(typeof(HeroData), "RefreshHorseState", Type.EmptyTypes, null, nameof(RefreshHorseStatePostfix));
+        var horseRefreshPatched = PatchFirstAvailableMethod(
+            typeof(HeroData),
+            "RefreshHorseState",
+            new[] { new[] { typeof(bool) }, Type.EmptyTypes },
+            null,
+            nameof(RefreshHorseStatePostfix),
+            out var horseRefreshSignature);
         PatchMethod(typeof(BuildingUIController), nameof(BuildingUIController.ShowBuildingShop), Type.EmptyTypes, null, nameof(ShowBuildingShopPostfix));
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListData), typeof(ItemListData), typeof(bool) }, null, nameof(ShowTradeUiBasicPostfix));
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListType), typeof(ItemListData), typeof(ItemListData) }, null, nameof(ShowTradeUiTypedPostfix));
@@ -575,9 +585,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListType), typeof(ItemListData), typeof(ItemListData), typeof(int), typeof(int), typeof(bool), typeof(bool), typeof(float), typeof(float) }, null, nameof(ShowTradeUiFullPostfix));
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.HideTradeUI), Type.EmptyTypes, null, nameof(HideTradeUiPostfix));
         PatchMethod(typeof(ItemIconController), nameof(ItemIconController.OnClick), Type.EmptyTypes, null, nameof(ItemIconOnClickPostfix));
-        PatchMethod(typeof(IdentifyMatchController), "set_correctTreasure", new[] { typeof(Il2CppSystem.Collections.Generic.List<GameObject>) }, null, nameof(IdentifyCorrectTreasurePostfix));
-        PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.SetNowChooseTreasure), new[] { typeof(GameObject) }, nameof(IdentifySetNowChooseTreasurePrefix), null);
-        PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.SureButtonClicked), Type.EmptyTypes, nameof(IdentifySureButtonClickedPrefix), null);
+        var identifySelectionPatched = PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.SetNowChooseTreasure), new[] { typeof(GameObject) }, nameof(IdentifySetNowChooseTreasurePrefix), null);
+        var identifySubmitPatched = PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.SureButtonClicked), Type.EmptyTypes, nameof(IdentifySureButtonClickedPrefix), null);
         PatchMethod(typeof(DebateUIController), nameof(DebateUIController.ChangePatient), new[] { typeof(bool), typeof(float) }, nameof(DebateChangePatientPrefix), null);
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.OpenCraftUI), new[] { typeof(CraftType), typeof(AreaBuildingData), typeof(bool) }, null, nameof(OpenCraftUiPostfix));
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.HideCraftUI), Type.EmptyTypes, null, nameof(HideCraftUiPostfix));
@@ -613,8 +622,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(StudyDodgeSkillController), "StartStudyDodgeSkill", new[] { typeof(KungfuSkillLvData) }, nameof(StudySkillTracePrefix), null);
         PatchMethod(typeof(StudyInternalSkillController), "StartStudyInternalSkill", new[] { typeof(KungfuSkillLvData) }, nameof(StudySkillTracePrefix), null);
         PatchMethod(typeof(StudyUniqueSkillController), "StartStudyUniqueSkill", new[] { typeof(KungfuSkillLvData) }, nameof(StudySkillTracePrefix), null);
-        PatchMethod(typeof(MailData), ".ctor", new[] { typeof(string), typeof(string), typeof(TimeData), typeof(bool), typeof(bool) }, null, nameof(MailDataCtorPostfix));
-        PatchMethod(typeof(GameController), nameof(GameController.GetNewMail), new[] { typeof(MailData), typeof(HeroData) }, null, nameof(GetNewMailPostfix));
+        var mailDeliveryPatched = PatchMethod(typeof(GameController), nameof(GameController.GetNewMail), new[] { typeof(MailData), typeof(HeroData) }, null, nameof(GetNewMailPostfix));
         PatchMethod(typeof(StudySkillController), nameof(StudySkillController.RealStartStudySkill), Type.EmptyTypes, nameof(RealStartStudySkillPrefix), null);
         PatchMethod(typeof(StudySkillController), nameof(StudySkillController.FinishStudySkill), new[] { typeof(float) }, null, nameof(FinishStudySkillPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.CraftResultChoosen), new[] { typeof(ItemData) }, nameof(CraftResultChoosenPrefix), nameof(CraftResultChoosenPostfix));
@@ -644,6 +652,19 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(GameController), nameof(GameController.ChangeYear), Type.EmptyTypes, nameof(CalendarChangePrefix), nameof(CalendarChangePostfix));
         PatchMethod(typeof(GameController), nameof(GameController.ChangeYearDirect), new[] { typeof(int) }, nameof(CalendarChangePrefix), nameof(CalendarChangePostfix));
         PatchMethod(typeof(GameController), nameof(GameController.ChangeHour), new[] { typeof(float) }, nameof(HourChangePrefix), nameof(HourChangePostfix));
+
+        var maxLoverSyncAvailable = ApplyConfiguredMaxLoverCount("startup compatibility probe");
+        LogCompatibilitySummary(
+            battlePrepareDirectPatched,
+            battlePrepareGroupedPatched,
+            battleTeamPreparePatched,
+            battleSpeedPatched,
+            horseRefreshPatched,
+            horseRefreshSignature,
+            maxLoverSyncAvailable,
+            identifySelectionPatched,
+            identifySubmitPatched,
+            mailDeliveryPatched);
 
         Log.LogInfo("LongYin Stamina Lock loaded.");
         Log.LogInfo("Legacy in-game mod panel is disabled. External Mod Control is the supported UI path.");
@@ -678,8 +699,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo($"Merchant cash floor starts at {Math.Max(0, _merchantCarryCash.Value)}.");
         Log.LogInfo($"Treasure trade helper starts {(_treasureTradeHelperEnabled.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Treasure auto cart starts {(_treasureAutoTradeEnabled.Value ? "ON" : "OFF")}.");
-        Log.LogInfo($"Treasure identify highlight starts {(_treasureIdentifyHighlightCorrect.Value ? "ON" : "OFF")}.");
-        Log.LogInfo($"Treasure identify force-correct starts {(_treasureIdentifyForceCorrectSelection.Value ? "ON" : "OFF")}.");
+        Log.LogInfo(
+            $"Treasure identify highlight starts {(_treasureIdentifyHighlightCorrect.Value ? "DEGRADED" : "OFF")}" +
+            $"{(_treasureIdentifyHighlightCorrect.Value ? " because the IL2CPP field accessor is not patchable" : string.Empty)}.");
+        Log.LogInfo(
+            $"Treasure identify force-correct starts {(_treasureIdentifyForceCorrectSelection.Value && identifySelectionPatched && identifySubmitPatched ? "ON" : _treasureIdentifyForceCorrectSelection.Value ? "DEGRADED" : "OFF")}.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
         Log.LogInfo($"Extra relationship gain chance starts at {ClampPercent(_extraRelationshipGainChancePercent.Value)}%.");
         Log.LogInfo($"Team auto favor starts {(_teamAutoFavorEnabled.Value ? "ON" : "OFF")} at +{FormatConfigFloat(Math.Max(0f, _teamAutoFavorPerDay.Value))}/day.");
@@ -711,25 +735,108 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo($"Outside-battle speed cycle hotkey is {_outsideBattleSpeedHotkey.Value}.");
     }
 
-    private void PatchMethod(Type type, string methodName, Type[] parameterTypes, string? prefixName, string? postfixName)
+    private bool PatchMethod(Type type, string methodName, Type[] parameterTypes, string? prefixName, string? postfixName)
     {
-        MethodBase? target = string.Equals(methodName, ".ctor", StringComparison.Ordinal)
-            ? AccessTools.Constructor(type, parameterTypes)
-            : AccessTools.Method(type, methodName, parameterTypes);
-        var prefix = prefixName == null ? null : AccessTools.Method(typeof(LongYinStaminaLockPlugin), prefixName);
-        var postfix = postfixName == null ? null : AccessTools.Method(typeof(LongYinStaminaLockPlugin), postfixName);
+        var target = FindCompatibleTargetMethod(type, methodName, parameterTypes);
 
         if (target == null)
         {
-            Log.LogWarning($"Could not patch {type.Name}.{methodName}({parameterTypes.Length} params)");
-            return;
+            RecordSkippedPatch(type, methodName, parameterTypes, "target is not exposed by this runtime");
+            return false;
         }
 
-        _harmony!.Patch(
-            target,
-            prefix: prefix == null ? null : new HarmonyMethod(prefix),
-            postfix: postfix == null ? null : new HarmonyMethod(postfix));
-        Log.LogInfo($"Patched {type.Name}.{target.Name}({target.GetParameters().Length} params)");
+        return PatchResolvedMethod(target, prefixName, postfixName);
+    }
+
+    private bool PatchFirstAvailableMethod(
+        Type type,
+        string methodName,
+        Type[][] parameterCandidates,
+        string? prefixName,
+        string? postfixName,
+        out string resolvedSignature)
+    {
+        foreach (var parameterTypes in parameterCandidates)
+        {
+            var target = FindCompatibleTargetMethod(type, methodName, parameterTypes);
+            if (target == null)
+            {
+                continue;
+            }
+
+            resolvedSignature = DescribeMethod(target);
+            return PatchResolvedMethod(target, prefixName, postfixName);
+        }
+
+        resolvedSignature = "unavailable";
+        RecordSkippedPatch(type, methodName, parameterCandidates.FirstOrDefault() ?? Type.EmptyTypes, "no supported signature is exposed by this runtime");
+        return false;
+    }
+
+    private bool PatchResolvedMethod(MethodBase target, string? prefixName, string? postfixName)
+    {
+        const BindingFlags PatchFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+        var patchType = typeof(LongYinStaminaLockPlugin);
+        var prefix = prefixName == null ? null : patchType.GetMethod(prefixName, PatchFlags);
+        var postfix = postfixName == null ? null : patchType.GetMethod(postfixName, PatchFlags);
+
+        if (prefixName != null && prefix == null)
+        {
+            RecordSkippedPatch(target.DeclaringType ?? typeof(object), target.Name, target.GetParameters().Select(parameter => parameter.ParameterType).ToArray(), $"prefix {prefixName} is unavailable");
+            return false;
+        }
+
+        if (postfixName != null && postfix == null)
+        {
+            RecordSkippedPatch(target.DeclaringType ?? typeof(object), target.Name, target.GetParameters().Select(parameter => parameter.ParameterType).ToArray(), $"postfix {postfixName} is unavailable");
+            return false;
+        }
+
+        try
+        {
+            _harmony!.Patch(
+                target,
+                prefix: prefix == null ? null : new HarmonyMethod(prefix),
+                postfix: postfix == null ? null : new HarmonyMethod(postfix));
+            _patchedMethodCount++;
+            Log.LogInfo($"Patched {target.DeclaringType?.Name}.{target.Name}({target.GetParameters().Length} params)");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            RecordSkippedPatch(
+                target.DeclaringType ?? typeof(object),
+                target.Name,
+                target.GetParameters().Select(parameter => parameter.ParameterType).ToArray(),
+                $"Harmony rejected the target: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+    }
+
+    private static MethodBase? FindCompatibleTargetMethod(Type type, string methodName, Type[] parameterTypes)
+    {
+        const BindingFlags MethodFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+        if (string.Equals(methodName, ".ctor", StringComparison.Ordinal))
+        {
+            return type.GetConstructor(MethodFlags, binder: null, parameterTypes, modifiers: null);
+        }
+
+        for (var currentType = type; currentType != null; currentType = currentType.BaseType)
+        {
+            var method = currentType.GetMethod(methodName, MethodFlags, binder: null, parameterTypes, modifiers: null);
+            if (method != null)
+            {
+                return method;
+            }
+        }
+
+        return null;
+    }
+
+    private void RecordSkippedPatch(Type type, string methodName, Type[] parameterTypes, string reason)
+    {
+        _skippedMethodCount++;
+        Log.LogWarning($"[Compatibility] SKIPPED patch {type.Name}.{methodName}({string.Join(", ", parameterTypes.Select(parameterType => parameterType.Name))}): {reason}.");
     }
 
     private void PatchHeroChangeFameMethod()
@@ -755,19 +862,89 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         if (target == null)
         {
-            Log.LogWarning("Could not patch HeroData.ChangeFame(*) for team fame share.");
+            RecordSkippedPatch(typeof(HeroData), nameof(HeroData.ChangeFame), new[] { typeof(float), typeof(bool) }, "no compatible numeric delta overload is exposed; team fame share is disabled");
             return;
         }
 
         _heroChangeFameMethod = target;
-        var prefix = AccessTools.Method(typeof(LongYinStaminaLockPlugin), nameof(ChangeFamePrefix));
-        var postfix = AccessTools.Method(typeof(LongYinStaminaLockPlugin), nameof(ChangeFamePostfix));
-        _harmony!.Patch(
-            target,
-            prefix: prefix == null ? null : new HarmonyMethod(prefix),
-            postfix: postfix == null ? null : new HarmonyMethod(postfix));
+        if (!PatchResolvedMethod(target, nameof(ChangeFamePrefix), nameof(ChangeFamePostfix)))
+        {
+            _heroChangeFameMethod = null;
+            return;
+        }
+
+        Log.LogInfo($"[Compatibility] Team fame share: ENABLED using HeroData.{target.Name}({target.GetParameters()[0].ParameterType.Name}, Boolean).");
+    }
+
+    private void LogCompatibilitySummary(
+        bool battlePrepareDirectPatched,
+        bool battlePrepareGroupedPatched,
+        bool battleTeamPreparePatched,
+        bool battleSpeedPatched,
+        bool horseRefreshPatched,
+        string horseRefreshSignature,
+        bool maxLoverSyncAvailable,
+        bool identifySelectionPatched,
+        bool identifySubmitPatched,
+        bool mailDeliveryPatched)
+    {
+        var battleHookCount = new[]
+        {
+            battlePrepareDirectPatched,
+            battlePrepareGroupedPatched,
+            battleTeamPreparePatched,
+            battleSpeedPatched
+        }.Count(enabled => enabled);
+        var identifyCoreAvailable = identifySelectionPatched && identifySubmitPatched;
+
+        Log.LogInfo($"[Compatibility] Summary: {_patchedMethodCount} method patches enabled, {_skippedMethodCount} safely skipped.");
+        var battleState = battleHookCount == 4 ? "ENABLED" : battleHookCount > 0 ? "PARTIAL" : "DEGRADED";
         Log.LogInfo(
-            $"Patched HeroData.{target.Name}({target.GetParameters().Length} params) for team fame share using {target.GetParameters()[0].ParameterType.Name} delta.");
+            $"[Compatibility] Battle hooks: {battleState} ({battleHookCount}/4 owned targets); " +
+            "BattleController.HeroEnterBattleFieldCoroutine is not registered by this plugin.");
+        Log.LogInfo(
+            $"[Compatibility] Horse refresh hook: {(horseRefreshPatched ? "ENABLED" : "DEGRADED")}" +
+            $"{(horseRefreshPatched ? $" via {horseRefreshSignature}" : "; periodic horse-state maintenance remains active")}.");
+        Log.LogInfo(
+            $"[Compatibility] Max lover override: {(maxLoverSyncAvailable ? "ENABLED" : "DEGRADED")} via direct GlobalData member synchronization; " +
+            "the IL2CPP field accessor is intentionally not patched.");
+        Log.LogInfo(
+            $"[Compatibility] Treasure identify force-correct: {(identifyCoreAvailable ? "ENABLED" : "DEGRADED")}; " +
+            "automatic highlight is DEGRADED because the correctTreasure field accessor is intentionally not patched.");
+        Log.LogInfo(
+            $"[Compatibility] Mail countdown hook: {(mailDeliveryPatched ? "ENABLED via GameController.GetNewMail" : "DEGRADED")}; " +
+            "the unpatchable MailData constructor is intentionally skipped.");
+        Log.LogInfo(
+            $"[Compatibility] Custom/threshold talents: PROBING through reflection only ({DescribeDeclaredHeroTagDatabaseShape()}); " +
+            "the runtime collection will be validated after game data loads.");
+    }
+
+    private static string DescribeDeclaredHeroTagDatabaseShape()
+    {
+        const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        try
+        {
+            var memberType = typeof(GameDataController).GetProperty("heroTagDataBase", Flags)?.PropertyType
+                ?? typeof(GameDataController).GetField("heroTagDataBase", Flags)?.FieldType;
+            return memberType == null
+                ? "accessor not declared"
+                : $"declared shape {memberType.FullName ?? memberType.Name}";
+        }
+        catch (Exception ex)
+        {
+            return $"declaration probe failed: {DescribeCompatibilityException(ex)}";
+        }
+    }
+
+    private static string DescribeCompatibilityException(Exception ex)
+    {
+        var current = ex;
+        while (current is TargetInvocationException && current.InnerException != null)
+        {
+            current = current.InnerException;
+        }
+
+        return $"{current.GetType().Name}: {current.Message}";
     }
 
     private static void ChangeMoveStepPrefix(ref int num)
@@ -1546,16 +1723,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return left.itemLv.CompareTo(right.itemLv);
     }
 
-    private static void IdentifyCorrectTreasurePostfix(IdentifyMatchController __instance)
-    {
-        if (!_treasureIdentifyHighlightCorrect.Value)
-        {
-            return;
-        }
-
-        TrySelectCorrectIdentifyTreasure(__instance, "correctTreasure");
-    }
-
     private static void IdentifySetNowChooseTreasurePrefix(IdentifyMatchController __instance, ref GameObject targetTreasure)
     {
         if (!_treasureIdentifyForceCorrectSelection.Value)
@@ -1598,7 +1765,17 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         try
         {
-            controller.SetNowChooseTreasure(correctTreasure);
+            var selectMethod = FindCompatibleTargetMethod(
+                controller.GetType(),
+                "SetNowChooseTreasure",
+                new[] { typeof(GameObject) });
+            if (selectMethod == null)
+            {
+                LoggerInstance.LogWarning($"Treasure identify selection safely skipped from {source}: SetNowChooseTreasure(GameObject) is unavailable.");
+                return false;
+            }
+
+            selectMethod.Invoke(controller, new object[] { correctTreasure });
             LoggerInstance.LogInfo($"Treasure identify selected correct treasure from {source}: {DescribeIdentifyTreasure(correctTreasure)}");
             return true;
         }
@@ -1614,18 +1791,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         if (controller == null)
         {
             return null;
-        }
-
-        try
-        {
-            var correctTreasure = controller.correctTreasure;
-            if (correctTreasure != null && correctTreasure.Count > 0)
-            {
-                return correctTreasure[0];
-            }
-        }
-        catch
-        {
         }
 
         var value = SafeProperty(controller, "correctTreasure") ?? SafeField(controller, "correctTreasure");
@@ -1645,14 +1810,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return null;
         }
 
-        try
-        {
-            return controller.nowChooseTreasure;
-        }
-        catch
-        {
-            return (SafeProperty(controller, "nowChooseTreasure") ?? SafeField(controller, "nowChooseTreasure")) as GameObject;
-        }
+        return (SafeProperty(controller, "nowChooseTreasure") ?? SafeField(controller, "nowChooseTreasure")) as GameObject;
     }
 
     private static string DescribeIdentifyTreasure(GameObject? treasure)
@@ -3706,18 +3864,16 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _studySkillTaskStartDate = TryGetWorldDateSnapshot();
     }
 
-    private static void MailDataCtorPostfix(MailData __instance)
+    private static void GetNewMailPostfix(MailData? targetMail, HeroData sourceHero)
     {
-        var mailTitle = SafeProperty(__instance, "mailTitle") as string;
-        var mailText = SafeProperty(__instance, "mailText") as string;
-        var mailTime = SafeProperty(__instance, "mailTime") as TimeData;
+        if (targetMail == null)
+        {
+            return;
+        }
 
-        TryForceReadBookCountdown(__instance, mailTitle, mailText, "MailData..ctor");
-    }
-
-    private static void GetNewMailPostfix(MailData targetMail, HeroData sourceHero)
-    {
-        TryForceReadBookCountdown(targetMail, targetMail?.mailTitle, targetMail?.mailText, "GameController.GetNewMail");
+        var mailTitle = SafeProperty(targetMail, "mailTitle") as string;
+        var mailText = SafeProperty(targetMail, "mailText") as string;
+        TryForceReadBookCountdown(targetMail, mailTitle, mailText, "GameController.GetNewMail");
     }
 
     private static TimeData? TryBuildDateFromDelta(TimeData startDate, int deltaDays)
@@ -5013,8 +5169,15 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static void LoadAllGameDataPostfix()
     {
         LoadCustomTalentPackFromDisk();
-        EnsureCustomTalentDefinitionsRegistered("LoadAllGameData");
-        EnsureThresholdTalentRegistered("LoadAllGameData");
+        TryGetHeroTagDatabase("LoadAllGameData", out _);
+
+        var customTalentsCompatible = EnsureCustomTalentDefinitionsRegistered("LoadAllGameData");
+        LoggerInstance.LogInfo(
+            $"[Compatibility] Custom talents: {(_customTalents.Count == 0 ? "DISABLED (no definitions)" : customTalentsCompatible ? "ENABLED" : "DEGRADED (database unavailable or unsupported)")}.");
+
+        var thresholdTalentCompatible = EnsureThresholdTalentRegistered("LoadAllGameData");
+        LoggerInstance.LogInfo(
+            $"[Compatibility] Threshold talent: {(!IsThresholdTalentFeatureActive() ? "DISABLED by configuration" : thresholdTalentCompatible ? "ENABLED" : "DEGRADED (database unavailable or unsupported)")}.");
     }
 
     private static void LoadCustomTalentPackFromDisk()
@@ -5201,6 +5364,209 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return true;
     }
 
+    private static bool TryGetHeroTagDatabase(string source, out object? database)
+    {
+        database = null;
+
+        GameDataController? gameData;
+        try
+        {
+            gameData = GameDataController.Instance;
+        }
+        catch (Exception ex)
+        {
+            UpdateHeroTagDatabaseCompatibility(
+                "DEGRADED",
+                $"GameDataController instance lookup failed: {DescribeCompatibilityException(ex)}",
+                source);
+            return false;
+        }
+
+        if (gameData == null)
+        {
+            UpdateHeroTagDatabaseCompatibility("PENDING", "GameDataController instance is not ready", source);
+            return false;
+        }
+
+        const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        try
+        {
+            var runtimeType = gameData.GetType();
+            var property = runtimeType.GetProperty("heroTagDataBase", Flags);
+            if (property != null && property.CanRead)
+            {
+                database = property.GetValue(gameData);
+            }
+            else
+            {
+                database = runtimeType.GetField("heroTagDataBase", Flags)?.GetValue(gameData);
+            }
+        }
+        catch (Exception ex)
+        {
+            UpdateHeroTagDatabaseCompatibility(
+                "DEGRADED",
+                $"dynamic accessor failed: {DescribeCompatibilityException(ex)}",
+                source);
+            database = null;
+            return false;
+        }
+
+        if (database == null)
+        {
+            UpdateHeroTagDatabaseCompatibility("DEGRADED", "dynamic accessor is absent or returned null", source);
+            return false;
+        }
+
+        if (database is Il2CppSystem.Collections.Generic.List<HeroTagDataBase> ||
+            database is Il2CppSystem.Collections.Generic.Dictionary<int, HeroTagDataBase>)
+        {
+            UpdateHeroTagDatabaseCompatibility("ENABLED", $"dynamic {DescribeHeroTagDatabaseShape(database)} adapter", source);
+            return true;
+        }
+
+        UpdateHeroTagDatabaseCompatibility(
+            "DEGRADED",
+            $"unsupported runtime collection {database.GetType().FullName ?? database.GetType().Name}",
+            source);
+        database = null;
+        return false;
+    }
+
+    private static void UpdateHeroTagDatabaseCompatibility(string state, string detail, string source)
+    {
+        if (string.Equals(_heroTagDatabaseCompatibilityState, state, StringComparison.Ordinal) &&
+            string.Equals(_heroTagDatabaseCompatibilityDetail, detail, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _heroTagDatabaseCompatibilityState = state;
+        _heroTagDatabaseCompatibilityDetail = detail;
+        var message = $"[Compatibility] Hero tag database: {state} from {source}; {detail}.";
+        if (string.Equals(state, "DEGRADED", StringComparison.Ordinal))
+        {
+            LoggerInstance.LogWarning(message);
+        }
+        else
+        {
+            LoggerInstance.LogInfo(message);
+        }
+    }
+
+    private static string DescribeHeroTagDatabaseShape(object database)
+    {
+        if (database is Il2CppSystem.Collections.Generic.List<HeroTagDataBase>)
+        {
+            return "List<HeroTagDataBase>";
+        }
+
+        if (database is Il2CppSystem.Collections.Generic.Dictionary<int, HeroTagDataBase>)
+        {
+            return "Dictionary<Int32, HeroTagDataBase>";
+        }
+
+        return database.GetType().FullName ?? database.GetType().Name;
+    }
+
+    private static IEnumerable<KeyValuePair<int, HeroTagDataBase>> EnumerateHeroTagDatabaseEntries(object database)
+    {
+        if (database is Il2CppSystem.Collections.Generic.List<HeroTagDataBase> list)
+        {
+            for (var index = 0; index < list.Count; index++)
+            {
+                yield return new KeyValuePair<int, HeroTagDataBase>(index, list[index]);
+            }
+
+            yield break;
+        }
+
+        if (database is Il2CppSystem.Collections.Generic.Dictionary<int, HeroTagDataBase> dictionary)
+        {
+            foreach (var pair in dictionary)
+            {
+                yield return new KeyValuePair<int, HeroTagDataBase>(pair.Key, pair.Value);
+            }
+        }
+    }
+
+    private static bool TryGetHeroTagDatabaseEntry(object database, int tagId, out HeroTagDataBase? entry)
+    {
+        entry = null;
+        try
+        {
+            if (database is Il2CppSystem.Collections.Generic.List<HeroTagDataBase> list)
+            {
+                if (tagId < 0 || tagId >= list.Count)
+                {
+                    return false;
+                }
+
+                entry = list[tagId];
+                return entry != null;
+            }
+
+            if (database is Il2CppSystem.Collections.Generic.Dictionary<int, HeroTagDataBase> dictionary &&
+                dictionary.TryGetValue(tagId, out var dictionaryEntry))
+            {
+                entry = dictionaryEntry;
+                return entry != null;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
+    private static int GetNextHeroTagDatabaseId(object database)
+    {
+        var nextId = 0;
+        foreach (var pair in EnumerateHeroTagDatabaseEntries(database))
+        {
+            if (pair.Key >= nextId && pair.Key < int.MaxValue)
+            {
+                nextId = pair.Key + 1;
+            }
+        }
+
+        return nextId;
+    }
+
+    private static bool TryAddHeroTagDatabaseEntry(object database, int tagId, HeroTagDataBase entry)
+    {
+        try
+        {
+            if (database is Il2CppSystem.Collections.Generic.List<HeroTagDataBase> list)
+            {
+                if (tagId != list.Count)
+                {
+                    return false;
+                }
+
+                list.Add(entry);
+                return true;
+            }
+
+            if (database is Il2CppSystem.Collections.Generic.Dictionary<int, HeroTagDataBase> dictionary)
+            {
+                if (dictionary.ContainsKey(tagId))
+                {
+                    return false;
+                }
+
+                dictionary.Add(tagId, entry);
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
     private static bool EnsureCustomTalentDefinitionsRegistered(string source)
     {
         if (_customTalents.Count == 0)
@@ -5208,14 +5574,18 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return true;
         }
 
-        var gameData = GameDataController.Instance;
-        var database = gameData?.heroTagDataBase;
-        if (gameData == null || database == null)
+        if (!TryGetHeroTagDatabase(source, out var database) || database == null)
         {
-            LoggerInstance.LogWarning($"Custom talent registration skipped from {source} because GameDataController or heroTagDataBase is unavailable.");
+            foreach (var talent in _customTalents)
+            {
+                talent.RuntimeTagId = -1;
+            }
+
+            LoggerInstance.LogWarning($"Custom talent registration safely skipped from {source} because the hero tag database capability is unavailable.");
             return false;
         }
 
+        var allRegistered = true;
         foreach (var talent in _customTalents)
         {
             try
@@ -5224,8 +5594,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 if (existingId >= 0)
                 {
                     talent.RuntimeTagId = existingId;
-                    var existing = database[existingId];
-                    if (existing != null)
+                    if (TryGetHeroTagDatabaseEntry(database, existingId, out var existing) && existing != null)
                     {
                         ApplyCustomTalentDefinition(existing, talent, existingId);
                     }
@@ -5233,43 +5602,49 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 else
                 {
                     var customTag = new HeroTagDataBase();
-                    var newId = database.Count;
+                    var newId = GetNextHeroTagDatabaseId(database);
                     ApplyCustomTalentDefinition(customTag, talent, newId);
-                    database.Add(customTag);
+                    if (!TryAddHeroTagDatabaseEntry(database, newId, customTag))
+                    {
+                        throw new InvalidOperationException($"runtime {DescribeHeroTagDatabaseShape(database)} adapter rejected id {newId}");
+                    }
+
                     talent.RuntimeTagId = newId;
                 }
             }
             catch (Exception ex)
             {
+                talent.RuntimeTagId = -1;
+                allRegistered = false;
                 LoggerInstance.LogWarning($"Failed to register custom talent '{talent.Name}' ({talent.Id}) from {source}: {ex.Message}");
             }
         }
 
-        return true;
+        return allRegistered;
     }
 
-    private static int FindTagIdByMarker(Il2CppSystem.Collections.Generic.List<HeroTagDataBase> database, string marker)
+    private static int FindTagIdByMarker(object database, string marker)
     {
         if (database == null || string.IsNullOrWhiteSpace(marker))
         {
             return -1;
         }
 
-        for (var i = 0; i < database.Count; i++)
+        try
         {
-            try
+            foreach (var pair in EnumerateHeroTagDatabaseEntries(database))
             {
-                var entry = database[i];
+                var entry = pair.Value;
                 if (entry != null &&
                     string.Equals(entry.category, CustomTalentCategory, StringComparison.Ordinal) &&
                     string.Equals(entry.sameMeaning, marker, StringComparison.Ordinal))
                 {
-                    return i;
+                    return pair.Key;
                 }
             }
-            catch
-            {
-            }
+        }
+        catch
+        {
         }
 
         return -1;
@@ -5470,22 +5845,26 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         try
         {
-            var database = GameDataController.Instance?.heroTagDataBase;
-            if (database == null)
+            if (!TryGetHeroTagDatabase("custom talent lookup", out var database) || database == null)
             {
+                talent.RuntimeTagId = -1;
                 return null;
             }
 
-            if (talent.RuntimeTagId >= 0 && talent.RuntimeTagId < database.Count)
+            if (talent.RuntimeTagId >= 0 &&
+                TryGetHeroTagDatabaseEntry(database, talent.RuntimeTagId, out var runtimeEntry) &&
+                runtimeEntry != null)
             {
-                return database[talent.RuntimeTagId];
+                return runtimeEntry;
             }
 
             var existingId = FindTagIdByMarker(database, talent.Marker);
             if (existingId >= 0)
             {
                 talent.RuntimeTagId = existingId;
-                return database[existingId];
+                return TryGetHeroTagDatabaseEntry(database, existingId, out var existingEntry)
+                    ? existingEntry
+                    : null;
             }
         }
         catch
@@ -5647,13 +6026,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return false;
         }
 
-        var gameData = GameDataController.Instance;
-        var database = gameData?.heroTagDataBase;
-        if (gameData == null || database == null)
+        if (!TryGetHeroTagDatabase(source, out var database) || database == null)
         {
+            _thresholdTalentTagId = -1;
             if (!_thresholdTalentRegistrationWarned && _thresholdTalentEnabled.Value)
             {
-                LoggerInstance.LogWarning($"Threshold talent registration skipped from {source} because GameDataController or heroTagDataBase is unavailable.");
+                LoggerInstance.LogWarning($"Threshold talent registration safely skipped from {source} because the hero tag database capability is unavailable.");
                 _thresholdTalentRegistrationWarned = true;
             }
 
@@ -5669,8 +6047,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
             try
             {
-                var existing = database[existingId];
-                if (existing != null)
+                if (TryGetHeroTagDatabaseEntry(database, existingId, out var existing) && existing != null)
                 {
                     ApplyThresholdTalentDefinition(existing, existingId);
                 }
@@ -5686,9 +6063,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         try
         {
             var customTag = new HeroTagDataBase();
-            var newId = database.Count;
+            var newId = GetNextHeroTagDatabaseId(database);
             ApplyThresholdTalentDefinition(customTag, newId);
-            database.Add(customTag);
+            if (!TryAddHeroTagDatabaseEntry(database, newId, customTag))
+            {
+                throw new InvalidOperationException($"runtime {DescribeHeroTagDatabaseShape(database)} adapter rejected id {newId}");
+            }
+
             _thresholdTalentTagId = newId;
             LoggerInstance.LogInfo(
                 $"Registered threshold talent '{_thresholdTalentTagName}' with runtime id={_thresholdTalentTagId}, " +
@@ -5727,26 +6108,26 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         tag.buffData = buffData;
     }
 
-    private static int FindThresholdTagId(Il2CppSystem.Collections.Generic.List<HeroTagDataBase> database)
+    private static int FindThresholdTagId(object database)
     {
         if (database == null)
         {
             return -1;
         }
 
-        for (var i = 0; i < database.Count; i++)
+        try
         {
-            try
+            foreach (var pair in EnumerateHeroTagDatabaseEntries(database))
             {
-                var entry = database[i];
+                var entry = pair.Value;
                 if (MatchesThresholdTalentDefinition(entry))
                 {
-                    return i;
+                    return pair.Key;
                 }
             }
-            catch
-            {
-            }
+        }
+        catch
+        {
         }
 
         return -1;
@@ -5861,23 +6242,26 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         try
         {
-            var gameData = GameDataController.Instance;
-            var database = gameData?.heroTagDataBase;
-            if (database == null)
+            if (!TryGetHeroTagDatabase("threshold talent lookup", out var database) || database == null)
             {
+                _thresholdTalentTagId = -1;
                 return null;
             }
 
-            if (_thresholdTalentTagId >= 0 && _thresholdTalentTagId < database.Count)
+            if (_thresholdTalentTagId >= 0 &&
+                TryGetHeroTagDatabaseEntry(database, _thresholdTalentTagId, out var runtimeEntry) &&
+                runtimeEntry != null)
             {
-                return database[_thresholdTalentTagId];
+                return runtimeEntry;
             }
 
             var existingId = FindThresholdTagId(database);
             if (existingId >= 0)
             {
                 _thresholdTalentTagId = existingId;
-                return database[existingId];
+                return TryGetHeroTagDatabaseEntry(database, existingId, out var existingEntry)
+                    ? existingEntry
+                    : null;
             }
         }
         catch
@@ -6088,16 +6472,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static void HeroDetailHiddenPostfix()
     {
         CacheActiveHeroDetailHero(null);
-    }
-
-    private static void GlobalDataMaxLoverNumPostfix(ref int __result)
-    {
-        ApplyConfiguredMaxLoverCount("GlobalData.get_MaxLoverNum");
-        var configured = Math.Max(1, _maxLoverCount.Value);
-        if (__result < configured)
-        {
-            __result = configured;
-        }
     }
 
     private static void MeetLoverResultRequirePostfix(ref bool __result)
@@ -8130,9 +8504,29 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static int TryGetCollectionCount(object? value)
     {
+        if (value == null)
+        {
+            return -1;
+        }
+
         if (value is System.Collections.ICollection collection)
         {
             return collection.Count;
+        }
+
+        try
+        {
+            var countProperty = value.GetType().GetProperty(
+                "Count",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            var reflectedCount = TryConvertToInt(countProperty?.GetValue(value));
+            if (reflectedCount.HasValue)
+            {
+                return reflectedCount.Value;
+            }
+        }
+        catch
+        {
         }
 
         return -1;
@@ -8535,18 +8929,27 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return player != null && hero != null && player == hero;
     }
 
-    private static void ApplyConfiguredMaxLoverCount(string source)
+    private static bool ApplyConfiguredMaxLoverCount(string source)
     {
         var configured = Math.Max(1, _maxLoverCount.Value);
         if (TrySetStaticMemberValue(typeof(GlobalData), "MaxLoverNum", configured))
         {
-            return;
+            if (_maxLoverMemberUnavailableWarned)
+            {
+                LoggerInstance.LogInfo($"[Compatibility] Max lover override recovered via direct GlobalData member synchronization from {source}.");
+                _maxLoverMemberUnavailableWarned = false;
+            }
+
+            return true;
         }
 
-        if (_traceMode.Value)
+        if (!_maxLoverMemberUnavailableWarned)
         {
-            LoggerInstance.LogWarning($"Max lover count override could not sync GlobalData.MaxLoverNum from {source}.");
+            LoggerInstance.LogWarning($"[Compatibility] Max lover override DEGRADED: GlobalData.MaxLoverNum is unavailable or read-only ({source}).");
+            _maxLoverMemberUnavailableWarned = true;
         }
+
+        return false;
     }
 
     private static int GetPlayerLoverCount(HeroData player)

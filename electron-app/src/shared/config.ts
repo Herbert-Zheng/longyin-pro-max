@@ -257,18 +257,27 @@ export function getGamePaths(gameRoot: string) {
     skillConfigPath: path.join(gameRoot, SKILL_CONFIG_NAME),
     battleConfigPath: path.join(gameRoot, BATTLE_CONFIG_NAME),
     customTalentConfigPath: path.join(gameRoot, CUSTOM_TALENT_CONFIG_NAME),
+    bepinExLogPath: path.join(gameRoot, 'BepInEx', 'LogOutput.log'),
     legacyTraceConfigPath: path.join(gameRoot, LEGACY_TRACE_CONFIG_NAME),
     legacySkillConfigPath: path.join(gameRoot, LEGACY_SKILL_CONFIG_NAME)
   };
 }
 
-function createHealthCheck(key: string, label: string, ok: boolean, detail: string): HealthCheckResult {
-  return { key, label, ok, detail };
+function createHealthCheck(
+  key: string,
+  label: string,
+  ok: boolean,
+  detail: string,
+  blocking = true,
+  launchBlocking = false
+): HealthCheckResult {
+  return { key, label, ok, detail, blocking, launchBlocking };
 }
 
 function summarizeHealth(checks: HealthCheckResult[], driftedFiles: string[]): string {
-  const failed = checks.filter((check) => !check.ok);
-  if (failed.length === 0 && driftedFiles.length === 0) {
+  const failed = checks.filter((check) => !check.ok && check.blocking !== false);
+  const warnings = checks.filter((check) => !check.ok && check.blocking === false);
+  if (failed.length === 0 && warnings.length === 0 && driftedFiles.length === 0) {
     return `已通过 ${checks.length} 项安装检查。`;
   }
 
@@ -279,7 +288,71 @@ function summarizeHealth(checks: HealthCheckResult[], driftedFiles: string[]): s
   if (driftedFiles.length > 0) {
     parts.push(`${driftedFiles.length} 个载荷文件与当前 Electron 包不一致`);
   }
+  if (warnings.length > 0) {
+    parts.push(`${warnings.length} 项 BepInEx 运行日志警告`);
+  }
   return `检测到${parts.join('，')}。`;
+}
+
+async function listPayloadPluginDlls(payloadRoot: string): Promise<string[]> {
+  const pluginsRoot = path.join(payloadRoot, 'BepInEx', 'plugins');
+  const pluginsRootExists = await directoryExists(pluginsRoot);
+  if (!pluginsRootExists) {
+    return [];
+  }
+
+  const relativePaths: string[] = [];
+  async function visit(directoryPath: string): Promise<void> {
+    const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) {
+        await visit(entryPath);
+      }
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith('.dll')) {
+        relativePaths.push(path.relative(payloadRoot, entryPath));
+      }
+    }
+  }
+
+  await visit(pluginsRoot);
+  return relativePaths;
+}
+
+function findBepInExRuntimeIssues(text: string | undefined): {
+  hardFailures: string[];
+  compatibilityWarnings: string[];
+} {
+  if (!text) {
+    return { hardFailures: [], compatibilityWarnings: [] };
+  }
+
+  const hardFailures: string[] = [];
+  const compatibilityWarnings: string[] = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+
+    const missingMethod = /\bMissing(?:Method|Field)(?:Exception)?\b/i.test(line);
+    const harmonyTargetMissing =
+      /(?:undefined|missing|not found|null|no)\s+target\s*method/i.test(line) ||
+      /target\s*method.{0,80}(?:undefined|missing|not found|null)/i.test(line) ||
+      /harmony(?:lib|x)?\.harmonyexception/i.test(line) ||
+      /could not patch/i.test(line) ||
+      /\bTypeLoadException\b/i.test(line);
+    const compatibilityWarning =
+      /\[Compatibility\].*(?::\s*|;\s*| is )(?:SKIPPED|PARTIAL|DEGRADED)\b/i.test(line);
+    if ((missingMethod || harmonyTargetMissing) && hardFailures.length < 6) {
+      hardFailures.push(line.slice(0, 360));
+    }
+    else if (compatibilityWarning && compatibilityWarnings.length < 6) {
+      compatibilityWarnings.push(line.slice(0, 360));
+    }
+  }
+
+  return { hardFailures, compatibilityWarnings };
 }
 
 function readBool(text: string | undefined, key: string, fallback: boolean): boolean {
@@ -981,7 +1054,20 @@ export async function inspectGameHealth(gameRoot: string, payloadRoot?: string):
   checks.push(createHealthCheck('game-exe', '游戏主程序', gameExeExists, gameExeExists ? GAME_EXE_NAME : `缺少 ${GAME_EXE_NAME}`));
   checks.push(createHealthCheck('bepinex-dir', 'BepInEx 目录', bepinexExists, bepinexExists ? '已检测到 BepInEx。' : '缺少 BepInEx 目录。'));
   checks.push(createHealthCheck('winhttp', 'Doorstop Loader', winhttpExists, winhttpExists ? '已检测到 winhttp.dll。' : '缺少 winhttp.dll。'));
-  checks.push(createHealthCheck('steam-appid', 'Steam AppId', steamAppIdExists, steamAppIdExists ? '已检测到 steam_appid.txt。' : '缺少 steam_appid.txt。'));
+  const steamAppIdText = steamAppIdExists ? await readTextIfExists(paths.steamAppIdPath) : undefined;
+  const steamAppIdValid = steamAppIdText?.trim() === STEAM_APP_ID;
+  checks.push(
+    createHealthCheck(
+      'steam-appid',
+      'Steam AppId',
+      steamAppIdValid,
+      !steamAppIdExists
+        ? '缺少 steam_appid.txt。'
+        : steamAppIdValid
+          ? `steam_appid.txt 已设置为 ${STEAM_APP_ID}。`
+          : `steam_appid.txt 内容不是 ${STEAM_APP_ID}。`
+    )
+  );
 
   const doorstopText = await readTextIfExists(paths.doorstopConfigPath);
   const doorstopEnabled = readBool(doorstopText, 'enabled', false);
@@ -996,6 +1082,65 @@ export async function inspectGameHealth(gameRoot: string, payloadRoot?: string):
         : doorstopEnabled && ignoreDisableSwitch
           ? 'Doorstop 已启用。'
           : 'doorstop_config.ini 存在，但未启用必要开关。'
+    )
+  );
+
+  const runtimeLogText = await readTextIfExists(paths.bepinExLogPath);
+  const runtimeFindings = findBepInExRuntimeIssues(runtimeLogText);
+  const runtimeLogStat = await fs.stat(paths.bepinExLogPath).catch(() => undefined);
+  const livePluginStats = await Promise.all(
+    REQUIRED_PLUGIN_NAMES.map((pluginName) =>
+      fs.stat(path.join(gameRoot, 'BepInEx', 'plugins', pluginName)).catch(() => undefined))
+  );
+  const newestPluginMtime = livePluginStats.reduce(
+    (latest, stat) => Math.max(latest, stat?.mtimeMs ?? 0),
+    0
+  );
+  const runtimeLogCurrent = Boolean(
+    runtimeLogStat && (newestPluginMtime === 0 || runtimeLogStat.mtimeMs + 1_000 >= newestPluginMtime)
+  );
+  const runtimeIssues = [
+    ...runtimeFindings.hardFailures,
+    ...runtimeFindings.compatibilityWarnings
+  ];
+  const hardRuntimeFailure = runtimeFindings.hardFailures.length > 0;
+  const stalePrefix = runtimeIssues.length > 0 && !runtimeLogCurrent
+    ? '日志早于当前插件部署；允许重新启动生成新日志。旧日志：'
+    : '';
+  checks.push(
+    createHealthCheck(
+      'bepinex-runtime-log',
+      'BepInEx 运行日志',
+      runtimeIssues.length === 0,
+      runtimeIssues.length === 0
+        ? runtimeLogText === undefined
+          ? '尚未生成 BepInEx LogOutput.log。'
+          : '未检测到运行时目标缺失或兼容性降级。'
+        : `${stalePrefix}${runtimeIssues.join(' | ')}`,
+      false,
+      hardRuntimeFailure && runtimeLogCurrent
+    )
+  );
+
+  const managedConfigPaths = [
+    paths.mainConfigPath,
+    paths.horseConfigPath,
+    paths.questSnapshotConfigPath,
+    paths.skillConfigPath,
+    paths.battleConfigPath
+  ];
+  const managedConfigExists = await Promise.all(managedConfigPaths.map((configPath) => fileExists(configPath)));
+  const missingManagedConfigs = managedConfigPaths
+    .filter((_configPath, index) => !managedConfigExists[index])
+    .map((configPath) => path.basename(configPath));
+  checks.push(
+    createHealthCheck(
+      'config-files',
+      '模组配置文件',
+      missingManagedConfigs.length === 0,
+      missingManagedConfigs.length === 0
+        ? '主要模组配置文件齐全。'
+        : `缺少配置文件：${missingManagedConfigs.join(', ')}`
     )
   );
 
@@ -1019,12 +1164,12 @@ export async function inspectGameHealth(gameRoot: string, payloadRoot?: string):
     createHealthCheck(
       'custom-talent-config',
       '自定义天赋配置',
-      customTalentConfigExists || writableCustomTalentConfig,
+      customTalentConfigExists,
       customTalentConfigExists
         ? '已检测到自定义天赋 JSON 配置。'
         : writableCustomTalentConfig
-          ? '自定义天赋 JSON 尚未生成，但路径可创建。'
-          : '自定义天赋 JSON 路径不可写。'
+          ? '缺少自定义天赋 JSON，需安装或修复。'
+          : '自定义天赋 JSON 缺失且路径不可写。'
     )
   );
 
@@ -1044,12 +1189,15 @@ export async function inspectGameHealth(gameRoot: string, payloadRoot?: string):
 
   const driftedFiles: string[] = [];
   if (payloadRoot && (await directoryExists(payloadRoot))) {
+    const payloadPluginDlls = await listPayloadPluginDlls(payloadRoot);
+    const synchronizedPaths = [...new Set([
+      'winhttp.dll',
+      'doorstop_config.ini',
+      ...REQUIRED_PLUGIN_NAMES.map((pluginName) => path.join('BepInEx', 'plugins', pluginName)),
+      ...payloadPluginDlls
+    ])];
     const payloadChecks = await Promise.all(
-      [
-        'winhttp.dll',
-        'doorstop_config.ini',
-        ...REQUIRED_PLUGIN_NAMES.map((pluginName) => path.join('BepInEx', 'plugins', pluginName))
-      ].map(async (relativePath) => {
+      synchronizedPaths.map(async (relativePath) => {
         const payloadPath = path.join(payloadRoot, relativePath);
         const gamePath = path.join(gameRoot, relativePath);
         const payloadHash = await sha256File(payloadPath);
@@ -1074,11 +1222,13 @@ export async function inspectGameHealth(gameRoot: string, payloadRoot?: string):
   }
 
   const healthy = checks.every((check) => check.ok) && driftedFiles.length === 0;
-  const needsRepair = !healthy;
+  const needsRepair = checks.some((check) => !check.ok && check.blocking !== false) || driftedFiles.length > 0;
+  const launchBlocked = checks.some((check) => !check.ok && check.launchBlocking === true);
 
   return {
     healthy,
     needsRepair,
+    launchBlocked,
     summary: summarizeHealth(checks, driftedFiles),
     driftedFiles,
     checks
@@ -1100,7 +1250,6 @@ export async function ensureGameFiles(gameRoot: string): Promise<void> {
 
 export async function readVisibleSettings(gameRoot: string): Promise<VisibleSettings> {
   const paths = getGamePaths(gameRoot);
-  await ensureGameFiles(gameRoot);
 
   const mainText = await readTextIfExists(paths.mainConfigPath);
   const horseText = await readTextIfExists(paths.horseConfigPath);
@@ -1254,8 +1403,10 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
 
 export async function readCustomTalentPack(gameRoot: string): Promise<CustomTalentPack> {
   const paths = getGamePaths(gameRoot);
-  await ensureGameFiles(gameRoot);
-  const text = await ensureCustomTalentPackFile(paths.customTalentConfigPath);
+  const text = await readTextIfExists(paths.customTalentConfigPath);
+  if (text === undefined) {
+    return buildDefaultCustomTalentPack();
+  }
 
   let parsed: unknown;
   try {

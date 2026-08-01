@@ -387,11 +387,23 @@ export interface HealthCheckResult {
   label: string;
   ok: boolean;
   detail: string;
+  blocking?: boolean;
+  launchBlocking?: boolean;
+}
+
+export interface SaveAndLaunchRequest {
+  settings: VisibleSettings;
+  customTalents: CustomTalentPack;
+}
+
+export interface LauncherPreferences {
+  launchOverlayWithGame: boolean;
 }
 
 export interface GameHealth {
   healthy: boolean;
   needsRepair: boolean;
+  launchBlocked: boolean;
   summary: string;
   driftedFiles: string[];
   checks: HealthCheckResult[];
@@ -412,6 +424,8 @@ export interface GameSnapshot {
   launchState: 'idle' | 'starting' | 'running';
   launchNote: string;
   visibleSettings: VisibleSettings;
+  launcherPreferences: LauncherPreferences;
+  overlayRunning: boolean;
   status: string;
   update: UpdateCheckResult;
 }
@@ -421,4 +435,5 @@ export interface OperationResult {
   message: string;
   gameRoot?: string;
   updatedSnapshot?: GameSnapshot;
+  customTalents?: CustomTalentPack;
 }

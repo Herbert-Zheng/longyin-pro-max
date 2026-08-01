@@ -6,9 +6,14 @@ import { spawn } from 'node:child_process';
 import AdmZip from 'adm-zip';
 import { RELEASE_MANIFEST_NAME, ReleaseHistoryItem, UpdateCheckResult, UpdateManifest } from './types';
 
-const GITHUB_OWNER = 'Zhihong0321';
+const GITHUB_OWNER = 'Herbert-Zheng';
 const GITHUB_REPO = 'longyin_plus';
 const DEFAULT_PRESERVE_PATHS = ['user-data/**', 'BepInEx/config/**'];
+const JSON_DOWNLOAD_LIMIT_BYTES = 2 * 1024 * 1024;
+const UPDATE_DOWNLOAD_LIMIT_BYTES = 512 * 1024 * 1024;
+const UPDATE_EXPANDED_LIMIT_BYTES = 1024 * 1024 * 1024;
+const JSON_DOWNLOAD_TIMEOUT_MS = 30_000;
+const UPDATE_DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
 
 function compareVersionParts(left: string, right: string): number {
   const leftParts = left.split('.').map((value) => Number.parseInt(value, 10) || 0);
@@ -66,19 +71,14 @@ async function directoryExists(dirPath: string): Promise<boolean> {
 }
 
 async function downloadJson(url: string): Promise<any> {
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'LongYinPlus-Electron'
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`获取失败 ${url}：${response.status} ${response.statusText}`);
-  }
-
-  return response.json();
+  const buffer = await downloadBuffer(
+    url,
+    undefined,
+    JSON_DOWNLOAD_LIMIT_BYTES,
+    JSON_DOWNLOAD_TIMEOUT_MS,
+    'application/vnd.github+json'
+  );
+  return JSON.parse(buffer.toString('utf8'));
 }
 
 function formatBytes(bytes: number): string {
@@ -113,64 +113,97 @@ function normalizeRelease(releaseJson: any, isLatest: boolean): ReleaseHistoryIt
   };
 }
 
-async function downloadBuffer(url: string, onProgress?: (detail: string, percent?: number) => void): Promise<Buffer> {
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/octet-stream',
-      'User-Agent': 'LongYinPlus-Electron'
-    }
-  });
+export async function downloadBuffer(
+  url: string,
+  onProgress?: (detail: string, percent?: number) => void,
+  maxBytes = UPDATE_DOWNLOAD_LIMIT_BYTES,
+  timeoutMs = UPDATE_DOWNLOAD_TIMEOUT_MS,
+  accept = 'application/octet-stream'
+): Promise<Buffer> {
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), timeoutMs);
 
-  if (!response.ok) {
-    throw new Error(`下载失败 ${url}：${response.status} ${response.statusText}`);
-  }
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: accept,
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'LongYinPlus-Electron'
+      },
+      signal: abortController.signal
+    });
 
-  const contentLength = Number.parseInt(response.headers.get('content-length') ?? '', 10);
-  const totalBytes = Number.isFinite(contentLength) && contentLength > 0 ? contentLength : undefined;
-
-  if (!response.body) {
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    onProgress?.(`更新包下载完成，大小 ${formatBytes(bytes.byteLength)}。`, 100);
-    return Buffer.from(bytes);
-  }
-
-  const reader = response.body.getReader();
-  const chunks: Buffer[] = [];
-  let receivedBytes = 0;
-  let lastPercent = -1;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
+    if (!response.ok) {
+      throw new Error(`下载失败 ${url}：${response.status} ${response.statusText}`);
     }
 
-    if (!value || value.byteLength === 0) {
-      continue;
+    const contentLength = Number.parseInt(response.headers.get('content-length') ?? '', 10);
+    const totalBytes = Number.isFinite(contentLength) && contentLength > 0 ? contentLength : undefined;
+    if (totalBytes && totalBytes > maxBytes) {
+      throw new Error(`下载资源超过允许大小：${formatBytes(totalBytes)} > ${formatBytes(maxBytes)}。`);
     }
 
-    const chunk = Buffer.from(value);
-    chunks.push(chunk);
-    receivedBytes += chunk.length;
+    if (!response.body) {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength > maxBytes) {
+        throw new Error(`下载资源超过允许大小：${formatBytes(bytes.byteLength)} > ${formatBytes(maxBytes)}。`);
+      }
 
-    if (totalBytes) {
-      const percent = Math.max(1, Math.min(99, Math.round((receivedBytes / totalBytes) * 100)));
-      if (percent !== lastPercent) {
-        lastPercent = percent;
-        onProgress?.(
-          `正在下载更新包：${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}`,
-          percent
-        );
+      onProgress?.(`更新包下载完成，大小 ${formatBytes(bytes.byteLength)}。`, 100);
+      return Buffer.from(bytes);
+    }
+
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let receivedBytes = 0;
+    let lastPercent = -1;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      if (!value || value.byteLength === 0) {
+        continue;
+      }
+
+      const chunk = Buffer.from(value);
+      chunks.push(chunk);
+      receivedBytes += chunk.length;
+      if (receivedBytes > maxBytes) {
+        await reader.cancel();
+        throw new Error(`下载资源超过允许大小：${formatBytes(receivedBytes)} > ${formatBytes(maxBytes)}。`);
+      }
+
+      if (totalBytes) {
+        const percent = Math.max(1, Math.min(99, Math.round((receivedBytes / totalBytes) * 100)));
+        if (percent !== lastPercent) {
+          lastPercent = percent;
+          onProgress?.(
+            `正在下载更新包：${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}`,
+            percent
+          );
+        }
+      }
+      else {
+        onProgress?.(`正在下载更新包：已接收 ${formatBytes(receivedBytes)}`);
       }
     }
-    else {
-      onProgress?.(`正在下载更新包：已接收 ${formatBytes(receivedBytes)}`);
-    }
-  }
 
-  const buffer = Buffer.concat(chunks);
-  onProgress?.(`更新包下载完成，大小 ${formatBytes(buffer.length)}。`, 100);
-  return buffer;
+    const buffer = Buffer.concat(chunks);
+    onProgress?.(`更新包下载完成，大小 ${formatBytes(buffer.length)}。`, 100);
+    return buffer;
+  }
+  catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`下载超时：${url}`);
+    }
+    throw error;
+  }
+  finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function writeBuffer(filePath: string, buffer: Buffer): Promise<void> {
@@ -182,10 +215,18 @@ function sha256(buffer: Buffer): string {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
-async function extractFilteredZip(zipPath: string, stageRoot: string, preservePaths: string[]): Promise<void> {
+export async function extractFilteredZip(
+  zipPath: string,
+  stageRoot: string,
+  preservePaths: string[],
+  maxExpandedBytes = UPDATE_EXPANDED_LIMIT_BYTES
+): Promise<void> {
   await fs.mkdir(stageRoot, { recursive: true });
   const zip = new AdmZip(zipPath);
   const entries = zip.getEntries();
+  const resolvedStageRoot = path.resolve(stageRoot);
+  const stagePrefix = `${resolvedStageRoot}${path.sep}`;
+  let expandedBytes = 0;
 
   for (const entry of entries) {
     const entryName = entry.entryName.replace(/\\/g, '/');
@@ -193,14 +234,28 @@ async function extractFilteredZip(zipPath: string, stageRoot: string, preservePa
       continue;
     }
 
-    const targetPath = path.join(stageRoot, entryName);
+    const targetPath = path.resolve(resolvedStageRoot, entryName);
+    if (targetPath !== resolvedStageRoot && !targetPath.startsWith(stagePrefix)) {
+      throw new Error(`更新包包含越界路径：${entry.entryName}`);
+    }
+
     if (entry.isDirectory) {
       await fs.mkdir(targetPath, { recursive: true });
       continue;
     }
 
+    const declaredSize = Number(entry.header.size) || 0;
+    if (expandedBytes + declaredSize > maxExpandedBytes) {
+      throw new Error(`更新包声明的解压大小超过限制：${formatBytes(expandedBytes + declaredSize)}。`);
+    }
+
+    const entryData = entry.getData();
+    expandedBytes += entryData.length;
+    if (expandedBytes > maxExpandedBytes) {
+      throw new Error(`更新包实际解压大小超过限制：${formatBytes(expandedBytes)}。`);
+    }
     await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    await fs.writeFile(targetPath, entry.getData());
+    await fs.writeFile(targetPath, entryData);
   }
 }
 
@@ -228,6 +283,12 @@ export async function checkGitHubRelease(currentVersion: string): Promise<Update
   const manifestResponse = await downloadBuffer(manifestAsset.browser_download_url);
   const manifest = JSON.parse(manifestResponse.toString('utf8')) as UpdateManifest;
   const zipAsset = assets.find((asset: any) => asset.name === manifest.zipAsset);
+  const assetUrl = typeof zipAsset?.browser_download_url === 'string'
+    ? zipAsset.browser_download_url.trim()
+    : '';
+  if (!zipAsset || !assetUrl) {
+    throw new Error(`Release 清单引用了 ${manifest.zipAsset}，但该 Release 未提供有效下载资产。`);
+  }
 
   return {
     currentVersion,
@@ -239,7 +300,7 @@ export async function checkGitHubRelease(currentVersion: string): Promise<Update
     releaseUrl: normalizedRelease.htmlUrl,
     manifest,
     asset: zipAsset,
-    assetUrl: zipAsset?.browser_download_url,
+    assetUrl,
     status: updateAvailable ? '发现了新版本。' : '当前已经是最新版本。'
   };
 }
@@ -260,15 +321,21 @@ export async function fetchReleaseHistory(limit = 8): Promise<ReleaseHistoryItem
 
 export async function stageGitHubUpdate(
   manifest: UpdateManifest,
+  assetUrl: string,
   onProgress?: (detail: string, percent?: number) => void
 ): Promise<{ stageRoot: string; manifest: UpdateManifest }> {
-  onProgress?.(`开始下载 ${manifest.zipAsset} ...`, 0);
+  const progress = onProgress;
+  progress?.(`开始下载 ${manifest.zipAsset} ...`, 0);
+  const downloadUrl = assetUrl.trim();
+  if (!downloadUrl) {
+    throw new Error(`Release 未提供 ${manifest.zipAsset} 的直接下载 URL。`);
+  }
   const zipBuffer = await downloadBuffer(
-    `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/v${manifest.version}/${manifest.zipAsset}`,
-    onProgress
+    downloadUrl,
+    progress
   );
 
-  onProgress?.('下载完成，正在校验更新包完整性...', 100);
+  progress?.('下载完成，正在校验更新包完整性...', 100);
   if (sha256(zipBuffer) !== manifest.sha256) {
     throw new Error('下载的更新包未通过 SHA-256 校验。');
   }
@@ -277,12 +344,18 @@ export async function stageGitHubUpdate(
   await fs.mkdir(stageBaseRoot, { recursive: true });
   const stageRoot = await fs.mkdtemp(path.join(stageBaseRoot, `${manifest.version}-`));
   const zipPath = path.join(stageRoot, manifest.zipAsset);
-  onProgress?.('校验通过，正在准备暂存目录...', 100);
-  await writeBuffer(zipPath, zipBuffer);
-  onProgress?.('正在解压更新包并准备替换文件...', 100);
-  await extractFilteredZip(zipPath, stageRoot, manifest.preservePaths ?? DEFAULT_PRESERVE_PATHS);
-  await fs.rm(zipPath, { force: true });
-  onProgress?.('更新文件已准备完成，正在启动后台替换程序...', 100);
+  progress?.('校验通过，正在准备暂存目录...', 100);
+  try {
+    await writeBuffer(zipPath, zipBuffer);
+    progress?.('正在解压更新包并准备替换文件...', 100);
+    await extractFilteredZip(zipPath, stageRoot, manifest.preservePaths ?? DEFAULT_PRESERVE_PATHS);
+    await fs.rm(zipPath, { force: true });
+  }
+  catch (error) {
+    await fs.rm(stageRoot, { recursive: true, force: true });
+    throw error;
+  }
+  progress?.('更新文件已准备完成，正在启动后台替换程序...', 100);
   return { stageRoot, manifest };
 }
 
@@ -327,6 +400,10 @@ export async function launchUpdaterApp(
     detached: true,
     stdio: 'ignore',
     windowsHide: false
+  });
+  await new Promise<void>((resolve, reject) => {
+    child.once('spawn', resolve);
+    child.once('error', reject);
   });
   child.unref();
 }

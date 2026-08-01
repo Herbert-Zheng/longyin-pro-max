@@ -12,10 +12,11 @@
     "dev:renderer": "vite",
     "dev:electron": "wait-on dist/main/main.js dist/renderer/index.html && electron .",
     "build": "npm run build:updater && npm run build:main && npm run build:renderer && set CSC_IDENTITY_AUTO_DISCOVERY=false&&electron-builder --win zip && npm run build:manifest",
-    "build:updater": "pwsh -NoProfile -ExecutionPolicy Bypass -File ..\\scripts\\build-updater.ps1",
+    "build:updater": "powershell -NoProfile -ExecutionPolicy Bypass -File ..\\scripts\\build-updater.ps1",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "build:manifest": "node scripts/generate-update-manifest.mjs",
+    "test:backend": "npm run build:main && node --test test/backend-safety.test.cjs test/update-safety.test.cjs test/renderer-overlay.test.cjs",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "start": "electron ."
   },

@@ -176,6 +176,8 @@ export function App() {
   const [savedCustomTalentPackText, setSavedCustomTalentPackText] = useState(() => JSON.stringify(createEmptyCustomTalentPack()));
   const [selectedCustomTalentId, setSelectedCustomTalentId] = useState<string | null>(null);
   const [customTalentLoadError, setCustomTalentLoadError] = useState<string | null>(null);
+  const [customTalentsReady, setCustomTalentsReady] = useState(false);
+  const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
 
   const navItems = useMemo<NavItem[]>(
     () => [
@@ -224,12 +226,15 @@ export function App() {
   };
 
   const refreshCustomTalents = async (targetGameRoot?: string) => {
+    setCustomTalentsReady(false);
+    setCustomTalentLoadError(null);
     if (!targetGameRoot) {
       const emptyPack = createEmptyCustomTalentPack();
       replaceCustomTalentPack(emptyPack);
       setSavedCustomTalentPackText(JSON.stringify(emptyPack));
       setSelectedCustomTalentId(null);
       setCustomTalentLoadError(null);
+      setCustomTalentsReady(true);
       return emptyPack;
     }
 
@@ -238,6 +243,7 @@ export function App() {
       replaceCustomTalentPack(nextPack);
       setSavedCustomTalentPackText(JSON.stringify(nextPack));
       setCustomTalentLoadError(null);
+      setCustomTalentsReady(true);
       return nextPack;
     }
     catch (err) {
@@ -253,6 +259,7 @@ export function App() {
   const refresh = async (nextMessage?: string, preserveMessage = false, syncSettings = true) => {
     const next = await window.longyin.getSnapshot();
     setSnapshot(next);
+    setInitialLoadError(null);
     if (syncSettings) {
       setSettings(next.visibleSettings);
     }
@@ -326,6 +333,7 @@ export function App() {
   useEffect(() => {
     void refresh().catch((err: Error) => {
       showError(err.message);
+      setInitialLoadError(err.message);
       setMessage('加载状态失败。');
     });
     void refreshReleaseHistory(true).catch(() => undefined);
@@ -403,7 +411,7 @@ export function App() {
   const gameRoot = snapshot?.gameRoot ?? '';
   const gameInstalled = snapshot?.gameInstalled ?? false;
   const health =
-    snapshot?.health ?? { healthy: false, needsRepair: false, summary: '正在加载自检状态。', driftedFiles: [], checks: [] };
+    snapshot?.health ?? { healthy: false, needsRepair: false, launchBlocked: false, summary: '正在加载自检状态。', driftedFiles: [], checks: [] };
   const payloadRoot = snapshot?.payloadRoot ?? '';
   const userDataRoot = snapshot?.userDataRoot ?? '';
   const startupLogPath = snapshot?.startupLogPath ?? '';
@@ -421,6 +429,15 @@ export function App() {
     customTalentPack.talents.find((talent) => talent.id === selectedCustomTalentId) ?? customTalentPack.talents[0] ?? null;
   const customTalentValidationErrors = validateCustomTalentPack(customTalentPack);
   const customTalentDirty = JSON.stringify(customTalentPack) !== savedCustomTalentPackText;
+  const saveAndLaunchDisabledReason = !customTalentsReady
+    ? customTalentLoadError
+      ? `自定义天赋读取失败：${customTalentLoadError}`
+      : '正在读取自定义天赋，请稍候。'
+    : customTalentValidationErrors.length > 0
+      ? `自定义天赋尚未通过校验：${customTalentValidationErrors[0]}`
+      : !launchReady
+        ? snapshot?.launchNote ?? '当前环境尚未达到启动条件。'
+        : null;
 
   const save = async () => {
     setWorking('保存中');
@@ -533,7 +550,37 @@ export function App() {
   };
 
   const saveAndLaunch = async () => {
-    await run('保存并启动', () => window.longyin.saveAndLaunch(settings));
+    const result = await run('保存并启动', () => window.longyin.saveAndLaunch({ settings, customTalents: customTalentPack }));
+    if (result?.customTalents) {
+      replaceCustomTalentPack(result.customTalents);
+      setSavedCustomTalentPackText(JSON.stringify(result.customTalents));
+      setCustomTalentLoadError(null);
+      setCustomTalentsReady(true);
+    }
+  };
+
+  const setLaunchOverlayWithGame = async (value: boolean) => {
+    setWorking('保存 Overlay 设置');
+    clearError();
+    try {
+      const next = await window.longyin.setLauncherPreferences({ launchOverlayWithGame: value });
+      setSnapshot(next);
+      setMessage(value ? '已启用随游戏启动 Overlay。' : '已关闭随游戏启动 Overlay。');
+    }
+    catch (err) {
+      showError(err instanceof Error ? err.message : String(err));
+    }
+    finally {
+      setWorking(null);
+    }
+  };
+
+  const startOverlay = async () => {
+    await run('启动 Overlay', () => window.longyin.startOverlay());
+  };
+
+  const stopOverlay = async () => {
+    await run('关闭 Overlay', () => window.longyin.stopOverlay());
   };
 
   const install = async () => {
@@ -645,7 +692,29 @@ export function App() {
   if (!snapshot) {
     return (
       <div className="shell shell--loading">
-        <div className="loading-card">正在加载 龙胤立志传 Pro Max...</div>
+        <div className="loading-card">
+          {initialLoadError ? (
+            <div className="stack">
+              <strong>启动器状态加载失败</strong>
+              <p className="body-copy">{initialLoadError}</p>
+              <button
+                className="btn btn--primary"
+                onClick={() => {
+                  setInitialLoadError(null);
+                  setMessage('正在重试加载...');
+                  void refresh().catch((err: Error) => {
+                    showError(err.message);
+                    setInitialLoadError(err.message);
+                  });
+                }}
+              >
+                重试加载
+              </button>
+            </div>
+          ) : (
+            '正在加载 龙胤立志传 Pro Max...'
+          )}
+        </div>
       </div>
     );
   }
@@ -710,7 +779,12 @@ export function App() {
               <button className="btn btn--primary" onClick={save} disabled={working !== null}>
                 保存设置
               </button>
-              <button className="btn btn--ghost" onClick={saveAndLaunch} disabled={working !== null || !launchReady}>
+              <button
+                className="btn btn--ghost"
+                onClick={saveAndLaunch}
+                disabled={working !== null || saveAndLaunchDisabledReason !== null}
+                title={saveAndLaunchDisabledReason ?? '保存普通设置和当前自定义天赋后启动游戏。'}
+              >
                 {launchBusy ? '启动中，请等待' : '保存并启动'}
               </button>
               <button
@@ -1046,6 +1120,27 @@ export function App() {
                       options={HOTKEY_OPTIONS}
                       hint="用于切换战斗外的测试速度倍率。"
                     />
+                  </div>
+                </Card>
+
+                <Card title="游戏 Overlay" eyebrow="Overlay">
+                  <div className="stack">
+                    <CheckboxField
+                      label="随游戏启动 Overlay"
+                      value={snapshot.launcherPreferences.launchOverlayWithGame}
+                      onChange={(value) => void setLaunchOverlayWithGame(value)}
+                    />
+                    <p className="body-copy body-copy--muted">
+                      Overlay 自带单实例保护。由启动器随游戏启动的实例会在游戏退出后自动关闭。
+                    </p>
+                    <div className="inline-actions">
+                      <button className="btn" onClick={startOverlay} disabled={working !== null || snapshot.overlayRunning}>
+                        {snapshot.overlayRunning ? 'Overlay 已运行' : '启动 Overlay'}
+                      </button>
+                      <button className="btn" onClick={stopOverlay} disabled={working !== null || !snapshot.overlayRunning}>
+                        关闭 Overlay
+                      </button>
+                    </div>
                   </div>
                 </Card>
 

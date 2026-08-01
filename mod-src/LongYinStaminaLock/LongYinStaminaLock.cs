@@ -46,6 +46,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const string CustomTalentConfigFileName = "codex.longyin.custom-talents.json";
     private const float CustomTalentEvaluationIntervalSeconds = 0.5f;
     private const int ShopOwnershipBuyPrice = 500;
+    private const string TradeInfoMoneyGap = "\u3000\u3000";
     private const int ShopOwnershipSaveVersion = 1;
     private const string ShopOwnershipSaveFolderName = "codex.longyin.shop-ownership";
     private const string ShopOwnershipOverlayPanelName = "CodexShopOwnershipOverlay";
@@ -432,6 +433,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static CraftRewardBonusState? _activeCraftRewardBonus;
     private static ItemIconController? _selectedTreasureTradeIcon;
     private static Text? _treasureTradeOverlayLabel;
+    private static Image? _treasureTradeOverlayIcon;
     private static PlotController? _auctionPreviewController;
     private static GameObject? _auctionPreviewRefreshButtonRoot;
     private static Button? _auctionPreviewRefreshButton;
@@ -448,8 +450,10 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool _identifyMatchOpen;
     private static GameObject? _shopOwnershipOverlayRoot;
     private static Text? _shopOwnershipOverlayLabel;
+    private static Image? _shopOwnershipOverlayIcon;
     private static Button? _shopOwnershipBuyButton;
     private static Text? _shopOwnershipBuyButtonLabel;
+    private static bool _tradeActionButtonLookupWarningLogged;
     private static float _treasureTradeShopOpenedAtRealtime = -1f;
     private static bool _treasureTradeAutoProcessed;
     private static bool _treasureTradeBusy;
@@ -2250,6 +2254,44 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return fallback;
     }
 
+    private static Button? FindTradeActionButtonTemplate(TradeUIController tradeUi)
+    {
+        if (tradeUi.tradeUI == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var candidate = FindUiButtonTemplate(tradeUi.tradeUI);
+            if (candidate == null)
+            {
+                if (!_tradeActionButtonLookupWarningLogged)
+                {
+                    _tradeActionButtonLookupWarningLogged = true;
+                    LoggerInstance.LogWarning("Could not locate a structure-validated native trade button template.");
+                }
+
+                return null;
+            }
+
+            LoggerInstance.LogInfo(
+                $"Using structure-validated native trade button template name={candidate.gameObject.name}; " +
+                "direct semantic validation is unavailable on this IL2CPP runtime.");
+            return candidate;
+        }
+        catch (Exception ex)
+        {
+            if (!_tradeActionButtonLookupWarningLogged)
+            {
+                _tradeActionButtonLookupWarningLogged = true;
+                LoggerInstance.LogWarning($"Could not resolve a native trade action button: {ex.Message}");
+            }
+
+            return null;
+        }
+    }
+
     private static Text? FindUiTextTemplate(GameObject root)
     {
         Text? fallback = null;
@@ -2983,6 +3025,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void UpdateTreasureTradeUiState()
     {
+        UpdateShopOwnershipUiState();
+
         if (!_treasureTradeHelperEnabled.Value && !_treasureAutoTradeEnabled.Value)
         {
             HideTreasureTradeOverlay();
@@ -3128,7 +3172,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void UpdateTreasureTradeOverlay(TradeUIController tradeUi, int identifyCost)
     {
-        TryResolveCurrentShopOwnershipContext(out var shopContext);
         var opportunity = TryResolveTreasureTradeOpportunity(tradeUi, identifyCost);
         if (opportunity == null)
         {
@@ -3136,9 +3179,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             if (_treasureTradeOverlayLabel != null)
             {
                 var baseText = identifyCost > 0
-                    ? $"珍宝倒宝助手\n当前无未鉴定珍宝\n鉴定费: {identifyCost}"
-                    : "珍宝倒宝助手\n当前无未鉴定珍宝";
-                _treasureTradeOverlayLabel.text = AppendShopOwnershipOverlayText(baseText, shopContext);
+                    ? $"<b><color=#E8B45B>珍宝倒宝助手</color></b>\n当前无未鉴定珍宝　鉴定费{TradeInfoMoneyGap}{identifyCost}"
+                    : "<b><color=#E8B45B>珍宝倒宝助手</color></b>\n当前无未鉴定珍宝";
+                SetTradeInfoLabelText(
+                    _treasureTradeOverlayLabel,
+                    _treasureTradeOverlayIcon,
+                    baseText,
+                    identifyCost > 0 ? $"鉴定费{TradeInfoMoneyGap}" : null,
+                    verticalOffset: -13f);
                 _treasureTradeOverlayLabel.gameObject.SetActive(true);
             }
 
@@ -3151,38 +3199,18 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
-        _treasureTradeOverlayLabel.text = AppendShopOwnershipOverlayText(BuildTreasureTradeOverlayText(opportunity), shopContext);
+        var overlayText = BuildTreasureTradeOverlayText(opportunity);
+        var moneyMarker = opportunity.IconType == TradeIconType.TradeRight ||
+            opportunity.IconType == TradeIconType.TradeRightOut
+                ? $"买价{TradeInfoMoneyGap}"
+                : $"当前卖价{TradeInfoMoneyGap}";
+        SetTradeInfoLabelText(
+            _treasureTradeOverlayLabel,
+            _treasureTradeOverlayIcon,
+            overlayText,
+            moneyMarker,
+            verticalOffset: 13f);
         _treasureTradeOverlayLabel.gameObject.SetActive(true);
-    }
-
-    private static string AppendShopOwnershipOverlayText(string baseText, ShopOwnershipContext? context)
-    {
-        if (context == null)
-        {
-            return baseText;
-        }
-
-        var isOwned = _ownedShops.TryGetValue(context.ShopKey, out var ownedRecord);
-        var currentMoney = TryGetHeroMoney(context.Player) ?? 0;
-        var saveSlotText = _currentShopOwnershipSaveSlotId >= 0
-            ? $"存档槽: {_currentShopOwnershipSaveSlotId}"
-            : _loadedShopOwnershipSourceSlotId >= 0
-                ? $"存档槽: 未绑定（当前读取自 {_loadedShopOwnershipSourceSlotId}）"
-                : "存档槽: 未绑定";
-        var buyText = isOwned
-            ? "状态: 你已买下此店"
-            : $"状态: 未买下 | 价格: {ShopOwnershipBuyPrice} | 金钱: {currentMoney}";
-        var purchasedText = ownedRecord == null || string.IsNullOrWhiteSpace(ownedRecord.PurchasedOn)
-            ? string.Empty
-            : $"\n买断记录: {ownedRecord.PurchasedOn}";
-
-        return
-            $"{baseText}\n\n" +
-            $"店铺产业试验\n" +
-            $"店铺: {context.ShopName}\n" +
-            $"{buyText}\n" +
-            $"{saveSlotText}" +
-            purchasedText;
     }
 
     private static TreasureTradeOpportunity? TryResolveTreasureTradeOpportunity(TradeUIController tradeUi, int identifyCost)
@@ -3293,19 +3321,15 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         var name = TryGetItemDisplayName(opportunity.Item);
         var priceLine = opportunity.IconType == TradeIconType.TradeRight || opportunity.IconType == TradeIconType.TradeRightOut
-            ? $"卖价/买价: {opportunity.CurrentSellPrice} / {opportunity.BuyPrice}"
-            : $"当前卖价: {opportunity.CurrentSellPrice}";
+            ? $"买价{TradeInfoMoneyGap}{opportunity.BuyPrice}　现卖 {opportunity.CurrentSellPrice}"
+            : $"当前卖价{TradeInfoMoneyGap}{opportunity.CurrentSellPrice}";
         var profitLine = opportunity.IconType == TradeIconType.TradeRight || opportunity.IconType == TradeIconType.TradeRightOut
-            ? $"鉴定费/净利: {opportunity.IdentifyCost} / {FormatSignedInt(opportunity.NetProfit)}"
-            : $"鉴定费/净增: {opportunity.IdentifyCost} / {FormatSignedInt(opportunity.IdentifyGain)}";
+            ? $"鉴定费 {opportunity.IdentifyCost}　预计净利 {FormatSignedInt(opportunity.NetProfit)}"
+            : $"鉴定费 {opportunity.IdentifyCost}　鉴后净增 {FormatSignedInt(opportunity.IdentifyGain)}";
 
         return
-            $"珍宝倒宝助手\n" +
-            $"{name}\n" +
-            $"{priceLine}\n" +
-            $"技能买/卖系数: x{opportunity.SkillBuyFactor:0.###} / x{opportunity.SkillSellFactor:0.###}\n" +
-            $"鉴后卖价: {opportunity.IdentifiedSellPrice}\n" +
-            $"{profitLine}";
+            $"<b><color=#E8B45B>珍宝倒宝助手</color></b>　{name}　{priceLine}　鉴后卖价 {opportunity.IdentifiedSellPrice}　{profitLine}\n" +
+            $"鉴定参考　技能买/卖系数 x{opportunity.SkillBuyFactor:0.###} / x{opportunity.SkillSellFactor:0.###}";
     }
 
     private static void EnsureTreasureTradeOverlay(TradeUIController tradeUi)
@@ -3337,28 +3361,280 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 return;
             }
 
-            overlayLabel.fontSize = Math.Max(16, template.fontSize - 2);
-            overlayLabel.resizeTextForBestFit = false;
-            overlayLabel.raycastTarget = false;
-            overlayLabel.supportRichText = true;
-            overlayLabel.color = new Color(1f, 0.95f, 0.78f, 1f);
-
-            var templateRect = template.GetComponent<RectTransform>();
-            var overlayRect = overlayLabel.GetComponent<RectTransform>();
-            if (templateRect != null && overlayRect != null)
+            if (!ConfigureTradeInfoLabel(
+                    tradeUi,
+                    template,
+                    overlayLabel,
+                    new Vector2(0f, 735f),
+                    new Vector2(900f, 58f),
+                    22,
+                    new Color(1f, 0.93f, 0.76f, 1f),
+                    TextAnchor.MiddleCenter))
             {
-                overlayRect.anchorMin = templateRect.anchorMin;
-                overlayRect.anchorMax = templateRect.anchorMax;
-                overlayRect.pivot = templateRect.pivot;
-                overlayRect.anchoredPosition = templateRect.anchoredPosition + new Vector2(0f, -120f);
-                overlayRect.sizeDelta = new Vector2(Mathf.Max(templateRect.sizeDelta.x, 380f), Mathf.Max(140f, templateRect.sizeDelta.y * 4f));
+                UnityEngine.Object.Destroy(overlayObject);
+                return;
             }
 
+            overlayObject.transform.SetAsLastSibling();
             _treasureTradeOverlayLabel = overlayLabel;
+            _treasureTradeOverlayIcon = FindTradeInfoMoneyIcon(overlayLabel, overlayObject.name);
+
+            LoggerInstance.LogInfo(
+                "Treasure trade helper moved to the upper trade information panel with native Chinese typography.");
         }
         catch (Exception ex)
         {
             LoggerInstance.LogWarning($"Could not create treasure trade overlay: {ex.Message}");
+        }
+    }
+
+    private static Text? FindReadableTradeTextTemplate(TradeUIController tradeUi)
+    {
+        Text? best = null;
+        var bestScore = int.MinValue;
+
+        try
+        {
+            var labels = tradeUi.tradeUI?.GetComponentsInChildren<Text>(includeInactive: true);
+            if (labels == null)
+            {
+                LoggerInstance.LogWarning("Could not enumerate native trade text templates.");
+                return null;
+            }
+
+            foreach (var candidate in labels)
+            {
+                if (candidate == null || candidate.font == null ||
+                    candidate.gameObject.name.StartsWith("Codex", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var text = candidate.text?.Trim() ?? string.Empty;
+                var isPreferredButtonLabel = text == "成交" || text == "撤销";
+                var hasChineseText = text.Any(static ch => ch >= '\u4e00' && ch <= '\u9fff');
+                var score = (isPreferredButtonLabel ? 1000 : 0) +
+                    (hasChineseText ? 100 : 0) -
+                    Math.Abs(candidate.fontSize - 20);
+                if (score <= bestScore)
+                {
+                    continue;
+                }
+
+                best = candidate;
+                bestScore = score;
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Could not inspect native trade text templates: {ex.Message}");
+            return null;
+        }
+
+        if (best == null)
+        {
+            LoggerInstance.LogWarning("Could not find a native Chinese trade text template.");
+        }
+
+        return best;
+    }
+
+    private static bool ConfigureTradeInfoLabel(
+        TradeUIController tradeUi,
+        Text template,
+        Text label,
+        Vector2 positionOffset,
+        Vector2 size,
+        int fontSize,
+        Color color,
+        TextAnchor alignment)
+    {
+        var templateRect = template.GetComponent<RectTransform>();
+        var labelRect = label.GetComponent<RectTransform>();
+        if (templateRect == null || labelRect == null)
+        {
+            return false;
+        }
+
+        var readableTemplate = FindReadableTradeTextTemplate(tradeUi);
+        if (readableTemplate == null || readableTemplate.font == null)
+        {
+            return false;
+        }
+
+        label.font = readableTemplate.font;
+        label.fontStyle = readableTemplate.fontStyle;
+        label.fontSize = fontSize;
+        label.resizeTextForBestFit = false;
+        label.raycastTarget = false;
+        label.supportRichText = true;
+        label.color = color;
+        label.alignment = alignment;
+        label.horizontalOverflow = HorizontalWrapMode.Wrap;
+        label.verticalOverflow = VerticalWrapMode.Truncate;
+        label.lineSpacing = 1.08f;
+
+        var labelObject = label.gameObject;
+        var layoutElement = labelObject.GetComponent<LayoutElement>() ?? labelObject.AddComponent<LayoutElement>();
+        layoutElement.ignoreLayout = true;
+
+        var contentSizeFitter = labelObject.GetComponent<ContentSizeFitter>();
+        if (contentSizeFitter != null)
+        {
+            contentSizeFitter.enabled = false;
+        }
+
+        foreach (var shadow in labelObject.GetComponents<Shadow>())
+        {
+            shadow.enabled = false;
+        }
+
+        labelRect.anchorMin = templateRect.anchorMin;
+        labelRect.anchorMax = templateRect.anchorMax;
+        labelRect.pivot = templateRect.pivot;
+        labelRect.anchoredPosition = templateRect.anchoredPosition + positionOffset;
+        labelRect.sizeDelta = size;
+        labelRect.localScale = Vector3.one;
+        labelRect.localRotation = Quaternion.identity;
+        return true;
+    }
+
+    private static Image? FindTradeInfoMoneyIcon(Text label, string overlayName)
+    {
+        try
+        {
+            var candidates = label.gameObject
+                .GetComponentsInChildren<Image>(includeInactive: true)
+                .Where(candidate => candidate != null && candidate.gameObject != label.gameObject)
+                .ToArray();
+            var directChildren = candidates
+                .Where(candidate => candidate.transform.parent == label.transform)
+                .ToArray();
+
+            if (directChildren.Length == 1)
+            {
+                return directChildren[0];
+            }
+
+            if (directChildren.Length == 0 && candidates.Length == 1)
+            {
+                return candidates[0];
+            }
+
+            LoggerInstance.LogWarning(
+                $"Could not uniquely resolve the money icon for {overlayName}: " +
+                $"direct={directChildren.Length}, total={candidates.Length}.");
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Could not resolve the money icon for {overlayName}: {ex.Message}");
+        }
+
+        return null;
+    }
+
+    private static void SetTradeInfoLabelText(
+        Text label,
+        Image? icon,
+        string text,
+        string? moneyMarker,
+        float verticalOffset)
+    {
+        if (string.Equals(label.text, text, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        label.text = text;
+        AlignTradeInfoIcon(label, icon, moneyMarker, verticalOffset);
+    }
+
+    private static void AlignTradeInfoIcon(Text label, Image? icon, string? moneyMarker, float verticalOffset)
+    {
+        try
+        {
+            var labelRect = label.GetComponent<RectTransform>();
+            if (labelRect == null || icon == null)
+            {
+                return;
+            }
+
+            var text = label.text ?? string.Empty;
+            string? moneyLine = null;
+            var markerIndex = -1;
+            if (!string.IsNullOrEmpty(moneyMarker))
+            {
+                foreach (var line in text.Split('\n'))
+                {
+                    markerIndex = line.IndexOf(moneyMarker, StringComparison.Ordinal);
+                    if (markerIndex >= 0)
+                    {
+                        moneyLine = line;
+                        break;
+                    }
+                }
+            }
+
+            if (moneyLine == null || markerIndex < 0 || string.IsNullOrEmpty(moneyMarker))
+            {
+                icon.gameObject.SetActive(false);
+                return;
+            }
+
+            if (icon.transform.parent != label.transform)
+            {
+                icon.transform.SetParent(label.transform, worldPositionStays: false);
+            }
+
+            var iconRect = icon.GetComponent<RectTransform>();
+            if (iconRect == null)
+            {
+                return;
+            }
+
+            const float iconSize = 26f;
+            const float textGap = 3f;
+            var markerEnd = markerIndex + moneyMarker.Length;
+            var prefixThroughGap = moneyLine.Substring(0, markerEnd);
+            var generator = label.cachedTextGeneratorForLayout;
+            var settings = label.GetGenerationSettings(new Vector2(10000f, 1000f));
+            var pixelsPerUnit = Mathf.Max(0.001f, label.pixelsPerUnit);
+            var lineWidth = generator.GetPreferredWidth(moneyLine, settings) / pixelsPerUnit;
+            var prefixWidth = generator.GetPreferredWidth(prefixThroughGap, settings) / pixelsPerUnit;
+            var numberStartX = (-lineWidth * 0.5f) + prefixWidth;
+            var iconX = numberStartX - textGap - (iconSize * 0.5f);
+            var halfLabelWidth = Mathf.Max(iconSize * 0.5f, labelRect.rect.width * 0.5f);
+            iconX = Mathf.Clamp(
+                iconX,
+                -halfLabelWidth + (iconSize * 0.5f),
+                halfLabelWidth - (iconSize * 0.5f));
+
+            icon.gameObject.SetActive(true);
+            icon.enabled = true;
+            icon.raycastTarget = false;
+            iconRect.anchorMin = new Vector2(0.5f, 0.5f);
+            iconRect.anchorMax = new Vector2(0.5f, 0.5f);
+            iconRect.pivot = new Vector2(0.5f, 0.5f);
+            iconRect.anchoredPosition = new Vector2(iconX, verticalOffset);
+            iconRect.sizeDelta = new Vector2(iconSize, iconSize);
+            iconRect.localScale = Vector3.one;
+            iconRect.localRotation = Quaternion.identity;
+            icon.transform.SetAsLastSibling();
+
+            var iconLayout = icon.gameObject.GetComponent<LayoutElement>();
+            if (iconLayout != null)
+            {
+                iconLayout.ignoreLayout = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            if (icon != null)
+            {
+                icon.gameObject.SetActive(false);
+            }
+
+            LoggerInstance.LogWarning($"Could not align a trade information money icon: {ex.Message}");
         }
     }
 
@@ -3430,7 +3706,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var currentMoney = TryGetHeroMoney(context.Player) ?? 0;
         var canBuy = !isOwned && context.Player != null && currentMoney >= ShopOwnershipBuyPrice;
 
-        _shopOwnershipOverlayLabel.text = BuildShopOwnershipOverlayText(context, ownedRecord);
+        SetTradeInfoLabelText(
+            _shopOwnershipOverlayLabel,
+            _shopOwnershipOverlayIcon,
+            BuildShopOwnershipOverlayText(context, ownedRecord),
+            ownedRecord == null ? $"现银{TradeInfoMoneyGap}" : null,
+            verticalOffset: 0f);
         _shopOwnershipBuyButton.interactable = canBuy;
         _shopOwnershipBuyButtonLabel.text = isOwned
             ? "已买下此店"
@@ -3438,10 +3719,10 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 ? $"花费 {ShopOwnershipBuyPrice} 文钱买下此店"
                 : $"银钱不足 ({currentMoney}/{ShopOwnershipBuyPrice})";
 
-        var buttonImage = _shopOwnershipBuyButton.GetComponent<Image>();
-        if (buttonImage != null)
+        var buttonGraphic = _shopOwnershipBuyButton.targetGraphic;
+        if (buttonGraphic != null)
         {
-            buttonImage.color = isOwned
+            buttonGraphic.color = isOwned
                 ? new Color(0.28f, 0.32f, 0.22f, 0.95f)
                 : canBuy
                     ? new Color(0.62f, 0.33f, 0.12f, 0.95f)
@@ -3523,24 +3804,26 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static string BuildShopOwnershipOverlayText(ShopOwnershipContext context, OwnedShopRecord? ownedRecord)
     {
-        var ownershipText = ownedRecord == null ? "未买下" : "你已买下此店";
-        var purchasedText = ownedRecord == null
-            ? "买断价格: 500 文钱"
-            : string.IsNullOrWhiteSpace(ownedRecord.PurchasedOn)
-                ? $"买断价格: {ownedRecord.BuyPrice} 文钱"
-                : $"买断记录: {ownedRecord.PurchasedOn} / {ownedRecord.BuyPrice} 文钱";
+        var currentMoney = TryGetHeroMoney(context.Player) ?? 0;
+        var ownershipText = ownedRecord == null
+            ? "<color=#F08A6A>未买下</color>"
+            : "<color=#8FD17A>已买下</color>";
+        var priceText = ownedRecord == null
+            ? $"现银{TradeInfoMoneyGap}{currentMoney}　买断 {ShopOwnershipBuyPrice} 文"
+            : $"买断 {ownedRecord.BuyPrice} 文";
         var saveSlotText = _currentShopOwnershipSaveSlotId >= 0
-            ? $"当前绑定存档槽: {_currentShopOwnershipSaveSlotId}"
+            ? _currentShopOwnershipSaveSlotId.ToString()
             : _loadedShopOwnershipSourceSlotId >= 0
-                ? $"当前未绑定存档槽: 当前读取自 {_loadedShopOwnershipSourceSlotId}，买下后请记得保存"
-                : "当前未绑定存档槽: 买下后请记得保存";
+                ? $"未绑定（读取自 {_loadedShopOwnershipSourceSlotId}）"
+                : "未绑定";
+        var purchasedText = ownedRecord == null || string.IsNullOrWhiteSpace(ownedRecord.PurchasedOn)
+            ? string.Empty
+            : $"　记录 {ownedRecord.PurchasedOn}";
 
         return
-            $"店铺产业试验\n" +
-            $"店铺: {context.ShopName}\n" +
-            $"产权状态: {ownershipText}\n" +
-            $"{purchasedText}\n" +
-            $"{saveSlotText}";
+            $"<b><color=#E8B45B>店铺产业</color></b>　{context.ShopName}　产权 {ownershipText}\n" +
+            $"{priceText}\n" +
+            $"存档 {saveSlotText}{purchasedText}";
     }
 
     private static void EnsureShopOwnershipOverlay(TradeUIController tradeUi)
@@ -3577,77 +3860,84 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             labelObject.SetActive(false);
 
             var label = labelObject.GetComponent<Text>();
-            var labelRect = labelObject.GetComponent<RectTransform>();
-            if (label == null || labelRect == null)
+            if (label == null ||
+                !ConfigureTradeInfoLabel(
+                    tradeUi,
+                    template,
+                    label,
+                    new Vector2(0f, -105f),
+                    new Vector2(650f, 70f),
+                    20,
+                    new Color(1f, 0.93f, 0.76f, 1f),
+                    TextAnchor.MiddleCenter))
             {
                 UnityEngine.Object.Destroy(labelObject);
                 return;
             }
 
-            label.fontSize = Math.Max(16, template.fontSize - 1);
-            label.resizeTextForBestFit = false;
-            label.supportRichText = true;
-            label.color = new Color(1f, 0.95f, 0.8f, 1f);
-            label.raycastTarget = false;
-            labelRect.anchorMin = templateRect.anchorMin;
-            labelRect.anchorMax = templateRect.anchorMax;
-            labelRect.pivot = templateRect.pivot;
-            labelRect.anchoredPosition = templateRect.anchoredPosition + new Vector2(0f, -140f);
-            labelRect.sizeDelta = new Vector2(Mathf.Max(templateRect.sizeDelta.x, 420f), Mathf.Max(120f, templateRect.sizeDelta.y * 3.5f));
+            var buttonTemplate = FindTradeActionButtonTemplate(tradeUi);
+            if (buttonTemplate == null ||
+                !TryCreateButtonTemplateButton(
+                    ShopOwnershipBuyButtonName,
+                    template.transform.parent,
+                    buttonTemplate,
+                    templateRect.anchorMin,
+                    templateRect.anchorMax,
+                    templateRect.pivot,
+                    templateRect.anchoredPosition + new Vector2(0f, -175f),
+                    new Vector2(300f, 42f),
+                    $"花费 {ShopOwnershipBuyPrice} 文钱买下此店",
+                    out var buttonObject,
+                    out var button,
+                    out var buttonLabel) ||
+                buttonObject == null || button == null || buttonLabel == null)
+            {
+                UnityEngine.Object.Destroy(labelObject);
+                return;
+            }
 
-            var buttonObject = UnityEngine.Object.Instantiate(template.gameObject, template.transform.parent);
-            buttonObject.name = ShopOwnershipBuyButtonName;
-            buttonObject.SetActive(false);
-
-            var button = buttonObject.GetComponent<Button>();
-            var buttonImage = buttonObject.GetComponent<Image>();
             var buttonRect = buttonObject.GetComponent<RectTransform>();
-            var buttonLabel = buttonObject.GetComponent<Text>();
-            if (button == null)
+            var buttonLabelRect = buttonLabel.GetComponent<RectTransform>();
+            if (buttonRect != null && buttonLabelRect != null && buttonLabelRect != buttonRect)
             {
-                button = buttonObject.AddComponent<Button>();
+                buttonLabelRect.anchorMin = Vector2.zero;
+                buttonLabelRect.anchorMax = Vector2.one;
+                buttonLabelRect.pivot = new Vector2(0.5f, 0.5f);
+                buttonLabelRect.anchoredPosition = Vector2.zero;
+                buttonLabelRect.sizeDelta = new Vector2(-20f, -8f);
+                buttonLabelRect.localScale = Vector3.one;
+                buttonLabelRect.localRotation = Quaternion.identity;
             }
 
-            if (buttonImage == null)
+            var buttonLabelLayout = buttonLabel.gameObject.GetComponent<LayoutElement>();
+            if (buttonLabelLayout != null)
             {
-                buttonImage = buttonObject.AddComponent<Image>();
+                buttonLabelLayout.ignoreLayout = true;
             }
 
-            if (button == null || buttonImage == null || buttonRect == null)
-            {
-                UnityEngine.Object.Destroy(labelObject);
-                UnityEngine.Object.Destroy(buttonObject);
-                return;
-            }
-
-            buttonImage.color = new Color(0.62f, 0.33f, 0.12f, 0.95f);
-            button.targetGraphic = buttonImage;
-            button.onClick = new Button.ButtonClickedEvent();
-            buttonRect.anchorMin = templateRect.anchorMin;
-            buttonRect.anchorMax = templateRect.anchorMax;
-            buttonRect.pivot = templateRect.pivot;
-            buttonRect.anchoredPosition = templateRect.anchoredPosition + new Vector2(0f, -240f);
-            buttonRect.sizeDelta = new Vector2(Mathf.Max(templateRect.sizeDelta.x, 420f), 42f);
-            if (buttonLabel == null)
-            {
-                UnityEngine.Object.Destroy(labelObject);
-                UnityEngine.Object.Destroy(buttonObject);
-                return;
-            }
-
-            buttonLabel.fontSize = Math.Max(15, template.fontSize);
-            buttonLabel.resizeTextForBestFit = false;
+            buttonLabel.fontSize = 20;
+            buttonLabel.resizeTextForBestFit = true;
+            buttonLabel.resizeTextMinSize = 14;
+            buttonLabel.resizeTextMaxSize = 22;
+            buttonLabel.alignment = TextAnchor.MiddleCenter;
+            buttonLabel.horizontalOverflow = HorizontalWrapMode.Wrap;
+            buttonLabel.verticalOverflow = VerticalWrapMode.Truncate;
             buttonLabel.color = Color.white;
             buttonLabel.raycastTarget = false;
 
+            labelObject.transform.SetAsLastSibling();
+            buttonObject.transform.SetAsLastSibling();
+            buttonObject.SetActive(false);
+
             _shopOwnershipOverlayRoot = labelObject;
             _shopOwnershipOverlayLabel = label;
+            _shopOwnershipOverlayIcon = FindTradeInfoMoneyIcon(label, labelObject.name);
             _shopOwnershipBuyButton = button;
             _shopOwnershipBuyButtonLabel = buttonLabel;
 
             if (_traceMode.Value)
             {
-                LoggerInstance.LogInfo("Shop ownership overlay widgets created.");
+                LoggerInstance.LogInfo("Shop ownership information placed below the treasure helper with a native trade button.");
             }
         }
         catch (Exception ex)

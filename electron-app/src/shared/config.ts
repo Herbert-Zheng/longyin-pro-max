@@ -629,6 +629,16 @@ IgnoreCarryWeight = ${boolText(settings.ignoreCarryWeight)}
 MerchantCarryCash = ${settings.merchantCarryCash}
 TreasureAutoTradeEnabled = ${boolText(settings.treasureAutoTradeEnabled)}
 
+[Auction]
+PreviewRefreshEnabled = true
+PreviewRefreshHotkey = R
+PreviewRefreshRequireAlt = true
+
+[TreasureIdentify]
+BestValueAssistEnabled = true
+BestValueHotkey = F
+BestValueRequireAlt = true
+
 [MoneyLuck]
 LuckyHitChancePercent = ${settings.luckyHitChancePercent}
 

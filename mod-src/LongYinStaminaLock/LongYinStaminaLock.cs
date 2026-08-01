@@ -10,11 +10,10 @@ using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
 using HarmonyLib;
 using UnityEngine;
-using UnityEngine.Events;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.29.0")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.30.0")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -51,6 +50,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const string ShopOwnershipSaveFolderName = "codex.longyin.shop-ownership";
     private const string ShopOwnershipOverlayPanelName = "CodexShopOwnershipOverlay";
     private const string ShopOwnershipBuyButtonName = "CodexShopOwnershipBuyButton";
+    private const string AuctionPreviewRefreshButtonName = "CodexAuctionPreviewRefreshButton";
+    private const string IdentifyBestTreasureButtonName = "CodexIdentifyBestTreasureButton";
     private const int ExternalOverlayProtocolVersion = 1;
     private const string ExternalOverlayStateFileName = "codex.longyin.overlay-state.json";
     private const string ExternalOverlayCommandFileName = "codex.longyin.overlay-command.json";
@@ -86,8 +87,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<int> _merchantCarryCash = null!;
     private static ConfigEntry<bool> _treasureTradeHelperEnabled = null!;
     private static ConfigEntry<bool> _treasureAutoTradeEnabled = null!;
-    private static ConfigEntry<bool> _treasureIdentifyHighlightCorrect = null!;
-    private static ConfigEntry<bool> _treasureIdentifyForceCorrectSelection = null!;
+    private static ConfigEntry<bool> _auctionPreviewRefreshEnabled = null!;
+    private static ConfigEntry<KeyCode> _auctionPreviewRefreshHotkey = null!;
+    private static ConfigEntry<bool> _auctionPreviewRefreshRequireAlt = null!;
+    private static ConfigEntry<bool> _treasureIdentifyBestValueAssistEnabled = null!;
+    private static ConfigEntry<KeyCode> _treasureIdentifyBestValueHotkey = null!;
+    private static ConfigEntry<bool> _treasureIdentifyBestValueRequireAlt = null!;
     private static ConfigEntry<int> _luckyMoneyHitChancePercent = null!;
     private static ConfigEntry<int> _extraRelationshipGainChancePercent = null!;
     private static ConfigEntry<bool> _teamAutoFavorEnabled = null!;
@@ -427,6 +432,20 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static CraftRewardBonusState? _activeCraftRewardBonus;
     private static ItemIconController? _selectedTreasureTradeIcon;
     private static Text? _treasureTradeOverlayLabel;
+    private static PlotController? _auctionPreviewController;
+    private static GameObject? _auctionPreviewRefreshButtonRoot;
+    private static Button? _auctionPreviewRefreshButton;
+    private static Text? _auctionPreviewRefreshButtonLabel;
+    private static Text? _auctionPreviewVisibilityMarker;
+    private static bool _auctionPreviewOpen;
+    private static bool _auctionPreviewVisibilityConfirmed;
+    private static bool _auctionPreviewRefreshBusy;
+    private static float _auctionPreviewRefreshButtonReadyAt;
+    private static IdentifyMatchController? _identifyMatchController;
+    private static GameObject? _identifyBestTreasureButtonRoot;
+    private static Button? _identifyBestTreasureButton;
+    private static Text? _identifyBestTreasureButtonLabel;
+    private static bool _identifyMatchOpen;
     private static GameObject? _shopOwnershipOverlayRoot;
     private static Text? _shopOwnershipOverlayLabel;
     private static Button? _shopOwnershipBuyButton;
@@ -471,8 +490,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _merchantCarryCash = Config.Bind("Commerce", "MerchantCarryCash", 100000, "Minimum cash carried by NPC shop merchants while a Shop trade window is open. Set to 0 to disable.");
         _treasureTradeHelperEnabled = Config.Bind("Commerce", "TreasureTradeHelperEnabled", true, "Shows current treasure resale estimates and skill factors inside trade shops that list treasure items.");
         _treasureAutoTradeEnabled = Config.Bind("Commerce", "TreasureAutoTradeEnabled", true, "Automatically adds profitable unidentified treasure items from the shop sell list into the trade cart when a trade shop opens.");
-        _treasureIdentifyHighlightCorrect = Config.Bind("TreasureIdentify", "HighlightCorrectTreasure", false, "Legacy highlight request. The current IL2CPP field accessor is not patchable, so this safely remains inactive unless a compatible gameplay method becomes available.");
-        _treasureIdentifyForceCorrectSelection = Config.Bind("TreasureIdentify", "ForceCorrectTreasureSelection", true, "Replaces any clicked treasure with the correct one before the game processes the choice.");
+        _auctionPreviewRefreshEnabled = Config.Bind("Auction", "PreviewRefreshEnabled", true, "Adds a free unlimited refresh button to the auction exhibit preview window.");
+        _auctionPreviewRefreshHotkey = Config.Bind("Auction", "PreviewRefreshHotkey", KeyCode.R, "Main key used to refresh while the auction exhibit preview is open.");
+        _auctionPreviewRefreshRequireAlt = Config.Bind("Auction", "PreviewRefreshRequireAlt", true, "When true, hold either Alt key while pressing PreviewRefreshHotkey. The default shortcut is Alt+R.");
+        _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the active treasure with the highest real value. Confirmation remains manual.");
+        _treasureIdentifyBestValueHotkey = Config.Bind("TreasureIdentify", "BestValueHotkey", KeyCode.F, "Main key used to select the highest-real-value treasure while the appraisal window is open.");
+        _treasureIdentifyBestValueRequireAlt = Config.Bind("TreasureIdentify", "BestValueRequireAlt", true, "When true, hold either Alt key while pressing BestValueHotkey. The default shortcut is Alt+F.");
         _luckyMoneyHitChancePercent = Config.Bind("MoneyLuck", "LuckyHitChancePercent", 0, "Chance from 0 to 100 that a player money transaction triggers a lucky bonus.");
         _extraRelationshipGainChancePercent = Config.Bind("Relationship", "ExtraRelationshipGainChancePercent", 0, "Chance from 0 to 100 that positive relationship gain becomes double.");
         _teamAutoFavorEnabled = Config.Bind("Relationship", "TeamAutoFavorEnabled", true, "When true, current player teammates automatically gain favor each elapsed in-game day.");
@@ -561,6 +584,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(UIButton), nameof(UIButton.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
         PatchMethod(typeof(UIButtonMessage), nameof(UIButtonMessage.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
         PatchMethod(typeof(ButtonClick), nameof(ButtonClick.OnPointerClick), new[] { typeof(PointerEventData) }, null, nameof(TreasureChestChoiceButtonClickedPostfix));
+        var overlayButtonPointerPatched = PatchMethod(
+            typeof(Button),
+            nameof(Button.OnPointerClick),
+            new[] { typeof(PointerEventData) },
+            nameof(OverlayButtonOnPointerClickPrefix),
+            null);
         PatchMethod(typeof(HeroData), nameof(HeroData.AddSkillBookExp), new[] { typeof(float), typeof(KungfuSkillLvData), typeof(bool) }, nameof(AddSkillBookExpPrefix), null);
         PatchMethod(typeof(HeroData), nameof(HeroData.BattleChangeSkillFightExp), new[] { typeof(float), typeof(KungfuSkillLvData), typeof(bool) }, nameof(BattleChangeSkillFightExpPrefix), null);
         PatchMethod(typeof(HeroData), nameof(HeroData.ChangeMoney), new[] { typeof(int), typeof(bool) }, nameof(ChangeMoneyPrefix), nameof(ChangeMoneyPostfix));
@@ -585,8 +614,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListType), typeof(ItemListData), typeof(ItemListData), typeof(int), typeof(int), typeof(bool), typeof(bool), typeof(float), typeof(float) }, null, nameof(ShowTradeUiFullPostfix));
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.HideTradeUI), Type.EmptyTypes, null, nameof(HideTradeUiPostfix));
         PatchMethod(typeof(ItemIconController), nameof(ItemIconController.OnClick), Type.EmptyTypes, null, nameof(ItemIconOnClickPostfix));
-        var identifySelectionPatched = PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.SetNowChooseTreasure), new[] { typeof(GameObject) }, nameof(IdentifySetNowChooseTreasurePrefix), null);
-        var identifySubmitPatched = PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.SureButtonClicked), Type.EmptyTypes, nameof(IdentifySureButtonClickedPrefix), null);
+        var auctionPreviewShowPatched = PatchMethod(typeof(PlotController), nameof(PlotController.ShowAuctionItem), Type.EmptyTypes, null, nameof(ShowAuctionItemPostfix));
+        var auctionPreviewHidePatched = PatchMethod(typeof(PlotController), nameof(PlotController.HidePlotItem), Type.EmptyTypes, null, nameof(HidePlotItemPostfix));
+        PatchMethod(typeof(PlotController), "Update", Type.EmptyTypes, null, nameof(PlotControllerUpdatePostfix));
+        var auctionRefreshGatePatched = PatchMethod(typeof(PlotController), nameof(PlotController.FreshAuctionItem), Type.EmptyTypes, nameof(FreshAuctionItemPrefix), null);
+        var identifyShowPatched = PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.ShowIdentifyMatchUI), new[] { typeof(float), typeof(string) }, null, nameof(ShowIdentifyMatchUiPostfix));
+        var identifyHidePatched = PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.HideIdentifyMatchUI), Type.EmptyTypes, null, nameof(HideIdentifyMatchUiPostfix));
         PatchMethod(typeof(DebateUIController), nameof(DebateUIController.ChangePatient), new[] { typeof(bool), typeof(float) }, nameof(DebateChangePatientPrefix), null);
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.OpenCraftUI), new[] { typeof(CraftType), typeof(AreaBuildingData), typeof(bool) }, null, nameof(OpenCraftUiPostfix));
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.HideCraftUI), Type.EmptyTypes, null, nameof(HideCraftUiPostfix));
@@ -662,8 +695,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             horseRefreshPatched,
             horseRefreshSignature,
             maxLoverSyncAvailable,
-            identifySelectionPatched,
-            identifySubmitPatched,
+            auctionPreviewShowPatched,
+            auctionPreviewHidePatched,
+            auctionRefreshGatePatched,
+            overlayButtonPointerPatched,
+            identifyShowPatched,
+            identifyHidePatched,
             mailDeliveryPatched);
 
         Log.LogInfo("LongYin Stamina Lock loaded.");
@@ -700,10 +737,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo($"Treasure trade helper starts {(_treasureTradeHelperEnabled.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Treasure auto cart starts {(_treasureAutoTradeEnabled.Value ? "ON" : "OFF")}.");
         Log.LogInfo(
-            $"Treasure identify highlight starts {(_treasureIdentifyHighlightCorrect.Value ? "DEGRADED" : "OFF")}" +
-            $"{(_treasureIdentifyHighlightCorrect.Value ? " because the IL2CPP field accessor is not patchable" : string.Empty)}.");
+            $"Auction exhibit preview refresh starts {(_auctionPreviewRefreshEnabled.Value ? "ON" : "OFF")} with shortcut " +
+            $"{FormatConfiguredHotkey(_auctionPreviewRefreshHotkey.Value, _auctionPreviewRefreshRequireAlt.Value)}.");
         Log.LogInfo(
-            $"Treasure identify force-correct starts {(_treasureIdentifyForceCorrectSelection.Value && identifySelectionPatched && identifySubmitPatched ? "ON" : _treasureIdentifyForceCorrectSelection.Value ? "DEGRADED" : "OFF")}.");
+            $"Treasure identify best-value assist starts {(_treasureIdentifyBestValueAssistEnabled.Value ? "ON" : "OFF")} with shortcut " +
+            $"{FormatConfiguredHotkey(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value)}; confirmation remains manual.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
         Log.LogInfo($"Extra relationship gain chance starts at {ClampPercent(_extraRelationshipGainChancePercent.Value)}%.");
         Log.LogInfo($"Team auto favor starts {(_teamAutoFavorEnabled.Value ? "ON" : "OFF")} at +{FormatConfigFloat(Math.Max(0f, _teamAutoFavorPerDay.Value))}/day.");
@@ -884,8 +922,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         bool horseRefreshPatched,
         string horseRefreshSignature,
         bool maxLoverSyncAvailable,
-        bool identifySelectionPatched,
-        bool identifySubmitPatched,
+        bool auctionPreviewShowPatched,
+        bool auctionPreviewHidePatched,
+        bool auctionRefreshGatePatched,
+        bool overlayButtonPointerPatched,
+        bool identifyShowPatched,
+        bool identifyHidePatched,
         bool mailDeliveryPatched)
     {
         var battleHookCount = new[]
@@ -895,7 +937,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             battleTeamPreparePatched,
             battleSpeedPatched
         }.Count(enabled => enabled);
-        var identifyCoreAvailable = identifySelectionPatched && identifySubmitPatched;
+        var auctionPreviewCoreAvailable =
+            auctionPreviewShowPatched &&
+            auctionPreviewHidePatched &&
+            auctionRefreshGatePatched &&
+            overlayButtonPointerPatched;
+        var identifyCoreAvailable = identifyShowPatched && identifyHidePatched && overlayButtonPointerPatched;
 
         Log.LogInfo($"[Compatibility] Summary: {_patchedMethodCount} method patches enabled, {_skippedMethodCount} safely skipped.");
         var battleState = battleHookCount == 4 ? "ENABLED" : battleHookCount > 0 ? "PARTIAL" : "DEGRADED";
@@ -909,8 +956,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             $"[Compatibility] Max lover override: {(maxLoverSyncAvailable ? "ENABLED" : "DEGRADED")} via direct GlobalData member synchronization; " +
             "the IL2CPP field accessor is intentionally not patched.");
         Log.LogInfo(
-            $"[Compatibility] Treasure identify force-correct: {(identifyCoreAvailable ? "ENABLED" : "DEGRADED")}; " +
-            "automatic highlight is DEGRADED because the correctTreasure field accessor is intentionally not patched.");
+            $"[Compatibility] Auction preview refresh: {(auctionPreviewCoreAvailable ? "ENABLED" : "DEGRADED")} " +
+            "through PlotController.ShowAuctionItem/HidePlotItem/FreshAuctionItem and Button.OnPointerClick; " +
+            "the original paid/count gate is bypassed.");
+        Log.LogInfo(
+            $"[Compatibility] Treasure identify assist: {(identifyCoreAvailable ? "ENABLED" : "DEGRADED")} " +
+            "through IdentifyMatchController.ShowIdentifyMatchUI/HideIdentifyMatchUI; no private correctTreasure accessor is used.");
         Log.LogInfo(
             $"[Compatibility] Mail countdown hook: {(mailDeliveryPatched ? "ENABLED via GameController.GetNewMail" : "DEGRADED")}; " +
             "the unpatchable MailData constructor is intentionally skipped.");
@@ -1723,116 +1774,1063 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return left.itemLv.CompareTo(right.itemLv);
     }
 
-    private static void IdentifySetNowChooseTreasurePrefix(IdentifyMatchController __instance, ref GameObject targetTreasure)
+    private static void ShowAuctionItemPostfix(PlotController __instance)
     {
-        if (!_treasureIdentifyForceCorrectSelection.Value)
+        if (__instance == null)
         {
             return;
         }
 
-        var correctTreasure = TryGetCorrectIdentifyTreasure(__instance);
-        if (correctTreasure == null || ReferenceEquals(correctTreasure, targetTreasure))
-        {
-            return;
-        }
-
-        targetTreasure = correctTreasure;
-        LoggerInstance.LogInfo($"Treasure identify forced correct treasure on click: {DescribeIdentifyTreasure(correctTreasure)}");
+        _auctionPreviewController = __instance;
+        _auctionPreviewOpen = true;
+        ScheduleAuctionPreviewRefreshButton();
     }
 
-    private static void IdentifySureButtonClickedPrefix(IdentifyMatchController __instance)
+    private static void PlotControllerUpdatePostfix()
     {
-        if (!_treasureIdentifyForceCorrectSelection.Value)
+        if (_auctionPreviewOpen)
         {
-            return;
+            UpdateAuctionPreviewRefreshAssist();
         }
-
-        TrySelectCorrectIdentifyTreasure(__instance, "submit");
     }
 
-    private static bool TrySelectCorrectIdentifyTreasure(IdentifyMatchController? controller, string source)
+    private static bool OverlayButtonOnPointerClickPrefix(Button __instance, PointerEventData eventData)
     {
-        var correctTreasure = TryGetCorrectIdentifyTreasure(controller);
-        if (controller == null || correctTreasure == null)
-        {
-            return false;
-        }
-
-        if (ReferenceEquals(TryGetCurrentIdentifyTreasure(controller), correctTreasure))
+        if (__instance?.gameObject == null)
         {
             return true;
         }
 
+        var buttonName = __instance.gameObject.name;
+        var isAuctionRefresh = string.Equals(buttonName, AuctionPreviewRefreshButtonName, StringComparison.Ordinal);
+        var isIdentifyAssist = string.Equals(buttonName, IdentifyBestTreasureButtonName, StringComparison.Ordinal);
+        var isShopOwnershipBuy = string.Equals(buttonName, ShopOwnershipBuyButtonName, StringComparison.Ordinal);
+        if (!isAuctionRefresh && !isIdentifyAssist && !isShopOwnershipBuy)
+        {
+            return true;
+        }
+
+        if (!__instance.IsActive() || !__instance.IsInteractable())
+        {
+            return false;
+        }
+
+        if (eventData == null || eventData.button == PointerEventData.InputButton.Left)
+        {
+            if (isAuctionRefresh)
+            {
+                TryRefreshAuctionPreview("button");
+            }
+            else if (isIdentifyAssist)
+            {
+                TrySelectHighestValueIdentifyTreasure(_identifyMatchController, "button");
+            }
+            else
+            {
+                OnShopOwnershipBuyButtonClicked();
+            }
+        }
+
+        return false;
+    }
+
+    private static bool FreshAuctionItemPrefix(PlotController __instance)
+    {
+        if (!_auctionPreviewRefreshEnabled.Value)
+        {
+            return true;
+        }
+
+        if (__instance == null)
+        {
+            LoggerInstance.LogWarning("Original auction refresh was suppressed because the preview controller was unavailable.");
+            return false;
+        }
+
+        if (_auctionPreviewRefreshBusy)
+        {
+            return false;
+        }
+
+        _auctionPreviewController = __instance;
+        var handled = TryRefreshAuctionPreview("original-refresh-gate", requireVisible: false);
+        if (handled)
+        {
+            LoggerInstance.LogInfo("Original auction refresh cost/count gate was bypassed by the unlimited preview refresh path.");
+        }
+        else
+        {
+            LoggerInstance.LogWarning("Original auction refresh cost/count gate remained suppressed after the replacement refresh failed.");
+        }
+
+        return false;
+    }
+
+    private static void HidePlotItemPostfix(PlotController __instance)
+    {
+        _auctionPreviewOpen = false;
+        _auctionPreviewVisibilityMarker = null;
+        _auctionPreviewVisibilityConfirmed = false;
+        _auctionPreviewRefreshButtonReadyAt = 0f;
+        SetOverlayObjectActive(_auctionPreviewRefreshButtonRoot, false);
+    }
+
+    private static void ShowIdentifyMatchUiPostfix(IdentifyMatchController __instance, float _difficulty, string _fightEndCallFuc)
+    {
+        if (__instance == null)
+        {
+            return;
+        }
+
+        _identifyMatchController = __instance;
+        _identifyMatchOpen = true;
+        EnsureIdentifyBestTreasureButton(__instance);
+    }
+
+    private static void HideIdentifyMatchUiPostfix(IdentifyMatchController __instance)
+    {
+        _identifyMatchOpen = false;
+        SetOverlayObjectActive(_identifyBestTreasureButtonRoot, false);
+    }
+
+    private static void UpdateAuctionPreviewRefreshAssist()
+    {
+        if (!_auctionPreviewRefreshEnabled.Value || !_auctionPreviewOpen)
+        {
+            SetOverlayObjectActive(_auctionPreviewRefreshButtonRoot, false);
+            return;
+        }
+
+        if (!IsAuctionPreviewVisible())
+        {
+            SetOverlayObjectActive(_auctionPreviewRefreshButtonRoot, false);
+            if (_auctionPreviewVisibilityConfirmed)
+            {
+                _auctionPreviewOpen = false;
+                _auctionPreviewVisibilityMarker = null;
+            }
+
+            return;
+        }
+
+        var controller = _auctionPreviewController;
+        if (controller == null)
+        {
+            _auctionPreviewOpen = false;
+            return;
+        }
+
+        if (Time.unscaledTime < _auctionPreviewRefreshButtonReadyAt)
+        {
+            return;
+        }
+
+        EnsureAuctionPreviewRefreshButton(controller);
+        SetOverlayObjectActive(_auctionPreviewRefreshButtonRoot, true);
+
+        if (IsConfiguredHotkeyPressed(_auctionPreviewRefreshHotkey.Value, _auctionPreviewRefreshRequireAlt.Value))
+        {
+            TryRefreshAuctionPreview("hotkey");
+        }
+    }
+
+    private static void UpdateTreasureIdentifyBestValueAssist()
+    {
+        if (!_treasureIdentifyBestValueAssistEnabled.Value || !_identifyMatchOpen || !IsIdentifyMatchVisible())
+        {
+            SetOverlayObjectActive(_identifyBestTreasureButtonRoot, false);
+            return;
+        }
+
+        var controller = _identifyMatchController;
+        if (controller == null)
+        {
+            _identifyMatchOpen = false;
+            return;
+        }
+
+        EnsureIdentifyBestTreasureButton(controller);
+        SetOverlayObjectActive(_identifyBestTreasureButtonRoot, true);
+
+        if (IsConfiguredHotkeyPressed(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value))
+        {
+            TrySelectHighestValueIdentifyTreasure(controller, "hotkey");
+        }
+    }
+
+    private static bool IsAuctionPreviewVisible()
+    {
         try
         {
-            var selectMethod = FindCompatibleTargetMethod(
-                controller.GetType(),
-                "SetNowChooseTreasure",
-                new[] { typeof(GameObject) });
-            if (selectMethod == null)
+            if (!_auctionPreviewOpen || _auctionPreviewController?.plotPanel == null)
             {
-                LoggerInstance.LogWarning($"Treasure identify selection safely skipped from {source}: SetNowChooseTreasure(GameObject) is unavailable.");
                 return false;
             }
 
-            selectMethod.Invoke(controller, new object[] { correctTreasure });
-            LoggerInstance.LogInfo($"Treasure identify selected correct treasure from {source}: {DescribeIdentifyTreasure(correctTreasure)}");
+            if (_auctionPreviewVisibilityMarker?.gameObject != null &&
+                _auctionPreviewVisibilityMarker.gameObject.activeInHierarchy)
+            {
+                return true;
+            }
+
+            var plotPanel = _auctionPreviewController.plotPanel;
+            var canvas = plotPanel.GetComponentInParent<Canvas>();
+            var searchRoot = canvas?.rootCanvas?.gameObject ?? canvas?.gameObject ?? plotPanel;
+            var labels = searchRoot.GetComponentsInChildren<Text>(includeInactive: true);
+            Text? firstMarker = null;
+            var openAllCount = 0;
+            var closeAllCount = 0;
+            foreach (var label in labels)
+            {
+                if (label?.gameObject == null || !label.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+
+                var markerText = label.text?.Trim();
+                if (string.Equals(markerText, "全开", StringComparison.Ordinal))
+                {
+                    firstMarker ??= label;
+                    openAllCount++;
+                }
+                else if (string.Equals(markerText, "全关", StringComparison.Ordinal))
+                {
+                    firstMarker ??= label;
+                    closeAllCount++;
+                }
+            }
+
+            if (firstMarker != null && openAllCount >= 2 && closeAllCount >= 2)
+            {
+                _auctionPreviewVisibilityMarker = firstMarker;
+                _auctionPreviewVisibilityConfirmed = true;
+                return true;
+            }
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsIdentifyMatchVisible()
+    {
+        try
+        {
+            return _identifyMatchController?.identifyMatchUIPanel != null &&
+                _identifyMatchController.identifyMatchUIPanel.activeInHierarchy;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsConfiguredHotkeyPressed(KeyCode key, bool requireAlt)
+    {
+        if (key == KeyCode.None || !Input.GetKeyDown(key))
+        {
+            return false;
+        }
+
+        return !requireAlt || Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+    }
+
+    private static void ScheduleAuctionPreviewRefreshButton()
+    {
+        if (_auctionPreviewRefreshButtonRoot != null)
+        {
+            try
+            {
+                _auctionPreviewRefreshButtonRoot.SetActive(false);
+                UnityEngine.Object.Destroy(_auctionPreviewRefreshButtonRoot);
+            }
+            catch
+            {
+                // The original preview may already have destroyed its children.
+            }
+        }
+
+        _auctionPreviewRefreshButtonRoot = null;
+        _auctionPreviewRefreshButton = null;
+        _auctionPreviewRefreshButtonLabel = null;
+        _auctionPreviewVisibilityMarker = null;
+        _auctionPreviewVisibilityConfirmed = false;
+        _auctionPreviewRefreshButtonReadyAt = Time.unscaledTime + 0.35f;
+    }
+
+    private static string FormatConfiguredHotkey(KeyCode key, bool requireAlt)
+    {
+        return requireAlt ? $"Alt+{key}" : key.ToString();
+    }
+
+    private static void EnsureAuctionPreviewRefreshButton(PlotController controller)
+    {
+        if (!_auctionPreviewRefreshEnabled.Value)
+        {
+            SetOverlayObjectActive(_auctionPreviewRefreshButtonRoot, false);
+            return;
+        }
+
+        if (_auctionPreviewRefreshButtonRoot != null &&
+            _auctionPreviewRefreshButton != null &&
+            _auctionPreviewRefreshButtonLabel != null)
+        {
+            _auctionPreviewRefreshButtonLabel.text =
+                $"免费刷新展品\n{FormatConfiguredHotkey(_auctionPreviewRefreshHotkey.Value, _auctionPreviewRefreshRequireAlt.Value)}";
+            SetOverlayObjectActive(_auctionPreviewRefreshButtonRoot, true);
+            return;
+        }
+
+        var grid = controller.plotItemGrid;
+        if (grid == null)
+        {
+            return;
+        }
+
+        var plotPanel = controller.plotPanel;
+        var canvas = plotPanel?.GetComponentInParent<Canvas>();
+        var buttonParent = canvas?.rootCanvas?.transform ?? canvas?.transform ?? plotPanel?.transform ??
+            grid.transform.parent ?? grid.transform;
+        var buttonTemplate = FindUiButtonTemplate(plotPanel ?? grid);
+        var buttonText =
+            $"免费刷新展品\n{FormatConfiguredHotkey(_auctionPreviewRefreshHotkey.Value, _auctionPreviewRefreshRequireAlt.Value)}";
+        var created = buttonTemplate != null &&
+            TryCreateButtonTemplateButton(
+                AuctionPreviewRefreshButtonName,
+                buttonParent,
+                buttonTemplate,
+                new Vector2(0.5f, 0.31f),
+                new Vector2(0.5f, 0.31f),
+                new Vector2(0.5f, 0.5f),
+                Vector2.zero,
+                new Vector2(190f, 54f),
+                buttonText,
+                out _auctionPreviewRefreshButtonRoot,
+                out _auctionPreviewRefreshButton,
+                out _auctionPreviewRefreshButtonLabel);
+
+        if (!created)
+        {
+            var labelTemplate = FindUiTextTemplate(grid);
+            created = labelTemplate != null &&
+                TryCreateTextTemplateButton(
+                    AuctionPreviewRefreshButtonName,
+                    buttonParent,
+                    labelTemplate,
+                    new Vector2(0.5f, 0.31f),
+                    new Vector2(0.5f, 0.31f),
+                    new Vector2(0.5f, 0.5f),
+                    Vector2.zero,
+                    new Vector2(190f, 54f),
+                    buttonText,
+                    out _auctionPreviewRefreshButtonRoot,
+                    out _auctionPreviewRefreshButton,
+                    out _auctionPreviewRefreshButtonLabel);
+        }
+
+        if (!created)
+        {
+            LoggerInstance.LogWarning("Auction preview refresh button could not be created.");
+            return;
+        }
+
+        LoggerInstance.LogInfo("Auction preview refresh button created on the auction preview canvas.");
+    }
+
+    private static void EnsureIdentifyBestTreasureButton(IdentifyMatchController controller)
+    {
+        if (!_treasureIdentifyBestValueAssistEnabled.Value)
+        {
+            SetOverlayObjectActive(_identifyBestTreasureButtonRoot, false);
+            return;
+        }
+
+        if (_identifyBestTreasureButtonRoot != null &&
+            _identifyBestTreasureButton != null &&
+            _identifyBestTreasureButtonLabel != null)
+        {
+            _identifyBestTreasureButtonLabel.text =
+                $"自动选中真品\n{FormatConfiguredHotkey(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value)}";
+            SetOverlayObjectActive(_identifyBestTreasureButtonRoot, true);
+            return;
+        }
+
+        var sureButton = controller.sureButton;
+        var sureButtonRect = sureButton?.GetComponent<RectTransform>();
+        var parent = sureButton?.transform.parent;
+        var template = sureButton?.GetComponent<Button>() ??
+            (sureButton == null ? null : FindUiButtonTemplate(sureButton));
+        if (sureButtonRect == null || parent == null || template == null)
+        {
+            LoggerInstance.LogWarning("Treasure identify assist button is waiting for the appraisal confirm-button UI template.");
+            return;
+        }
+
+        var width = Mathf.Max(190f, sureButtonRect.sizeDelta.x);
+        var height = Mathf.Max(48f, sureButtonRect.sizeDelta.y);
+        var position = sureButtonRect.anchoredPosition + new Vector2(-(width + 24f), 0f);
+        if (!TryCreateButtonTemplateButton(
+                IdentifyBestTreasureButtonName,
+                parent,
+                template,
+                sureButtonRect.anchorMin,
+                sureButtonRect.anchorMax,
+                sureButtonRect.pivot,
+                position,
+                new Vector2(width, height),
+                $"自动选中真品\n{FormatConfiguredHotkey(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value)}",
+                out _identifyBestTreasureButtonRoot,
+                out _identifyBestTreasureButton,
+                out _identifyBestTreasureButtonLabel))
+        {
+            LoggerInstance.LogWarning("Treasure identify assist button could not be created.");
+            return;
+        }
+
+        LoggerInstance.LogInfo("Treasure identify best-value button created beside the appraisal confirm button.");
+    }
+
+    private static Button? FindUiButtonTemplate(GameObject root)
+    {
+        Button? fallback = null;
+        Transform? current = root.transform;
+        for (var depth = 0; current != null && depth < 4; depth++, current = current.parent)
+        {
+            Button[]? buttons;
+            try
+            {
+                buttons = current.gameObject.GetComponentsInChildren<Button>(includeInactive: true);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (buttons == null)
+            {
+                continue;
+            }
+
+            foreach (var button in buttons)
+            {
+                var buttonName = button?.gameObject?.name;
+                if (button == null ||
+                    string.Equals(buttonName, AuctionPreviewRefreshButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, IdentifyBestTreasureButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, ShopOwnershipBuyButtonName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (button.GetComponent<RectTransform>() == null ||
+                        (button.targetGraphic == null &&
+                            button.GetComponentInChildren<Graphic>(includeInactive: true) == null))
+                    {
+                        continue;
+                    }
+
+                    fallback ??= button;
+                    if (button.GetComponentInChildren<Text>(includeInactive: true) != null)
+                    {
+                        return button;
+                    }
+                }
+                catch
+                {
+                    continue;
+                }
+            }
+        }
+
+        return fallback;
+    }
+
+    private static Text? FindUiTextTemplate(GameObject root)
+    {
+        Text? fallback = null;
+        Transform? current = root.transform;
+        for (var depth = 0; current != null && depth < 5; depth++, current = current.parent)
+        {
+            Text[]? labels;
+            try
+            {
+                labels = current.gameObject.GetComponentsInChildren<Text>(includeInactive: true);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (labels == null)
+            {
+                continue;
+            }
+
+            foreach (var candidate in labels)
+            {
+                if (candidate == null ||
+                    (_auctionPreviewRefreshButtonRoot != null &&
+                        candidate.transform.IsChildOf(_auctionPreviewRefreshButtonRoot.transform)) ||
+                    (_identifyBestTreasureButtonRoot != null &&
+                        candidate.transform.IsChildOf(_identifyBestTreasureButtonRoot.transform)))
+                {
+                    continue;
+                }
+
+                fallback ??= candidate;
+                return candidate;
+            }
+        }
+
+        return fallback;
+    }
+
+    private static bool TryCreateTextTemplateButton(
+        string name,
+        Transform parent,
+        Text template,
+        Vector2 anchorMin,
+        Vector2 anchorMax,
+        Vector2 pivot,
+        Vector2 anchoredPosition,
+        Vector2 size,
+        string text,
+        out GameObject? buttonRoot,
+        out Button? button,
+        out Text? label)
+    {
+        buttonRoot = null;
+        button = null;
+        label = null;
+
+        try
+        {
+            var buttonObject = UnityEngine.Object.Instantiate(template.gameObject, parent);
+            buttonRoot = buttonObject;
+            buttonObject.name = name;
+            buttonObject.SetActive(false);
+
+            var buttonRect = buttonObject.GetComponent<RectTransform>();
+            label = buttonObject.GetComponent<Text>() ??
+                buttonObject.GetComponentInChildren<Text>(includeInactive: true);
+            button = buttonObject.GetComponent<Button>() ?? buttonObject.AddComponent<Button>();
+            var layoutElement = buttonObject.GetComponent<LayoutElement>() ?? buttonObject.AddComponent<LayoutElement>();
+            if (buttonRect == null || label == null || button == null || layoutElement == null)
+            {
+                UnityEngine.Object.Destroy(buttonObject);
+                button = null;
+                label = null;
+                return false;
+            }
+
+            var contentSizeFitter = buttonObject.GetComponent<ContentSizeFitter>();
+            if (contentSizeFitter != null)
+            {
+                contentSizeFitter.enabled = false;
+            }
+
+            layoutElement.ignoreLayout = true;
+            buttonRect.anchorMin = anchorMin;
+            buttonRect.anchorMax = anchorMax;
+            buttonRect.pivot = pivot;
+            buttonRect.anchoredPosition = anchoredPosition;
+            buttonRect.sizeDelta = size;
+            buttonRect.localScale = Vector3.one;
+            buttonRect.localRotation = Quaternion.identity;
+
+            label.enabled = true;
+            label.text = text;
+            label.fontSize = Math.Max(16, label.fontSize);
+            label.resizeTextForBestFit = true;
+            label.resizeTextMinSize = 14;
+            label.resizeTextMaxSize = Math.Max(20, label.fontSize + 2);
+            label.color = new Color(1f, 0.78f, 0.2f, 1f);
+            label.raycastTarget = true;
+
+            button.targetGraphic = label;
+            button.interactable = true;
+            button.transition = Selectable.Transition.ColorTint;
+            button.onClick = new Button.ButtonClickedEvent();
+
+            buttonObject.transform.SetAsLastSibling();
+            buttonObject.SetActive(true);
+            buttonRoot = buttonObject;
             return true;
         }
         catch (Exception ex)
         {
-            LoggerInstance.LogWarning($"Failed to auto-select correct identify treasure from {source}: {ex.Message}");
+            if (buttonRoot != null)
+            {
+                UnityEngine.Object.Destroy(buttonRoot);
+            }
+
+            buttonRoot = null;
+            button = null;
+            label = null;
+            LoggerInstance.LogWarning($"Failed to create text-template UI button {name}: {ex.Message}");
             return false;
         }
     }
 
-    private static GameObject? TryGetCorrectIdentifyTreasure(IdentifyMatchController? controller)
+    private static bool TryCreateButtonTemplateButton(
+        string name,
+        Transform parent,
+        Button template,
+        Vector2 anchorMin,
+        Vector2 anchorMax,
+        Vector2 pivot,
+        Vector2 anchoredPosition,
+        Vector2 size,
+        string text,
+        out GameObject? buttonRoot,
+        out Button? button,
+        out Text? label)
     {
-        if (controller == null)
-        {
-            return null;
-        }
+        buttonRoot = null;
+        button = null;
+        label = null;
 
-        var value = SafeProperty(controller, "correctTreasure") ?? SafeField(controller, "correctTreasure");
-        var count = TryGetCollectionCount(value);
-        if (count <= 0)
+        try
         {
-            return null;
-        }
+            var buttonObject = UnityEngine.Object.Instantiate(template.gameObject, parent);
+            buttonRoot = buttonObject;
+            buttonObject.name = name;
+            buttonObject.SetActive(false);
 
-        return TryGetIndexedValue(value!, 0) as GameObject;
+            var buttonRect = buttonObject.GetComponent<RectTransform>();
+            label = buttonObject.GetComponentInChildren<Text>(includeInactive: true);
+            if (label == null)
+            {
+                var labelTemplate = FindUiTextTemplate(template.gameObject);
+                if (labelTemplate != null)
+                {
+                    var labelObject = UnityEngine.Object.Instantiate(labelTemplate.gameObject, buttonObject.transform);
+                    labelObject.name = $"{name}Label";
+                    labelObject.SetActive(true);
+                    label = labelObject.GetComponent<Text>() ??
+                        labelObject.GetComponentInChildren<Text>(includeInactive: true);
+
+                    var labelRect = labelObject.GetComponent<RectTransform>();
+                    if (labelRect != null)
+                    {
+                        labelRect.anchorMin = Vector2.zero;
+                        labelRect.anchorMax = Vector2.one;
+                        labelRect.pivot = new Vector2(0.5f, 0.5f);
+                        labelRect.anchoredPosition = Vector2.zero;
+                        labelRect.sizeDelta = new Vector2(-16f, -8f);
+                        labelRect.localScale = Vector3.one;
+                        labelRect.localRotation = Quaternion.identity;
+                    }
+
+                    var labelLayout = labelObject.GetComponent<LayoutElement>();
+                    if (labelLayout != null)
+                    {
+                        labelLayout.ignoreLayout = true;
+                    }
+                }
+            }
+
+            button = buttonObject.GetComponent<Button>();
+            var layoutElement = buttonObject.GetComponent<LayoutElement>() ?? buttonObject.AddComponent<LayoutElement>();
+            var targetGraphic = button?.targetGraphic ?? buttonObject.GetComponentInChildren<Graphic>(includeInactive: true);
+            if (buttonRect == null || label == null || button == null || layoutElement == null || targetGraphic == null)
+            {
+                UnityEngine.Object.Destroy(buttonObject);
+                button = null;
+                label = null;
+                return false;
+            }
+
+            layoutElement.ignoreLayout = true;
+            buttonRect.anchorMin = anchorMin;
+            buttonRect.anchorMax = anchorMax;
+            buttonRect.pivot = pivot;
+            buttonRect.anchoredPosition = anchoredPosition;
+            buttonRect.sizeDelta = size;
+            buttonRect.localScale = Vector3.one;
+            buttonRect.localRotation = Quaternion.identity;
+
+            targetGraphic.gameObject.SetActive(true);
+            targetGraphic.enabled = true;
+            targetGraphic.color = new Color(0.58f, 0.32f, 0.12f, 0.96f);
+            targetGraphic.raycastTarget = true;
+            var targetGraphicRect = targetGraphic.GetComponent<RectTransform>();
+            if (targetGraphicRect != null &&
+                targetGraphicRect != buttonRect &&
+                targetGraphicRect.IsChildOf(buttonObject.transform))
+            {
+                targetGraphicRect.anchorMin = Vector2.zero;
+                targetGraphicRect.anchorMax = Vector2.one;
+                targetGraphicRect.pivot = new Vector2(0.5f, 0.5f);
+                targetGraphicRect.anchoredPosition = Vector2.zero;
+                targetGraphicRect.sizeDelta = Vector2.zero;
+                targetGraphicRect.localScale = Vector3.one;
+                targetGraphicRect.localRotation = Quaternion.identity;
+            }
+
+            button.targetGraphic = targetGraphic;
+            button.interactable = true;
+            button.onClick = new Button.ButtonClickedEvent();
+
+            label.text = text;
+            label.fontSize = Math.Max(14, label.fontSize);
+            label.resizeTextForBestFit = true;
+            label.resizeTextMinSize = 12;
+            label.resizeTextMaxSize = Math.Max(18, label.fontSize + 2);
+            label.color = Color.white;
+            label.raycastTarget = false;
+
+            buttonObject.transform.SetAsLastSibling();
+            buttonObject.SetActive(true);
+            buttonRoot = buttonObject;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (buttonRoot != null)
+            {
+                UnityEngine.Object.Destroy(buttonRoot);
+            }
+
+            buttonRoot = null;
+            button = null;
+            label = null;
+            LoggerInstance.LogWarning($"Failed to create UI button {name}: {ex.Message}");
+            return false;
+        }
     }
 
-    private static GameObject? TryGetCurrentIdentifyTreasure(IdentifyMatchController? controller)
+    private static void SetOverlayObjectActive(GameObject? target, bool active)
     {
-        if (controller == null)
+        if (target == null)
         {
-            return null;
-        }
-
-        return (SafeProperty(controller, "nowChooseTreasure") ?? SafeField(controller, "nowChooseTreasure")) as GameObject;
-    }
-
-    private static string DescribeIdentifyTreasure(GameObject? treasure)
-    {
-        if (treasure == null)
-        {
-            return "<null>";
+            return;
         }
 
         try
         {
-            var icon = treasure.GetComponent<ItemIconController>();
-            if (icon?.itemData != null)
+            target.SetActive(active);
+            if (active)
             {
-                return $"{treasure.name} => {DescribeItemSummary(icon.itemData)}";
+                target.transform.SetAsLastSibling();
             }
         }
         catch
         {
         }
+    }
 
-        return treasure.name ?? "<unnamed-treasure>";
+    private static bool TryRefreshAuctionPreview(string source, bool requireVisible = true)
+    {
+        if (_auctionPreviewRefreshBusy ||
+            !_auctionPreviewRefreshEnabled.Value ||
+            requireVisible && !IsAuctionPreviewVisible())
+        {
+            return false;
+        }
+
+        var controller = _auctionPreviewController;
+        if (controller == null)
+        {
+            return false;
+        }
+
+        _auctionPreviewRefreshBusy = true;
+        var player = TryGetPlayerHero();
+        var moneyBefore = TryGetHeroMoney(player);
+        var itemsBefore = DescribeAuctionPreviewItems(controller);
+        EventData? eventDataBefore = null;
+        ItemListData? eventItemsBefore = null;
+        ItemListData? tempPlotShopBefore = null;
+        var randomSeedBefore = 0;
+        var snapshotCaptured = false;
+        var previewReopenAttempted = false;
+
+        try
+        {
+            eventDataBefore = controller.nowEvent;
+            eventItemsBefore = eventDataBefore?.eventItemList;
+            tempPlotShopBefore = controller.tempPlotShop;
+            randomSeedBefore = eventDataBefore?.randomSeed ?? 0;
+            snapshotCaptured = true;
+
+            var refreshed = TryRegenerateAuctionPreviewDirect(controller);
+            if (!refreshed)
+            {
+                TryRestoreAuctionPreviewState(
+                    controller,
+                    eventDataBefore,
+                    eventItemsBefore,
+                    tempPlotShopBefore,
+                    randomSeedBefore);
+                PushPlayerLog("拍卖展品刷新失败：当前版本缺少兼容刷新接口");
+                LoggerInstance.LogWarning("Auction preview refresh safely skipped because direct regeneration was unavailable.");
+                return false;
+            }
+
+            previewReopenAttempted = true;
+            ReopenAuctionPreview(controller);
+            _auctionPreviewController = controller;
+            _auctionPreviewOpen = true;
+
+            var itemsAfter = DescribeAuctionPreviewItems(controller);
+            PushPlayerLog("拍卖展品已免费刷新");
+            LoggerInstance.LogInfo(
+                $"Auction preview refreshed for free from {source}: money={SafeFormatValue(moneyBefore)}->{SafeFormatValue(TryGetHeroMoney(player))}, " +
+                $"before=[{itemsBefore}], after=[{itemsAfter}].");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            var restored = !snapshotCaptured ||
+                TryRestoreAuctionPreviewState(
+                    controller,
+                    eventDataBefore,
+                    eventItemsBefore,
+                    tempPlotShopBefore,
+                    randomSeedBefore);
+            var previewRestored = !previewReopenAttempted || restored && TryReopenAuctionPreviewAfterRollback(controller);
+            PushPlayerLog(
+                restored && previewRestored
+                    ? "拍卖展品刷新失败，原展品已恢复"
+                    : "拍卖展品刷新失败，请退出后重新打开展品预览");
+            LoggerInstance.LogWarning($"Auction preview refresh failed from {source}: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+        finally
+        {
+            _auctionPreviewRefreshBusy = false;
+        }
+    }
+
+    private static bool TryRestoreAuctionPreviewState(
+        PlotController controller,
+        EventData? eventData,
+        ItemListData? eventItems,
+        ItemListData? tempPlotShop,
+        int randomSeed)
+    {
+        try
+        {
+            if (eventData != null)
+            {
+                eventData.eventItemList = eventItems;
+                eventData.randomSeed = randomSeed;
+            }
+
+            controller.tempPlotShop = tempPlotShop;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Auction preview rollback failed: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+    }
+
+    private static bool TryReopenAuctionPreviewAfterRollback(PlotController controller)
+    {
+        try
+        {
+            ReopenAuctionPreview(controller);
+            _auctionPreviewController = controller;
+            _auctionPreviewOpen = true;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Auction preview UI could not be reopened after rollback: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+    }
+
+    private static bool TryRegenerateAuctionPreviewDirect(PlotController controller)
+    {
+        EventData? eventData = null;
+        var originalRandomSeed = 0;
+        try
+        {
+            eventData = controller.nowEvent;
+            originalRandomSeed = eventData?.randomSeed ?? 0;
+            var itemList = eventData?.eventItemList ?? controller.tempPlotShop;
+            if (itemList == null)
+            {
+                return false;
+            }
+
+            if (eventData != null)
+            {
+                eventData.randomSeed = eventData.randomSeed >= int.MaxValue - 1
+                    ? 1
+                    : Math.Max(1, eventData.randomSeed + 1);
+            }
+
+            var regeneratedItems = new ItemListData();
+            var difficulty = eventData?.difficulty ?? controller.GetNowEventDifficulty();
+            controller.GenerateAuctionItem(regeneratedItems, difficulty, null, -1);
+            if (TryGetCollectionCount(regeneratedItems.allItem) <= 0)
+            {
+                if (eventData != null)
+                {
+                    eventData.randomSeed = originalRandomSeed;
+                }
+
+                return false;
+            }
+
+            if (eventData != null)
+            {
+                eventData.eventItemList = regeneratedItems;
+            }
+
+            controller.tempPlotShop = regeneratedItems;
+            return TryGetCollectionCount(regeneratedItems.allItem) > 0;
+        }
+        catch (Exception ex)
+        {
+            if (eventData != null)
+            {
+                eventData.randomSeed = originalRandomSeed;
+            }
+
+            LoggerInstance.LogWarning($"Direct auction preview regeneration failed: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+    }
+
+    private static void ReopenAuctionPreview(PlotController controller)
+    {
+        var hideMethod = FindCompatibleTargetMethod(controller.GetType(), nameof(PlotController.HidePlotItem), Type.EmptyTypes);
+        hideMethod?.Invoke(controller, Array.Empty<object>());
+
+        var showMethod = FindCompatibleTargetMethod(controller.GetType(), nameof(PlotController.ShowAuctionItem), Type.EmptyTypes);
+        if (showMethod == null)
+        {
+            throw new MissingMethodException(controller.GetType().FullName, nameof(PlotController.ShowAuctionItem));
+        }
+
+        showMethod.Invoke(controller, Array.Empty<object>());
+    }
+
+    private static string DescribeAuctionPreviewItems(PlotController controller)
+    {
+        try
+        {
+            var eventItems = controller.nowEvent?.eventItemList;
+            var tempItems = controller.tempPlotShop;
+            var itemList = eventItems ?? tempItems;
+            var count = TryGetCollectionCount(itemList?.allItem);
+            if (count <= 0)
+            {
+                return $"count={count}";
+            }
+
+            var summaries = new List<string>();
+            var summaryCount = Math.Min(count, 12);
+            for (var index = 0; index < summaryCount; index++)
+            {
+                var item = TryGetIndexedValue(itemList!.allItem, index) as ItemData;
+                summaries.Add(DescribeItemSummary(item));
+            }
+
+            return $"count={count}; {string.Join(" | ", summaries)}";
+        }
+        catch (Exception ex)
+        {
+            return $"unavailable: {DescribeCompatibilityException(ex)}";
+        }
+    }
+
+    private static bool TrySelectHighestValueIdentifyTreasure(IdentifyMatchController? controller, string source)
+    {
+        if (controller?.identifyMatchUIPanel == null || !IsIdentifyMatchVisible())
+        {
+            return false;
+        }
+
+        ItemIconController[]? icons;
+        try
+        {
+            icons = controller.identifyMatchUIPanel.GetComponentsInChildren<ItemIconController>(includeInactive: true);
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Treasure identify selection could not enumerate appraisal items from {source}: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+
+        ItemIconController? bestIcon = null;
+        var bestValue = int.MinValue;
+        if (icons != null)
+        {
+            foreach (var icon in icons)
+            {
+                if (icon?.itemData == null || !IsActiveIdentifyTreasureIcon(icon))
+                {
+                    continue;
+                }
+
+                int realValue;
+                try
+                {
+                    realValue = icon.itemData.GetTreasureRealValue();
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (bestIcon == null ||
+                    realValue > bestValue ||
+                    realValue == bestValue && CompareTreasureChestChoicePriority(icon.itemData, bestIcon.itemData) > 0)
+                {
+                    bestIcon = icon;
+                    bestValue = realValue;
+                }
+            }
+        }
+
+        if (bestIcon == null)
+        {
+            PushPlayerLog("自动鉴宝：当前没有可选择的宝物");
+            LoggerInstance.LogWarning($"Treasure identify best-value selection found no active treasure icons from {source}.");
+            return false;
+        }
+
+        try
+        {
+            controller.SetNowChooseTreasure(bestIcon.gameObject);
+            PushPlayerLog($"自动鉴宝已选中：{bestIcon.itemData.Name(false)}");
+            LoggerInstance.LogInfo(
+                $"Treasure identify selected highest-real-value item from {source}: realValue={bestValue}, item={DescribeItemSummary(bestIcon.itemData)}. " +
+                "The player must still confirm manually.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Treasure identify best-value selection failed from {source}: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+    }
+
+    private static bool IsActiveIdentifyTreasureIcon(ItemIconController icon)
+    {
+        try
+        {
+            return icon.gameObject != null &&
+                icon.gameObject.activeInHierarchy &&
+                icon.itemData != null &&
+                icon.itemData.type == ItemType.Treasure;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void TryGrantTreasureChestBonusItems(HeroData? targetHero, ItemData? itemData, int treasureChestClickTime, bool skipManageItemPoison)
@@ -2624,8 +3622,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
             buttonImage.color = new Color(0.62f, 0.33f, 0.12f, 0.95f);
             button.targetGraphic = buttonImage;
-            button.onClick.RemoveAllListeners();
-            button.onClick.AddListener((UnityAction)OnShopOwnershipBuyButtonClicked);
+            button.onClick = new Button.ButtonClickedEvent();
             buttonRect.anchorMin = templateRect.anchorMin;
             buttonRect.anchorMax = templateRect.anchorMax;
             buttonRect.pivot = templateRect.pivot;
@@ -5026,6 +6023,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         KeepPlayerHorseTurboReady("Update");
         ApplyPlayerCarryWeightOverride("Update");
         UpdateTreasureTradeUiState();
+        UpdateAuctionPreviewRefreshAssist();
+        UpdateTreasureIdentifyBestValueAssist();
         TrySyncExternalOverlay();
 
         if (Input.GetKeyDown(_dialogFastForwardAssistHotkey.Value))

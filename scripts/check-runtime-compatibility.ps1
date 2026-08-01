@@ -55,11 +55,68 @@ if (-not $staminaSource) {
 $sourceText = Get-Content -LiteralPath $staminaSource -Raw
 $sourceHasStaticHeroTagReference =
     $sourceText -match '(?m)(?:\.|\?\.)heroTagDataBase\b'
+$sourceUsesPrivateIdentifyAnswer =
+    $sourceText -match '(?m)(?:\.|\?\.)correctTreasure\b|Safe(?:Property|Field)\([^\r\n]*["'']correctTreasure["'']'
+$sourceRegistersManagedUnityClickListener =
+    $sourceText -match '(?m)\.onClick\.AddListener\s*\('
 
 if ($sourceHasStaticHeroTagReference) {
     $failures.Add(
         'The plugin still contains a static GameDataController.heroTagDataBase reference; this optional native accessor has already failed with MissingMethodException and must be capability-detected dynamically.'
     )
+}
+
+if ($sourceUsesPrivateIdentifyAnswer) {
+    $failures.Add(
+        'The treasure-identify assist still reads IdentifyMatchController.correctTreasure. The current implementation must select by ItemData.GetTreasureRealValue instead of the private answer list.'
+    )
+}
+
+if ($sourceRegistersManagedUnityClickListener) {
+    $failures.Add(
+        'The plugin registers a managed Unity onClick listener. This game build crashes in DelegateSupport.ConvertDelegate; route custom button clicks through the patched Button.OnPointerClick method instead.'
+    )
+}
+
+$requiredInteropMembers = [ordered]@{
+    PlotController = @(
+        'ShowAuctionItem',
+        'HidePlotItem',
+        'FreshAuctionItem',
+        'GenerateAuctionItem',
+        'Update',
+        'plotPanel',
+        'plotItemGrid',
+        'tempPlotShop',
+        'nowEvent'
+    )
+    EventData = @('eventItemList', 'difficulty', 'randomSeed')
+    IdentifyMatchController = @(
+        'ShowIdentifyMatchUI',
+        'HideIdentifyMatchUI',
+        'SetNowChooseTreasure',
+        'identifyMatchUIPanel',
+        'sureButton'
+    )
+    ItemData = @('GetTreasureRealValue')
+}
+
+foreach ($typeName in $requiredInteropMembers.Keys) {
+    $typeInspection = & $inspectScript `
+        -AssemblyPath $InteropAssembly `
+        -TypeName $typeName `
+        -MemberPattern $requiredInteropMembers[$typeName] `
+        -SkipRestore 2>&1 | Out-String
+    $declaredMemberLines = @($typeInspection -split "`r?`n" | Where-Object {
+        $_ -match '^\s{2}(?:public|private|protected|internal)\s+'
+    })
+    foreach ($memberName in $requiredInteropMembers[$typeName]) {
+        $escapedMemberName = [regex]::Escape($memberName)
+        $memberPattern = "(?<![A-Za-z0-9_])$escapedMemberName(?![A-Za-z0-9_])"
+        if (-not ($declaredMemberLines | Where-Object { $_ -match $memberPattern } | Select-Object -First 1)) {
+            $failures.Add("Required interop capability is missing: $typeName.$memberName")
+        }
+    }
 }
 
 if (-not $SkipRuntimeLog) {
@@ -87,12 +144,7 @@ if (-not $SkipRuntimeLog) {
             $_ -match '\[Compatibility\].*(?::\s*|;\s*| is )(?:SKIPPED|PARTIAL|DEGRADED)\b'
         })
         foreach ($line in $degradedLines) {
-            $knownDisabledDegradation =
-                $line -match 'automatic highlight is DEGRADED' -and
-                $logText -match 'Treasure identify highlight starts OFF\.'
-            if (-not $knownDisabledDegradation) {
-                $failures.Add("Unexpected compatibility degradation: $($line.Trim())")
-            }
+            $failures.Add("Unexpected compatibility degradation: $($line.Trim())")
         }
 
         $requiredMarkers = @(
@@ -101,6 +153,8 @@ if (-not $SkipRuntimeLog) {
             'LongYin Horse Stamina Multiplier 1.0.1 loaded',
             'LongYin Skip Intro 1.0.1 loaded',
             '[Compatibility] Summary:',
+            '[Compatibility] Auction preview refresh: ENABLED',
+            '[Compatibility] Treasure identify assist: ENABLED',
             '[Compatibility] Hero tag database: ENABLED'
         )
         foreach ($marker in $requiredMarkers) {
@@ -128,6 +182,8 @@ Write-Host "Interop: $InteropAssembly"
 Write-Host "Plugin sources: $($PluginSource -join ', ')"
 Write-Host "Interop exposes heroTagDataBase: $interopHasHeroTagDatabase"
 Write-Host "Plugin has static heroTagDataBase reference: $sourceHasStaticHeroTagReference"
+Write-Host "Plugin reads private identify answer list: $sourceUsesPrivateIdentifyAnswer"
+Write-Host "Plugin registers managed Unity onClick listeners: $sourceRegistersManagedUnityClickListener"
 
 if ($failures.Count -gt 0) {
     foreach ($failure in $failures) {

@@ -192,6 +192,7 @@ $references = @(
     (Join-Path $interopDir "Assembly-CSharp.dll")
     (Join-Path $interopDir "Il2Cppmscorlib.dll")
     (Join-Path $interopDir "UnityEngine.CoreModule.dll")
+    (Join-Path $interopDir "UnityEngine.UIModule.dll")
     (Join-Path $interopDir "UnityEngine.UI.dll")
     (Join-Path $interopDir "UnityEngine.IMGUIModule.dll")
     (Join-Path $interopDir "UnityEngine.InputLegacyModule.dll")

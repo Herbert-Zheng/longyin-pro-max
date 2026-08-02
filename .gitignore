@@ -10,6 +10,7 @@ electron-app/node_modules/
 electron-app/dist/
 electron-app/release/
 electron-app/updater-dist/
+electron-app/user-data/
 mod-src/bin/
 mod-src/*/bin/
 mod-src/*/artifacts/

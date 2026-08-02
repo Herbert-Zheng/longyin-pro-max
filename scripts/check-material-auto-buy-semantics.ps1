@@ -103,6 +103,7 @@ function Require-ScopePattern {
 
 $clickRouterMethod = Get-CSharpMethodText 'OverlayButtonOnPointerClickPrefix'
 $autoBuyClickMethod = Get-CSharpMethodText 'OnMaterialAutoBuyButtonClicked'
+$updateControlsMethod = Get-CSharpMethodText 'UpdateMaterialAutoBuyUiState'
 $filterMaterialsMethod = Get-CSharpMethodText 'TryAddFilteredMaterialsToTradeCart'
 $matchingThresholdsMethod = Get-CSharpMethodText 'IsMaterialMatchingThresholds'
 $activeShopMethod = Get-CSharpMethodText 'TryGetActiveShopTradeUi'
@@ -117,6 +118,15 @@ $findButtonTemplateMethod = Get-CSharpMethodText 'FindUiButtonTemplate'
 $insideOverlayRootMethod = Get-CSharpMethodText 'IsButtonInsideKnownOverlayRoot'
 $filterOptionNameMethod = Get-CSharpMethodText 'IsMaterialFilterOptionButtonName'
 $filterOptionParserMethod = Get-CSharpMethodText 'TryParseMaterialFilterOptionButton'
+$toggleDropdownMethod = Get-CSharpMethodText 'ToggleMaterialFilterDropdown'
+
+Require-ScopePattern $source 'Config\.Bind\s*\(\s*"Commerce"\s*,\s*"MaterialAutoBuyEnabled"\s*,\s*true\b' 'Material auto-buy must have an enabled-by-default Commerce feature switch.'
+Require-ScopePattern $clickRouterMethod 'isMaterialAutoBuy[\s\S]*?_materialAutoBuyEnabled\.Value[\s\S]*?OnMaterialAutoBuyButtonClicked' 'The shared overlay click router must gate material sweep dispatch behind MaterialAutoBuyEnabled.'
+Require-ScopePattern $updateControlsMethod '!_materialAutoBuyEnabled\.Value[\s\S]*?HideMaterialAutoBuyUi\(\)' 'Disabling material auto-buy must actively hide any existing sweep and filter controls.'
+Require-ScopeText $ensureControlsMethod '!_materialAutoBuyEnabled.Value' 'Disabled material auto-buy must not create sweep or filter controls.'
+Require-ScopePattern $toggleDropdownMethod '!_materialAutoBuyEnabled\.Value[\s\S]*?HideMaterialAutoBuyUi\(\)' 'The material filter dropdown action must reject stale clicks after the feature is disabled.'
+Require-ScopePattern $setFilterLevelMethod '!_materialAutoBuyEnabled\.Value[\s\S]*?HideMaterialAutoBuyUi\(\)[\s\S]*?return;' 'Material filter option actions must reject stale clicks after the feature is disabled.'
+Require-ScopePattern $autoBuyClickMethod '!_materialAutoBuyEnabled\.Value[\s\S]*?HideMaterialAutoBuyUi\(\)[\s\S]*?return;' 'The material sweep action must have a final MaterialAutoBuyEnabled gate.'
 
 foreach ($controlName in @(
     'MaterialAutoBuyButtonName',

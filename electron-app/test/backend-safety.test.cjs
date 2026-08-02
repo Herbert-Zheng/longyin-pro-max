@@ -4,7 +4,12 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { inspectGameHealth, readCustomTalentPack, readVisibleSettings } = require('../dist/main/shared/config.js');
+const {
+  inspectGameHealth,
+  readCustomTalentPack,
+  readVisibleSettings,
+  saveVisibleSettings
+} = require('../dist/main/shared/config.js');
 const { installOwnedPayload, uninstallOwnedPayload } = require('../dist/main/shared/payload.js');
 
 async function createWorkspace() {
@@ -194,6 +199,191 @@ test('reading visible settings does not create or modify game files', async (t) 
 
   assert.equal(settings.lockStamina, true);
   assert.deepEqual(after, before);
+});
+
+test('new commerce and assist settings have safe defaults when configuration is absent', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const settings = await readVisibleSettings(gameRoot);
+
+  assert.deepEqual(
+    {
+      treasureTradeHelperEnabled: settings.treasureTradeHelperEnabled,
+      materialAutoBuyEnabled: settings.materialAutoBuyEnabled,
+      materialPurchaseMinRareLv: settings.materialPurchaseMinRareLv,
+      materialPurchaseMinItemLv: settings.materialPurchaseMinItemLv,
+      shopOwnershipEnabled: settings.shopOwnershipEnabled,
+      auctionPreviewRefreshEnabled: settings.auctionPreviewRefreshEnabled,
+      auctionPreviewRefreshHotkey: settings.auctionPreviewRefreshHotkey,
+      auctionPreviewRefreshRequireAlt: settings.auctionPreviewRefreshRequireAlt,
+      treasureIdentifyBestValueAssistEnabled: settings.treasureIdentifyBestValueAssistEnabled,
+      treasureIdentifyBestValueHotkey: settings.treasureIdentifyBestValueHotkey,
+      treasureIdentifyBestValueRequireAlt: settings.treasureIdentifyBestValueRequireAlt
+    },
+    {
+      treasureTradeHelperEnabled: true,
+      materialAutoBuyEnabled: true,
+      materialPurchaseMinRareLv: 0,
+      materialPurchaseMinItemLv: 0,
+      shopOwnershipEnabled: true,
+      auctionPreviewRefreshEnabled: true,
+      auctionPreviewRefreshHotkey: 'R',
+      auctionPreviewRefreshRequireAlt: true,
+      treasureIdentifyBestValueAssistEnabled: true,
+      treasureIdentifyBestValueHotkey: 'F',
+      treasureIdentifyBestValueRequireAlt: true
+    }
+  );
+});
+
+test('new commerce and assist settings are parsed from their owning INI sections', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await writeFile(
+    gameRoot,
+    'BepInEx/config/codex.longyin.staminalock.cfg',
+    [
+      '[WrongSection]',
+      'TreasureTradeHelperEnabled = true',
+      'MaterialAutoBuyEnabled = true',
+      'MaterialPurchaseMinRareLv = 1',
+      'MaterialPurchaseMinItemLv = 1',
+      'ShopOwnershipEnabled = true',
+      'PreviewRefreshEnabled = true',
+      'PreviewRefreshHotkey = WRONG_AUCTION_KEY',
+      'PreviewRefreshRequireAlt = true',
+      'BestValueAssistEnabled = true',
+      'BestValueHotkey = WRONG_IDENTIFY_KEY',
+      'BestValueRequireAlt = true',
+      '',
+      '[Commerce]',
+      'TreasureTradeHelperEnabled = false',
+      'MaterialAutoBuyEnabled = false',
+      'MaterialPurchaseMinRareLv = 4',
+      'MaterialPurchaseMinItemLv = 3',
+      'ShopOwnershipEnabled = false',
+      '',
+      '[Auction]',
+      'PreviewRefreshEnabled = false',
+      'PreviewRefreshHotkey = T',
+      'PreviewRefreshRequireAlt = false',
+      '',
+      '[TreasureIdentify]',
+      'BestValueAssistEnabled = false',
+      'BestValueHotkey = G',
+      'BestValueRequireAlt = false',
+      ''
+    ].join('\r\n')
+  );
+
+  const settings = await readVisibleSettings(gameRoot);
+
+  assert.deepEqual(
+    {
+      treasureTradeHelperEnabled: settings.treasureTradeHelperEnabled,
+      materialAutoBuyEnabled: settings.materialAutoBuyEnabled,
+      materialPurchaseMinRareLv: settings.materialPurchaseMinRareLv,
+      materialPurchaseMinItemLv: settings.materialPurchaseMinItemLv,
+      shopOwnershipEnabled: settings.shopOwnershipEnabled,
+      auctionPreviewRefreshEnabled: settings.auctionPreviewRefreshEnabled,
+      auctionPreviewRefreshHotkey: settings.auctionPreviewRefreshHotkey,
+      auctionPreviewRefreshRequireAlt: settings.auctionPreviewRefreshRequireAlt,
+      treasureIdentifyBestValueAssistEnabled: settings.treasureIdentifyBestValueAssistEnabled,
+      treasureIdentifyBestValueHotkey: settings.treasureIdentifyBestValueHotkey,
+      treasureIdentifyBestValueRequireAlt: settings.treasureIdentifyBestValueRequireAlt
+    },
+    {
+      treasureTradeHelperEnabled: false,
+      materialAutoBuyEnabled: false,
+      materialPurchaseMinRareLv: 4,
+      materialPurchaseMinItemLv: 3,
+      shopOwnershipEnabled: false,
+      auctionPreviewRefreshEnabled: false,
+      auctionPreviewRefreshHotkey: 'T',
+      auctionPreviewRefreshRequireAlt: false,
+      treasureIdentifyBestValueAssistEnabled: false,
+      treasureIdentifyBestValueHotkey: 'G',
+      treasureIdentifyBestValueRequireAlt: false
+    }
+  );
+});
+
+test('saving new commerce and assist settings upserts their sections without discarding unrelated values', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[WrongSection]',
+      'TreasureTradeHelperEnabled = decoy-trade',
+      'MaterialAutoBuyEnabled = decoy-material',
+      'MaterialPurchaseMinRareLv = 91',
+      'MaterialPurchaseMinItemLv = 92',
+      'ShopOwnershipEnabled = decoy-shop',
+      'PreviewRefreshEnabled = decoy-auction',
+      'PreviewRefreshHotkey = DECOY_AUCTION_KEY',
+      'PreviewRefreshRequireAlt = decoy-auction-alt',
+      'BestValueAssistEnabled = decoy-identify',
+      'BestValueHotkey = DECOY_IDENTIFY_KEY',
+      'BestValueRequireAlt = decoy-identify-alt',
+      '',
+      '[Commerce]',
+      'MerchantCarryCash = 43210',
+      'UnrelatedFutureSetting = keep-me',
+      ''
+    ].join('\r\n')
+  );
+  const current = await readVisibleSettings(gameRoot);
+
+  const saved = await saveVisibleSettings(gameRoot, {
+    ...current,
+    treasureTradeHelperEnabled: false,
+    materialAutoBuyEnabled: false,
+    materialPurchaseMinRareLv: 5,
+    materialPurchaseMinItemLv: 2,
+    shopOwnershipEnabled: false,
+    auctionPreviewRefreshEnabled: false,
+    auctionPreviewRefreshHotkey: 'T',
+    auctionPreviewRefreshRequireAlt: false,
+    treasureIdentifyBestValueAssistEnabled: false,
+    treasureIdentifyBestValueHotkey: 'G',
+    treasureIdentifyBestValueRequireAlt: false
+  });
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.equal(saved.treasureTradeHelperEnabled, false);
+  assert.equal(saved.materialAutoBuyEnabled, false);
+  assert.equal(saved.materialPurchaseMinRareLv, 5);
+  assert.equal(saved.materialPurchaseMinItemLv, 2);
+  assert.equal(saved.shopOwnershipEnabled, false);
+  assert.equal(saved.auctionPreviewRefreshEnabled, false);
+  assert.equal(saved.auctionPreviewRefreshHotkey, 'T');
+  assert.equal(saved.auctionPreviewRefreshRequireAlt, false);
+  assert.equal(saved.treasureIdentifyBestValueAssistEnabled, false);
+  assert.equal(saved.treasureIdentifyBestValueHotkey, 'G');
+  assert.equal(saved.treasureIdentifyBestValueRequireAlt, false);
+  assert.match(text, /^UnrelatedFutureSetting = keep-me$/m);
+  assert.match(text, /^MerchantCarryCash = 43210$/m);
+  assert.match(text, /^TreasureTradeHelperEnabled = false$/m);
+  assert.match(text, /^MaterialAutoBuyEnabled = false$/m);
+  assert.match(text, /^MaterialPurchaseMinRareLv = 5$/m);
+  assert.match(text, /^MaterialPurchaseMinItemLv = 2$/m);
+  assert.match(text, /^ShopOwnershipEnabled = false$/m);
+  assert.match(text, /^\[Auction\]$/m);
+  assert.match(text, /^PreviewRefreshEnabled = false$/m);
+  assert.match(text, /^PreviewRefreshHotkey = T$/m);
+  assert.match(text, /^PreviewRefreshRequireAlt = false$/m);
+  assert.match(text, /^\[TreasureIdentify\]$/m);
+  assert.match(text, /^BestValueAssistEnabled = false$/m);
+  assert.match(text, /^BestValueHotkey = G$/m);
+  assert.match(text, /^BestValueRequireAlt = false$/m);
+  assert.match(
+    text,
+    /\[WrongSection\]\r?\nTreasureTradeHelperEnabled = decoy-trade\r?\nMaterialAutoBuyEnabled = decoy-material\r?\nMaterialPurchaseMinRareLv = 91\r?\nMaterialPurchaseMinItemLv = 92\r?\nShopOwnershipEnabled = decoy-shop\r?\nPreviewRefreshEnabled = decoy-auction\r?\nPreviewRefreshHotkey = DECOY_AUCTION_KEY\r?\nPreviewRefreshRequireAlt = decoy-auction-alt\r?\nBestValueAssistEnabled = decoy-identify\r?\nBestValueHotkey = DECOY_IDENTIFY_KEY\r?\nBestValueRequireAlt = decoy-identify-alt/
+  );
 });
 
 test('reading custom talents returns an empty pack without creating its JSON file', async (t) => {

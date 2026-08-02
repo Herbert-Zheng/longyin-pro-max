@@ -65,3 +65,65 @@ test('OTA completion is only emitted after the restarted app consumes the update
   assert.match(main, /emitUpdateProgress\('complete'/);
   assert.doesNotMatch(main, /更新包已准备完成[^\n]+emitUpdateProgress\('complete'/);
 });
+
+test('renderer exposes controls and shortcut hints for the new commerce and assist settings', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+  const controlBindings = [
+    'treasureTradeHelperEnabled',
+    'materialAutoBuyEnabled',
+    'materialPurchaseMinRareLv',
+    'materialPurchaseMinItemLv',
+    'shopOwnershipEnabled',
+    'auctionPreviewRefreshEnabled',
+    'auctionPreviewRefreshHotkey',
+    'auctionPreviewRefreshRequireAlt',
+    'treasureIdentifyBestValueAssistEnabled',
+    'treasureIdentifyBestValueHotkey',
+    'treasureIdentifyBestValueRequireAlt'
+  ];
+
+  for (const binding of controlBindings) {
+    assert.match(
+      renderer,
+      new RegExp(
+        `value=\\{settings\\.${binding}\\}[\\s\\S]{0,180}` +
+        `onChange=\\{\\(value\\) => updateSetting\\('${binding}', value\\)\\}`
+      ),
+      `missing value/onChange wiring for ${binding}`
+    );
+  }
+
+  assert.match(
+    renderer,
+    /label="扫货最低品级"[\s\S]{0,240}value=\{settings\.materialPurchaseMinRareLv\}[\s\S]{0,240}min=\{0\}[\s\S]{0,80}max=\{5\}/
+  );
+  assert.match(
+    renderer,
+    /label="扫货最低等级"[\s\S]{0,240}value=\{settings\.materialPurchaseMinItemLv\}[\s\S]{0,240}min=\{0\}[\s\S]{0,80}max=\{5\}/
+  );
+
+  for (const label of [
+    '显示珍宝交易估价',
+    '启用材料一键扫货',
+    '扫货最低品级',
+    '扫货最低等级',
+    '启用店铺产业与买断',
+    '启用拍卖预览免费刷新',
+    '拍卖刷新主键',
+    '拍卖刷新需要按住 Alt',
+    '启用鉴宝最高鉴定价辅助',
+    '最高估值选择主键',
+    '最高估值选择需要按住 Alt'
+  ]) {
+    assert.match(renderer, new RegExp(`label="${label}"`), `missing independent label: ${label}`);
+  }
+
+  assert.match(renderer, /hint="在出售珍宝的商店中显示当前转售估价与技能影响。"/);
+  assert.match(renderer, /hint="在商店内显示材料扫货按钮和筛选菜单；只批量加入购物车，仍需手动结账。"/);
+  assert.match(renderer, /hint="0 表示不限；1–5 表示只加入达到该品级的材料。"/);
+  assert.match(renderer, /hint="0 表示不限；1–5 表示只加入达到该等级的材料。"/);
+  assert.match(renderer, /hint="在商店界面显示产业信息与买断按钮；关闭后隐藏相关入口。"/);
+  assert.match(renderer, /hint="在拍卖展品预览窗口增加不限次数的免费刷新按钮。"/);
+  assert.match(renderer, /hint="按鼠标悬浮括号内的玩家鉴定价选择最高项；最终确认仍需手动完成。"/);
+  assert.equal((renderer.match(/hint="开启时快捷键为 Alt \+ 主键。"/g) ?? []).length >= 2, true);
+});

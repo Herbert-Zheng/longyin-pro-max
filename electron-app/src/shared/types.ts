@@ -268,7 +268,18 @@ export interface VisibleSettings {
   carryWeightCap: number;
   ignoreCarryWeight: boolean;
   merchantCarryCash: number;
+  treasureTradeHelperEnabled: boolean;
   treasureAutoTradeEnabled: boolean;
+  materialAutoBuyEnabled: boolean;
+  materialPurchaseMinRareLv: number;
+  materialPurchaseMinItemLv: number;
+  shopOwnershipEnabled: boolean;
+  auctionPreviewRefreshEnabled: boolean;
+  auctionPreviewRefreshHotkey: string;
+  auctionPreviewRefreshRequireAlt: boolean;
+  treasureIdentifyBestValueAssistEnabled: boolean;
+  treasureIdentifyBestValueHotkey: string;
+  treasureIdentifyBestValueRequireAlt: boolean;
   luckyHitChancePercent: number;
   extraRelationshipGainChancePercent: number;
   teamAutoFavorEnabled: boolean;

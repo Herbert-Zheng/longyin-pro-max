@@ -101,6 +101,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<int> _merchantCarryCash = null!;
     private static ConfigEntry<bool> _treasureTradeHelperEnabled = null!;
     private static ConfigEntry<bool> _treasureAutoTradeEnabled = null!;
+    private static ConfigEntry<bool> _materialAutoBuyEnabled = null!;
+    private static ConfigEntry<bool> _shopOwnershipEnabled = null!;
     private static ConfigEntry<int> _materialPurchaseMinRareLv = null!;
     private static ConfigEntry<int> _materialPurchaseMinItemLv = null!;
     private static ConfigEntry<bool> _auctionPreviewRefreshEnabled = null!;
@@ -521,6 +523,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _merchantCarryCash = Config.Bind("Commerce", "MerchantCarryCash", 100000, "Minimum cash carried by NPC shop merchants while a Shop trade window is open. Set to 0 to disable.");
         _treasureTradeHelperEnabled = Config.Bind("Commerce", "TreasureTradeHelperEnabled", true, "Shows current treasure resale estimates and skill factors inside trade shops that list treasure items.");
         _treasureAutoTradeEnabled = Config.Bind("Commerce", "TreasureAutoTradeEnabled", true, "Automatically adds unidentified treasures estimated profitable from the player-appraised parenthesized value when a trade shop opens.");
+        _materialAutoBuyEnabled = Config.Bind("Commerce", "MaterialAutoBuyEnabled", true, "Adds the in-shop material sweep button and its rarity and quality filters.");
+        _shopOwnershipEnabled = Config.Bind("Commerce", "ShopOwnershipEnabled", true, "Shows the shop ownership overlay and enables buying out the current shop.");
         _materialPurchaseMinRareLv = Config.Bind("Commerce", "MaterialPurchaseMinRareLv", 0, "Minimum material rarity tier for the in-shop material sweep button. Values are clamped to 0-5.");
         _materialPurchaseMinItemLv = Config.Bind("Commerce", "MaterialPurchaseMinItemLv", 0, "Minimum material item-quality tier for the in-shop material sweep button. Values are clamped to 0-5.");
         _auctionPreviewRefreshEnabled = Config.Bind("Auction", "PreviewRefreshEnabled", true, "Adds a free unlimited refresh button to the auction exhibit preview window.");
@@ -1870,23 +1874,38 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             }
             else if (isIdentifyAssist)
             {
-                TrySelectHighestValueIdentifyTreasure(_identifyMatchController, "button");
+                if (_treasureIdentifyBestValueAssistEnabled.Value)
+                {
+                    TrySelectHighestValueIdentifyTreasure(_identifyMatchController, "button");
+                }
             }
             else if (isShopOwnershipBuy)
             {
-                OnShopOwnershipBuyButtonClicked();
+                if (_shopOwnershipEnabled.Value)
+                {
+                    OnShopOwnershipBuyButtonClicked();
+                }
             }
             else if (isMaterialAutoBuy)
             {
-                OnMaterialAutoBuyButtonClicked();
+                if (_materialAutoBuyEnabled.Value)
+                {
+                    OnMaterialAutoBuyButtonClicked();
+                }
             }
             else if (isMaterialFilterDropdown)
             {
-                ToggleMaterialFilterDropdown();
+                if (_materialAutoBuyEnabled.Value)
+                {
+                    ToggleMaterialFilterDropdown();
+                }
             }
             else
             {
-                SetMaterialFilterLevel(materialFilterIsRare, materialFilterLevel);
+                if (_materialAutoBuyEnabled.Value)
+                {
+                    SetMaterialFilterLevel(materialFilterIsRare, materialFilterLevel);
+                }
             }
         }
 
@@ -2882,7 +2901,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static bool TrySelectHighestValueIdentifyTreasure(IdentifyMatchController? controller, string source)
     {
-        if (controller?.identifyMatchUIPanel == null || !IsIdentifyMatchVisible())
+        if (!_treasureIdentifyBestValueAssistEnabled.Value ||
+            controller?.identifyMatchUIPanel == null ||
+            !IsIdentifyMatchVisible())
         {
             return false;
         }
@@ -3817,8 +3838,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void UpdateMaterialAutoBuyUiState()
     {
-        if (!TryGetActiveShopTradeUi(out var tradeUi))
+        if (!_materialAutoBuyEnabled.Value || !TryGetActiveShopTradeUi(out var tradeUi))
         {
+            _materialFilterDropdownOpen = false;
             HideMaterialAutoBuyUi();
             return;
         }
@@ -3852,7 +3874,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void EnsureMaterialAutoBuyControls(TradeUIController tradeUi)
     {
-        if (_materialAutoBuyControlCreationFailed)
+        if (!_materialAutoBuyEnabled.Value || _materialAutoBuyControlCreationFailed)
         {
             return;
         }
@@ -4169,7 +4191,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void ToggleMaterialFilterDropdown()
     {
-        if (!TryGetActiveShopTradeUi(out var tradeUi))
+        if (!_materialAutoBuyEnabled.Value || !TryGetActiveShopTradeUi(out var tradeUi))
         {
             _materialFilterDropdownOpen = false;
             HideMaterialAutoBuyUi();
@@ -4188,6 +4210,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void SetMaterialFilterLevel(bool isRareLevel, int level)
     {
+        if (!_materialAutoBuyEnabled.Value)
+        {
+            _materialFilterDropdownOpen = false;
+            HideMaterialAutoBuyUi();
+            return;
+        }
+
         var clampedLevel = ClampMaterialFilterLevel(level);
         if (isRareLevel)
         {
@@ -4213,6 +4242,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void OnMaterialAutoBuyButtonClicked()
     {
+        if (!_materialAutoBuyEnabled.Value)
+        {
+            _materialFilterDropdownOpen = false;
+            HideMaterialAutoBuyUi();
+            return;
+        }
+
         if (_materialAutoBuyBusy)
         {
             return;
@@ -4371,7 +4407,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void UpdateShopOwnershipUiState()
     {
-        if (!TryResolveCurrentShopOwnershipContext(out var context))
+        if (!_shopOwnershipEnabled.Value || !TryResolveCurrentShopOwnershipContext(out var context))
         {
             HideShopOwnershipOverlay();
             return;
@@ -4515,7 +4551,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void EnsureShopOwnershipOverlay(TradeUIController tradeUi)
     {
-        if (tradeUi == null)
+        if (!_shopOwnershipEnabled.Value || tradeUi == null)
         {
             return;
         }
@@ -4635,6 +4671,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void OnShopOwnershipBuyButtonClicked()
     {
+        if (!_shopOwnershipEnabled.Value)
+        {
+            HideShopOwnershipOverlay();
+            return;
+        }
+
         var bought = TryBuyCurrentShop(expectedShopKey: null, out var message, out var tradeUi);
         PushPlayerLog(message);
 
@@ -4655,6 +4697,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool TryBuyCurrentShop(string? expectedShopKey, out string message, out TradeUIController? tradeUi)
     {
         tradeUi = null;
+        if (!_shopOwnershipEnabled.Value)
+        {
+            message = "产业试验：店铺买断功能当前已关闭。";
+            SetExternalOverlayStatusMessage(message);
+            HideShopOwnershipOverlay();
+            return false;
+        }
+
         if (!TryResolveCurrentShopOwnershipContext(out var context))
         {
             message = "产业试验：当前无法识别店铺，买断失败。";
@@ -6840,7 +6890,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             var player = TryGetPlayerHero();
             var playerMoney = TryGetHeroMoney(player);
-            var inShop = TryResolveCurrentShopOwnershipContext(out var context);
+            ShopOwnershipContext context = null!;
+            var inShop = _shopOwnershipEnabled.Value &&
+                TryResolveCurrentShopOwnershipContext(out context);
             OwnedShopRecord? ownedRecord = null;
             var isOwned = inShop && _ownedShops.TryGetValue(context.ShopKey, out ownedRecord);
             var canBuy = inShop && !isOwned && playerMoney.GetValueOrDefault() >= ShopOwnershipBuyPrice;

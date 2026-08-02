@@ -71,7 +71,18 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   carryWeightCap: 100000,
   ignoreCarryWeight: false,
   merchantCarryCash: 100000,
+  treasureTradeHelperEnabled: true,
   treasureAutoTradeEnabled: true,
+  materialAutoBuyEnabled: true,
+  materialPurchaseMinRareLv: 0,
+  materialPurchaseMinItemLv: 0,
+  shopOwnershipEnabled: true,
+  auctionPreviewRefreshEnabled: true,
+  auctionPreviewRefreshHotkey: 'R',
+  auctionPreviewRefreshRequireAlt: true,
+  treasureIdentifyBestValueAssistEnabled: true,
+  treasureIdentifyBestValueHotkey: 'F',
+  treasureIdentifyBestValueRequireAlt: true,
   luckyHitChancePercent: 0,
   extraRelationshipGainChancePercent: 0,
   teamAutoFavorEnabled: true,
@@ -627,17 +638,22 @@ IgnoreCarryWeight = ${boolText(settings.ignoreCarryWeight)}
 
 [Commerce]
 MerchantCarryCash = ${settings.merchantCarryCash}
+TreasureTradeHelperEnabled = ${boolText(settings.treasureTradeHelperEnabled)}
 TreasureAutoTradeEnabled = ${boolText(settings.treasureAutoTradeEnabled)}
+MaterialAutoBuyEnabled = ${boolText(settings.materialAutoBuyEnabled)}
+MaterialPurchaseMinRareLv = ${settings.materialPurchaseMinRareLv}
+MaterialPurchaseMinItemLv = ${settings.materialPurchaseMinItemLv}
+ShopOwnershipEnabled = ${boolText(settings.shopOwnershipEnabled)}
 
 [Auction]
-PreviewRefreshEnabled = true
-PreviewRefreshHotkey = R
-PreviewRefreshRequireAlt = true
+PreviewRefreshEnabled = ${boolText(settings.auctionPreviewRefreshEnabled)}
+PreviewRefreshHotkey = ${settings.auctionPreviewRefreshHotkey}
+PreviewRefreshRequireAlt = ${boolText(settings.auctionPreviewRefreshRequireAlt)}
 
 [TreasureIdentify]
-BestValueAssistEnabled = true
-BestValueHotkey = F
-BestValueRequireAlt = true
+BestValueAssistEnabled = ${boolText(settings.treasureIdentifyBestValueAssistEnabled)}
+BestValueHotkey = ${settings.treasureIdentifyBestValueHotkey}
+BestValueRequireAlt = ${boolText(settings.treasureIdentifyBestValueRequireAlt)}
 
 [MoneyLuck]
 LuckyHitChancePercent = ${settings.luckyHitChancePercent}
@@ -849,7 +865,24 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     carryWeightCap: clamp(input.carryWeightCap, 0, 999999999),
     ignoreCarryWeight: input.ignoreCarryWeight,
     merchantCarryCash: Math.round(clamp(input.merchantCarryCash, 0, 999999999)),
+    treasureTradeHelperEnabled: input.treasureTradeHelperEnabled,
     treasureAutoTradeEnabled: input.treasureAutoTradeEnabled,
+    materialAutoBuyEnabled: input.materialAutoBuyEnabled,
+    materialPurchaseMinRareLv: Math.round(clamp(input.materialPurchaseMinRareLv, 0, 5)),
+    materialPurchaseMinItemLv: Math.round(clamp(input.materialPurchaseMinItemLv, 0, 5)),
+    shopOwnershipEnabled: input.shopOwnershipEnabled,
+    auctionPreviewRefreshEnabled: input.auctionPreviewRefreshEnabled,
+    auctionPreviewRefreshHotkey: normalizeHotkey(
+      input.auctionPreviewRefreshHotkey,
+      DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshHotkey
+    ),
+    auctionPreviewRefreshRequireAlt: input.auctionPreviewRefreshRequireAlt,
+    treasureIdentifyBestValueAssistEnabled: input.treasureIdentifyBestValueAssistEnabled,
+    treasureIdentifyBestValueHotkey: normalizeHotkey(
+      input.treasureIdentifyBestValueHotkey,
+      DEFAULT_VISIBLE_SETTINGS.treasureIdentifyBestValueHotkey
+    ),
+    treasureIdentifyBestValueRequireAlt: input.treasureIdentifyBestValueRequireAlt,
     luckyHitChancePercent: Math.round(clamp(input.luckyHitChancePercent, 0, 100)),
     extraRelationshipGainChancePercent: Math.round(clamp(input.extraRelationshipGainChancePercent, 0, 100)),
     teamAutoFavorEnabled: input.teamAutoFavorEnabled,
@@ -892,6 +925,9 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
   const dailySkillInsightSection = getIniSectionBody(text, 'DailySkillInsight');
   const relationshipSection = getIniSectionBody(text, 'Relationship');
   const systemsSection = getIniSectionBody(text, 'Systems') ?? getIniSectionBody(text, 'Time');
+  const commerceSection = getIniSectionBody(text, 'Commerce');
+  const auctionSection = getIniSectionBody(text, 'Auction');
+  const treasureIdentifySection = getIniSectionBody(text, 'TreasureIdentify');
 
   return {
     lockStamina: readBool(text, 'LockStamina', DEFAULT_VISIBLE_SETTINGS.lockStamina),
@@ -910,11 +946,66 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
     horseStaminaMultiplier: DEFAULT_VISIBLE_SETTINGS.horseStaminaMultiplier,
     carryWeightCap: readFloat(text, 'CarryWeightCap', DEFAULT_VISIBLE_SETTINGS.carryWeightCap),
     ignoreCarryWeight: readBool(text, 'IgnoreCarryWeight', DEFAULT_VISIBLE_SETTINGS.ignoreCarryWeight),
-    merchantCarryCash: readInt(text, 'MerchantCarryCash', DEFAULT_VISIBLE_SETTINGS.merchantCarryCash),
+    merchantCarryCash: readInt(commerceSection, 'MerchantCarryCash', DEFAULT_VISIBLE_SETTINGS.merchantCarryCash),
+    treasureTradeHelperEnabled: readBool(
+      commerceSection,
+      'TreasureTradeHelperEnabled',
+      DEFAULT_VISIBLE_SETTINGS.treasureTradeHelperEnabled
+    ),
     treasureAutoTradeEnabled: readBool(
-      text,
+      commerceSection,
       'TreasureAutoTradeEnabled',
       DEFAULT_VISIBLE_SETTINGS.treasureAutoTradeEnabled
+    ),
+    materialAutoBuyEnabled: readBool(
+      commerceSection,
+      'MaterialAutoBuyEnabled',
+      DEFAULT_VISIBLE_SETTINGS.materialAutoBuyEnabled
+    ),
+    materialPurchaseMinRareLv: readInt(
+      commerceSection,
+      'MaterialPurchaseMinRareLv',
+      DEFAULT_VISIBLE_SETTINGS.materialPurchaseMinRareLv
+    ),
+    materialPurchaseMinItemLv: readInt(
+      commerceSection,
+      'MaterialPurchaseMinItemLv',
+      DEFAULT_VISIBLE_SETTINGS.materialPurchaseMinItemLv
+    ),
+    shopOwnershipEnabled: readBool(
+      commerceSection,
+      'ShopOwnershipEnabled',
+      DEFAULT_VISIBLE_SETTINGS.shopOwnershipEnabled
+    ),
+    auctionPreviewRefreshEnabled: readBool(
+      auctionSection,
+      'PreviewRefreshEnabled',
+      DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshEnabled
+    ),
+    auctionPreviewRefreshHotkey: readString(
+      auctionSection,
+      'PreviewRefreshHotkey',
+      DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshHotkey
+    ),
+    auctionPreviewRefreshRequireAlt: readBool(
+      auctionSection,
+      'PreviewRefreshRequireAlt',
+      DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshRequireAlt
+    ),
+    treasureIdentifyBestValueAssistEnabled: readBool(
+      treasureIdentifySection,
+      'BestValueAssistEnabled',
+      DEFAULT_VISIBLE_SETTINGS.treasureIdentifyBestValueAssistEnabled
+    ),
+    treasureIdentifyBestValueHotkey: readString(
+      treasureIdentifySection,
+      'BestValueHotkey',
+      DEFAULT_VISIBLE_SETTINGS.treasureIdentifyBestValueHotkey
+    ),
+    treasureIdentifyBestValueRequireAlt: readBool(
+      treasureIdentifySection,
+      'BestValueRequireAlt',
+      DEFAULT_VISIBLE_SETTINGS.treasureIdentifyBestValueRequireAlt
     ),
     luckyHitChancePercent: readInt(text, 'LuckyHitChancePercent', DEFAULT_VISIBLE_SETTINGS.luckyHitChancePercent),
     extraRelationshipGainChancePercent: readInt(
@@ -1298,8 +1389,74 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   nextMain = upsertIniValue(nextMain, 'LockTurboStamina', boolText(normalized.lockHorseTurboStamina));
   nextMain = upsertIniValue(nextMain, 'CarryWeightCap', formatFloat(normalized.carryWeightCap));
   nextMain = upsertIniValue(nextMain, 'IgnoreCarryWeight', boolText(normalized.ignoreCarryWeight));
-  nextMain = upsertIniValue(nextMain, 'MerchantCarryCash', String(normalized.merchantCarryCash));
-  nextMain = upsertIniValue(nextMain, 'TreasureAutoTradeEnabled', boolText(normalized.treasureAutoTradeEnabled));
+  nextMain = upsertIniSectionValue(nextMain, 'Commerce', 'MerchantCarryCash', String(normalized.merchantCarryCash));
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Commerce',
+    'TreasureTradeHelperEnabled',
+    boolText(normalized.treasureTradeHelperEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Commerce',
+    'TreasureAutoTradeEnabled',
+    boolText(normalized.treasureAutoTradeEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Commerce',
+    'MaterialAutoBuyEnabled',
+    boolText(normalized.materialAutoBuyEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Commerce',
+    'MaterialPurchaseMinRareLv',
+    String(normalized.materialPurchaseMinRareLv)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Commerce',
+    'MaterialPurchaseMinItemLv',
+    String(normalized.materialPurchaseMinItemLv)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Commerce',
+    'ShopOwnershipEnabled',
+    boolText(normalized.shopOwnershipEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Auction',
+    'PreviewRefreshEnabled',
+    boolText(normalized.auctionPreviewRefreshEnabled)
+  );
+  nextMain = upsertIniSectionValue(nextMain, 'Auction', 'PreviewRefreshHotkey', normalized.auctionPreviewRefreshHotkey);
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Auction',
+    'PreviewRefreshRequireAlt',
+    boolText(normalized.auctionPreviewRefreshRequireAlt)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'TreasureIdentify',
+    'BestValueAssistEnabled',
+    boolText(normalized.treasureIdentifyBestValueAssistEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'TreasureIdentify',
+    'BestValueHotkey',
+    normalized.treasureIdentifyBestValueHotkey
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'TreasureIdentify',
+    'BestValueRequireAlt',
+    boolText(normalized.treasureIdentifyBestValueRequireAlt)
+  );
   nextMain = upsertIniSectionValue(nextMain, 'MoneyLuck', 'LuckyHitChancePercent', String(normalized.luckyHitChancePercent));
   nextMain = removeIniSectionValue(nextMain, 'Commerce', 'LuckyHitChancePercent');
   nextMain = upsertIniSectionValue(

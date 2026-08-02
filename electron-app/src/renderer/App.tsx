@@ -1701,10 +1701,46 @@ export function App() {
                       step={1000}
                     />
                     <CheckboxField
+                      label="显示珍宝交易估价"
+                      value={settings.treasureTradeHelperEnabled}
+                      onChange={(value) => updateSetting('treasureTradeHelperEnabled', value)}
+                      hint="在出售珍宝的商店中显示当前转售估价与技能影响。"
+                    />
+                    <CheckboxField
                       label="珍宝自动加入购物车"
                       value={settings.treasureAutoTradeEnabled}
                       onChange={(value) => updateSetting('treasureAutoTradeEnabled', value)}
                       hint="进入珍宝铺时，自动把预估有利润的未鉴定珍宝加入购物车；不会替你结账。"
+                    />
+                    <CheckboxField
+                      label="启用材料一键扫货"
+                      value={settings.materialAutoBuyEnabled}
+                      onChange={(value) => updateSetting('materialAutoBuyEnabled', value)}
+                      hint="在商店内显示材料扫货按钮和筛选菜单；只批量加入购物车，仍需手动结账。"
+                    />
+                    <NumberField
+                      label="扫货最低品级"
+                      value={settings.materialPurchaseMinRareLv}
+                      onChange={(value) => updateSetting('materialPurchaseMinRareLv', value)}
+                      min={0}
+                      max={5}
+                      step={1}
+                      hint="0 表示不限；1–5 表示只加入达到该品级的材料。"
+                    />
+                    <NumberField
+                      label="扫货最低等级"
+                      value={settings.materialPurchaseMinItemLv}
+                      onChange={(value) => updateSetting('materialPurchaseMinItemLv', value)}
+                      min={0}
+                      max={5}
+                      step={1}
+                      hint="0 表示不限；1–5 表示只加入达到该等级的材料。"
+                    />
+                    <CheckboxField
+                      label="启用店铺产业与买断"
+                      value={settings.shopOwnershipEnabled}
+                      onChange={(value) => updateSetting('shopOwnershipEnabled', value)}
+                      hint="在商店界面显示产业信息与买断按钮；关闭后隐藏相关入口。"
                     />
                     <NumberField
                       label="幸运返利命中概率"
@@ -1727,6 +1763,47 @@ export function App() {
                       min={0}
                       max={999999999}
                       step={1000}
+                    />
+                  </div>
+                </Card>
+
+                <Card title="拍卖与珍宝鉴定" eyebrow="Auction">
+                  <div className="field-grid">
+                    <CheckboxField
+                      label="启用拍卖预览免费刷新"
+                      value={settings.auctionPreviewRefreshEnabled}
+                      onChange={(value) => updateSetting('auctionPreviewRefreshEnabled', value)}
+                      hint="在拍卖展品预览窗口增加不限次数的免费刷新按钮。"
+                    />
+                    <TextField
+                      label="拍卖刷新主键"
+                      value={settings.auctionPreviewRefreshHotkey}
+                      onChange={(value) => updateSetting('auctionPreviewRefreshHotkey', value)}
+                      hint="填写 Unity KeyCode 名称，例如 R、F8 或 Mouse3。"
+                    />
+                    <CheckboxField
+                      label="拍卖刷新需要按住 Alt"
+                      value={settings.auctionPreviewRefreshRequireAlt}
+                      onChange={(value) => updateSetting('auctionPreviewRefreshRequireAlt', value)}
+                      hint="开启时快捷键为 Alt + 主键。"
+                    />
+                    <CheckboxField
+                      label="启用鉴宝最高鉴定价辅助"
+                      value={settings.treasureIdentifyBestValueAssistEnabled}
+                      onChange={(value) => updateSetting('treasureIdentifyBestValueAssistEnabled', value)}
+                      hint="按鼠标悬浮括号内的玩家鉴定价选择最高项；最终确认仍需手动完成。"
+                    />
+                    <TextField
+                      label="最高估值选择主键"
+                      value={settings.treasureIdentifyBestValueHotkey}
+                      onChange={(value) => updateSetting('treasureIdentifyBestValueHotkey', value)}
+                      hint="填写 Unity KeyCode 名称，例如 F、F8 或 Mouse3。"
+                    />
+                    <CheckboxField
+                      label="最高估值选择需要按住 Alt"
+                      value={settings.treasureIdentifyBestValueRequireAlt}
+                      onChange={(value) => updateSetting('treasureIdentifyBestValueRequireAlt', value)}
+                      hint="开启时快捷键为 Alt + 主键。"
                     />
                   </div>
                 </Card>

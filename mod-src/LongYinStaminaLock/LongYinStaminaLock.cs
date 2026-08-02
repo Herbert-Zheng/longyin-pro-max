@@ -387,7 +387,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         public int CurrentSellPrice { get; init; }
         public int IdentifiedSellPrice { get; init; }
         public int IdentifyCost { get; init; }
-        public int RealValue { get; init; }
+        public int AppraisedValue { get; init; }
         public float SkillBuyFactor { get; init; }
         public float SkillSellFactor { get; init; }
         public int NetProfit => IdentifiedSellPrice - BuyPrice - IdentifyCost;
@@ -457,7 +457,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static float _treasureTradeShopOpenedAtRealtime = -1f;
     private static bool _treasureTradeAutoProcessed;
     private static bool _treasureTradeBusy;
-    private static readonly HashSet<string> _treasureTradeLoggedSignatures = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> _treasureAppraisedValueFailureSignatures = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, OwnedShopRecord> _ownedShops = new(StringComparer.Ordinal);
     private static int _currentShopOwnershipSaveSlotId = -1;
     private static int _loadedShopOwnershipSourceSlotId = -1;
@@ -493,12 +493,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _ignoreCarryWeight = Config.Bind("Inventory", "IgnoreCarryWeight", false, "When true, forces the player inventory's current carried weight to 0.");
         _merchantCarryCash = Config.Bind("Commerce", "MerchantCarryCash", 100000, "Minimum cash carried by NPC shop merchants while a Shop trade window is open. Set to 0 to disable.");
         _treasureTradeHelperEnabled = Config.Bind("Commerce", "TreasureTradeHelperEnabled", true, "Shows current treasure resale estimates and skill factors inside trade shops that list treasure items.");
-        _treasureAutoTradeEnabled = Config.Bind("Commerce", "TreasureAutoTradeEnabled", true, "Automatically adds profitable unidentified treasure items from the shop sell list into the trade cart when a trade shop opens.");
+        _treasureAutoTradeEnabled = Config.Bind("Commerce", "TreasureAutoTradeEnabled", true, "Automatically adds unidentified treasures estimated profitable from the player-appraised parenthesized value when a trade shop opens.");
         _auctionPreviewRefreshEnabled = Config.Bind("Auction", "PreviewRefreshEnabled", true, "Adds a free unlimited refresh button to the auction exhibit preview window.");
         _auctionPreviewRefreshHotkey = Config.Bind("Auction", "PreviewRefreshHotkey", KeyCode.R, "Main key used to refresh while the auction exhibit preview is open.");
         _auctionPreviewRefreshRequireAlt = Config.Bind("Auction", "PreviewRefreshRequireAlt", true, "When true, hold either Alt key while pressing PreviewRefreshHotkey. The default shortcut is Alt+R.");
-        _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the active treasure with the highest real value. Confirmation remains manual.");
-        _treasureIdentifyBestValueHotkey = Config.Bind("TreasureIdentify", "BestValueHotkey", KeyCode.F, "Main key used to select the highest-real-value treasure while the appraisal window is open.");
+        _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the treasure with the highest player-appraised value shown in parentheses. Confirmation remains manual.");
+        _treasureIdentifyBestValueHotkey = Config.Bind("TreasureIdentify", "BestValueHotkey", KeyCode.F, "Main key used to select the highest parenthesized appraisal value while the appraisal window is open.");
         _treasureIdentifyBestValueRequireAlt = Config.Bind("TreasureIdentify", "BestValueRequireAlt", true, "When true, hold either Alt key while pressing BestValueHotkey. The default shortcut is Alt+F.");
         _luckyMoneyHitChancePercent = Config.Bind("MoneyLuck", "LuckyHitChancePercent", 0, "Chance from 0 to 100 that a player money transaction triggers a lucky bonus.");
         _extraRelationshipGainChancePercent = Config.Bind("Relationship", "ExtraRelationshipGainChancePercent", 0, "Chance from 0 to 100 that positive relationship gain becomes double.");
@@ -2157,7 +2157,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             _identifyBestTreasureButtonLabel != null)
         {
             _identifyBestTreasureButtonLabel.text =
-                $"自动选中真品\n{FormatConfiguredHotkey(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value)}";
+                $"自动选择最高价\n{FormatConfiguredHotkey(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value)}";
             SetOverlayObjectActive(_identifyBestTreasureButtonRoot, true);
             return;
         }
@@ -2185,7 +2185,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 sureButtonRect.pivot,
                 position,
                 new Vector2(width, height),
-                $"自动选中真品\n{FormatConfiguredHotkey(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value)}",
+                $"自动选择最高价\n{FormatConfiguredHotkey(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value)}",
                 out _identifyBestTreasureButtonRoot,
                 out _identifyBestTreasureButton,
                 out _identifyBestTreasureButtonLabel))
@@ -2817,22 +2817,17 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                     continue;
                 }
 
-                int realValue;
-                try
-                {
-                    realValue = icon.itemData.GetTreasureRealValue();
-                }
-                catch
+                if (!TryGetTreasureAppraisedValue(icon.itemData, out var appraisedValue))
                 {
                     continue;
                 }
 
                 if (bestIcon == null ||
-                    realValue > bestValue ||
-                    realValue == bestValue && CompareTreasureChestChoicePriority(icon.itemData, bestIcon.itemData) > 0)
+                    appraisedValue > bestValue ||
+                    appraisedValue == bestValue && CompareTreasureChestChoicePriority(icon.itemData, bestIcon.itemData) > 0)
                 {
                     bestIcon = icon;
-                    bestValue = realValue;
+                    bestValue = appraisedValue;
                 }
             }
         }
@@ -2847,9 +2842,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         try
         {
             controller.SetNowChooseTreasure(bestIcon.gameObject);
-            PushPlayerLog($"自动鉴宝已选中：{bestIcon.itemData.Name(false)}");
+            PushPlayerLog($"自动鉴宝已选中最高价：{bestIcon.itemData.Name(false)}（括号价 {bestValue}）");
             LoggerInstance.LogInfo(
-                $"Treasure identify selected highest-real-value item from {source}: realValue={bestValue}, item={DescribeItemSummary(bestIcon.itemData)}. " +
+                $"Treasure identify selected highest hover-appraised-value item from {source}: appraisedValue={bestValue}, item={DescribeItemSummary(bestIcon.itemData)}. " +
                 "The player must still confirm manually.");
             return true;
         }
@@ -2991,7 +2986,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _treasureTradeAutoProcessed = false;
         _treasureTradeBusy = false;
         _selectedTreasureTradeIcon = null;
-        _treasureTradeLoggedSignatures.Clear();
     }
 
     private static void ResetTreasureTradeUiState(string source)
@@ -3000,7 +2994,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _treasureTradeShopOpenedAtRealtime = -1f;
         _treasureTradeAutoProcessed = false;
         _treasureTradeBusy = false;
-        _treasureTradeLoggedSignatures.Clear();
         HideTreasureTradeOverlay();
     }
 
@@ -3017,7 +3010,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             case TradeIconType.TradeRight:
             case TradeIconType.TradeLeftOut:
             case TradeIconType.TradeRightOut:
-                var changed = _selectedTreasureTradeIcon != icon;
                 _selectedTreasureTradeIcon = icon;
                 break;
         }
@@ -3265,22 +3257,17 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return false;
         }
 
-        var realValue = TryGetTreasureRealValue(item);
-        if (realValue <= 0)
-        {
-            var identifiedClone = TryCloneAndIdentifyItem(item);
-            if (identifiedClone != null)
-            {
-                realValue = TryGetTreasureRealValue(identifiedClone);
-            }
-        }
-
-        if (realValue <= 0)
+        if (!TryGetTreasureAppraisedValue(item, out var appraisedValue))
         {
             return false;
         }
 
-        var identifiedSellPrice = EstimateTreasureSellPriceFromRealValue(item, currentSellPrice, realValue);
+        var skillBuyFactor = GetSkillTradeFactor(buy: true);
+        var skillSellFactor = GetSkillTradeFactor(buy: false);
+        var identifiedSellPrice = EstimateTreasureSellPriceFromAppraisedValue(
+            item,
+            currentSellPrice,
+            appraisedValue);
 
         opportunity = new TreasureTradeOpportunity
         {
@@ -3291,17 +3278,17 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             CurrentSellPrice = currentSellPrice,
             IdentifiedSellPrice = identifiedSellPrice,
             IdentifyCost = Math.Max(0, identifyCost),
-            RealValue = Math.Max(0, realValue),
-            SkillBuyFactor = GetSkillTradeFactor(buy: true),
-            SkillSellFactor = GetSkillTradeFactor(buy: false)
+            AppraisedValue = Math.Max(0, appraisedValue),
+            SkillBuyFactor = skillBuyFactor,
+            SkillSellFactor = skillSellFactor
         };
 
         return true;
     }
 
-    private static int EstimateTreasureSellPriceFromRealValue(ItemData item, int currentSellPrice, int realValue)
+    private static int EstimateTreasureSellPriceFromAppraisedValue(ItemData item, int currentSellPrice, int appraisedValue)
     {
-        if (realValue <= 0)
+        if (appraisedValue <= 0)
         {
             return Math.Max(0, currentSellPrice);
         }
@@ -3309,11 +3296,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var baseValue = Math.Max(1, item.value);
         if (currentSellPrice <= 0)
         {
-            return Math.Max(realValue, 0);
+            return Math.Max(appraisedValue, 0);
         }
 
         var sellRatio = Math.Max(0d, (double)currentSellPrice / baseValue);
-        var estimated = (int)Math.Round(realValue * sellRatio, MidpointRounding.AwayFromZero);
+        var estimated = (int)Math.Round(appraisedValue * sellRatio, MidpointRounding.AwayFromZero);
         return Math.Max(currentSellPrice, estimated);
     }
 
@@ -3325,11 +3312,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             : $"当前卖价{TradeInfoMoneyGap}{opportunity.CurrentSellPrice}";
         var profitLine = opportunity.IconType == TradeIconType.TradeRight || opportunity.IconType == TradeIconType.TradeRightOut
             ? $"鉴定费 {opportunity.IdentifyCost}　预计净利 {FormatSignedInt(opportunity.NetProfit)}"
-            : $"鉴定费 {opportunity.IdentifyCost}　鉴后净增 {FormatSignedInt(opportunity.IdentifyGain)}";
+            : $"鉴定费 {opportunity.IdentifyCost}　预计鉴后净增 {FormatSignedInt(opportunity.IdentifyGain)}";
 
         return
-            $"<b><color=#E8B45B>珍宝倒宝助手</color></b>　{name}　{priceLine}　鉴后卖价 {opportunity.IdentifiedSellPrice}　{profitLine}\n" +
-            $"鉴定参考　技能买/卖系数 x{opportunity.SkillBuyFactor:0.###} / x{opportunity.SkillSellFactor:0.###}";
+            $"<b><color=#E8B45B>珍宝倒宝助手</color></b>　{name}　{priceLine}　括号估价 {opportunity.AppraisedValue}\n" +
+            $"预计鉴后卖价 {opportunity.IdentifiedSellPrice}　{profitLine}　技能买/卖 x{opportunity.SkillBuyFactor:0.###} / x{opportunity.SkillSellFactor:0.###}";
     }
 
     private static void EnsureTreasureTradeOverlay(TradeUIController tradeUi)
@@ -4255,59 +4242,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
     }
 
-    private static ItemData? TryCloneAndIdentifyItem(ItemData? item)
-    {
-        if (item == null)
-        {
-            return null;
-        }
-
-        ItemData? clone;
-        try
-        {
-            clone = item.Clone() as ItemData;
-        }
-        catch
-        {
-            return null;
-        }
-
-        if (clone == null)
-        {
-            return null;
-        }
-
-        return TryFullIdentifyTreasure(clone) ? clone : null;
-    }
-
-    private static bool TryFullIdentifyTreasure(ItemData? item)
-    {
-        if (item == null || !IsTreasureItem(item))
-        {
-            return false;
-        }
-
-        try
-        {
-            item.FullIdentify();
-        }
-        catch (Exception ex)
-        {
-            LoggerInstance.LogWarning($"Treasure full identify failed for {TryGetItemDisplayName(item)}: {ex.Message}");
-            return false;
-        }
-
-        try
-        {
-            item.RecountRareLv();
-        }
-        catch
-        {
-        }
-
-        return IsTreasureFullyIdentified(item);
-    }
-
     private static bool IsUnidentifiedTreasure(ItemData? item)
     {
         return IsTreasureItem(item) && !IsTreasureFullyIdentified(item);
@@ -4367,20 +4301,32 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return true;
     }
 
-    private static int TryGetTreasureRealValue(ItemData? item)
+    private static bool TryGetTreasureAppraisedValue(ItemData? item, out int appraisedValue)
     {
+        appraisedValue = 0;
         if (item == null)
         {
-            return 0;
+            return false;
         }
 
         try
         {
-            return Math.Max(0, item.GetTreasureRealValue());
+            // Runtime verification against the appraisal tooltip in v1.1.0f5 shows that
+            // GetTreasureRealValue() matches the knowledge-dependent value in parentheses.
+            appraisedValue = Math.Max(0, item.GetTreasureRealValue());
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
-            return Math.Max(0, item.value);
+            var signature = $"{ex.GetType().FullName}: {ex.Message}";
+            if (_treasureAppraisedValueFailureSignatures.Add(signature))
+            {
+                LoggerInstance.LogWarning(
+                    $"Player-appraised treasure value is unavailable; the item will be skipped instead of falling back to its raw value. " +
+                    $"{DescribeCompatibilityException(ex)}");
+            }
+
+            return false;
         }
     }
 

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
+  ensureBepInExConsoleDisabled,
   ensureDoorstopEnabled,
   ensureGameFiles,
   ensureSteamAppId,
@@ -541,6 +542,8 @@ async function launchGame(gameRoot: string): Promise<void> {
   if (launchState.launchState !== 'idle') {
     throw new Error(launchState.launchNote);
   }
+
+  await ensureBepInExConsoleDisabled(gameRoot);
 
   await fs.stat(paths.gameExePath).catch(() => {
     throw new Error(`未找到游戏可执行文件：${paths.gameExePath}`);

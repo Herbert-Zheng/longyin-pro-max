@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  ensureBepInExConsoleDisabled,
   inspectGameHealth,
   readCustomTalentPack,
   readVisibleSettings,
@@ -31,6 +32,212 @@ async function writeFile(root, relativePath, content) {
 async function exists(filePath) {
   return fs.stat(filePath).then(() => true).catch(() => false);
 }
+
+const realisticBepInExConfig = [
+  '## BepInEx configuration',
+  '# User comments and custom values must survive launcher repairs.',
+  '',
+  '[Logging.Console]',
+  '## Enables showing a console for log output.',
+  '# Setting type: Boolean',
+  '# Default value: false',
+  'Enabled = true',
+  'PreventClose = true',
+  '',
+  '[Logging.Disk]',
+  'Enabled = true',
+  'AppendLog = false',
+  '',
+  '[Chainloader]',
+  'Enabled = custom-value',
+  'HideManagerGameObject = false',
+  ''
+].join('\r\n');
+
+test('console enforcement changes only Logging.Console Enabled to false', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = await writeFile(gameRoot, 'BepInEx/config/BepInEx.cfg', realisticBepInExConfig);
+  const expected = realisticBepInExConfig.replace(
+    '[Logging.Console]\r\n## Enables showing a console for log output.\r\n# Setting type: Boolean\r\n# Default value: false\r\nEnabled = true',
+    '[Logging.Console]\r\n## Enables showing a console for log output.\r\n# Setting type: Boolean\r\n# Default value: false\r\nEnabled = false'
+  );
+
+  await ensureBepInExConsoleDisabled(gameRoot);
+
+  assert.equal(await fs.readFile(configPath, 'utf8'), expected);
+});
+
+test('console enforcement is byte-idempotent after the console is disabled', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = await writeFile(gameRoot, 'BepInEx/config/BepInEx.cfg', realisticBepInExConfig);
+
+  await ensureBepInExConsoleDisabled(gameRoot);
+  const afterFirstCall = await fs.readFile(configPath);
+  await ensureBepInExConsoleDisabled(gameRoot);
+  const afterSecondCall = await fs.readFile(configPath);
+
+  assert.deepEqual(afterSecondCall, afterFirstCall);
+});
+
+test('console enforcement rejects a missing BepInEx.cfg with an actionable repair message', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  await assert.rejects(
+    ensureBepInExConsoleDisabled(gameRoot),
+    /BepInEx\.cfg[\s\S]*(?:修复|重新安装)/
+  );
+});
+
+test('console enforcement adds a disabled Logging.Console section when the section is absent', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const before = [
+    '## Existing BepInEx configuration',
+    '[Logging.Disk]',
+    'Enabled = true',
+    'LogLevels = Fatal, Error, Warning, Message, Info',
+    ''
+  ].join('\r\n');
+  const expected = `${before}\r\n[Logging.Console]\r\nEnabled = false\r\n`;
+  const configPath = await writeFile(gameRoot, 'BepInEx/config/BepInEx.cfg', before);
+
+  await ensureBepInExConsoleDisabled(gameRoot);
+
+  assert.equal(await fs.readFile(configPath, 'utf8'), expected);
+});
+
+test('console enforcement adds Enabled false when Logging.Console has no Enabled key', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const before = [
+    '[Logging.Console]',
+    '## Keep this user comment.',
+    'PreventClose = true',
+    '',
+    '[Logging.Disk]',
+    'Enabled = true',
+    ''
+  ].join('\r\n');
+  const expected = [
+    '[Logging.Console]',
+    '## Keep this user comment.',
+    'PreventClose = true',
+    'Enabled = false',
+    '',
+    '[Logging.Disk]',
+    'Enabled = true',
+    ''
+  ].join('\r\n');
+  const configPath = await writeFile(gameRoot, 'BepInEx/config/BepInEx.cfg', before);
+
+  await ensureBepInExConsoleDisabled(gameRoot);
+
+  assert.equal(await fs.readFile(configPath, 'utf8'), expected);
+});
+
+test('console enforcement separates an EOF-only Logging.Console header from the inserted key', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = await writeFile(gameRoot, 'BepInEx/config/BepInEx.cfg', '[Logging.Console]');
+
+  await ensureBepInExConsoleDisabled(gameRoot);
+
+  assert.equal(
+    await fs.readFile(configPath, 'utf8'),
+    '[Logging.Console]\r\nEnabled = false\r\n'
+  );
+});
+
+for (const invalidValueCase of [
+  {
+    name: 'yes',
+    before: 'Enabled = yes # keep yes comment',
+    expected: 'Enabled = false # keep yes comment'
+  },
+  {
+    name: 'empty',
+    before: 'Enabled =    # keep empty comment',
+    expected: 'Enabled = false   # keep empty comment'
+  },
+  {
+    name: 'custom text',
+    before: 'Enabled = sometimes ; keep custom comment',
+    expected: 'Enabled = false ; keep custom comment'
+  }
+]) {
+  test(`console enforcement repairs ${invalidValueCase.name} Enabled value and preserves its comment`, async (t) => {
+    const { root, gameRoot } = await createWorkspace();
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const before = [
+      '[Logging.Console]',
+      invalidValueCase.before,
+      'PreventClose = true',
+      '',
+      '[Logging.Disk]',
+      'Enabled = true',
+      ''
+    ].join('\r\n');
+    const expected = before.replace(invalidValueCase.before, invalidValueCase.expected);
+    const configPath = await writeFile(gameRoot, 'BepInEx/config/BepInEx.cfg', before);
+
+    await ensureBepInExConsoleDisabled(gameRoot);
+
+    assert.equal(await fs.readFile(configPath, 'utf8'), expected);
+  });
+}
+
+test('console enforcement converges every duplicate Logging.Console Enabled key to false', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const before = [
+    '# Preserve every byte outside console values.',
+    '[Logging.Console]',
+    'Enabled = false # already safe',
+    'Enabled = true # unsafe duplicate',
+    'Enabled = yes # invalid duplicate',
+    'PreventClose = true',
+    '',
+    '[Logging.Disk]',
+    'Enabled = true # disk logging remains enabled',
+    ''
+  ].join('\r\n');
+  const expected = before
+    .replace('Enabled = true # unsafe duplicate', 'Enabled = false # unsafe duplicate')
+    .replace('Enabled = yes # invalid duplicate', 'Enabled = false # invalid duplicate');
+  const configPath = await writeFile(gameRoot, 'BepInEx/config/BepInEx.cfg', before);
+
+  await ensureBepInExConsoleDisabled(gameRoot);
+
+  assert.equal(await fs.readFile(configPath, 'utf8'), expected);
+});
+
+test('launch enforces disabled BepInEx console after guards and before overlay or game spawn', async () => {
+  const mainSource = await fs.readFile(path.join(__dirname, '../src/main.ts'), 'utf8');
+  const launchStart = mainSource.indexOf('async function launchGame(gameRoot: string): Promise<void>');
+  const launchEnd = mainSource.indexOf('\nasync function buildSnapshot', launchStart);
+  const launchSource = mainSource.slice(launchStart, launchEnd);
+  const repairNeededGuard = launchSource.indexOf('if (repairResult.health.needsRepair)');
+  const repairGuard = launchSource.indexOf('if (repairResult.health.launchBlocked)');
+  const runningGuard = launchSource.indexOf("if (launchState.launchState !== 'idle')");
+  const enforcement = launchSource.indexOf('await ensureBepInExConsoleDisabled(gameRoot)');
+  const overlay = launchSource.indexOf('await startOverlay(gameRoot, true)');
+  const gameSpawn = launchSource.indexOf('spawn(paths.gameExePath');
+
+  assert.notEqual(repairNeededGuard, -1, 'launchGame must retain the repair-needed guard');
+  assert.notEqual(repairGuard, -1, 'launchGame must retain the launch-blocked guard');
+  assert.notEqual(runningGuard, -1, 'launchGame must retain the game-running guard');
+  assert.notEqual(enforcement, -1, 'launchGame must enforce the BepInEx console setting');
+  assert.notEqual(overlay, -1, 'launchGame must retain overlay startup');
+  assert.notEqual(gameSpawn, -1, 'launchGame must retain game spawn');
+  assert.equal(repairNeededGuard < enforcement, true, 'repair-needed guard must run before console enforcement');
+  assert.equal(repairGuard < enforcement, true, 'repair/health guards must run before console enforcement');
+  assert.equal(runningGuard < enforcement, true, 'game-running guard must run before console enforcement');
+  assert.equal(enforcement < overlay, true, 'console enforcement must run before overlay startup');
+  assert.equal(enforcement < gameSpawn, true, 'console enforcement must run before spawning the game');
+});
 
 test('uninstall restores replaced files and leaves unrelated BepInEx files untouched', async (t) => {
   const { root, gameRoot, payloadRoot } = await createWorkspace();

@@ -24,6 +24,7 @@ const LEGACY_SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.s
 const SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.skilltalentgrant.cfg');
 const BATTLE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.battleturbo.cfg');
 const CUSTOM_TALENT_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.custom-talents.json');
+const BEPINEX_CONFIG_NAME = path.join('BepInEx', 'config', 'BepInEx.cfg');
 const DOORSTOP_NAME = 'doorstop_config.ini';
 const STEAM_APP_ID_NAME = 'steam_appid.txt';
 const REQUIRED_PLUGIN_NAMES = [
@@ -1601,6 +1602,115 @@ export async function saveCustomTalentPack(gameRoot: string, pack: CustomTalentP
   }
 
   return verified;
+}
+
+interface IniSectionRange {
+  name: string;
+  bodyStart: number;
+  end: number;
+}
+
+function findIniSectionRanges(text: string): IniSectionRange[] {
+  const headerPattern = /^(?:\uFEFF)?[ \t]*\[([^\]\r\n]+)\][ \t]*(?:\r?\n|$)/gm;
+  const headers = [...text.matchAll(headerPattern)];
+  return headers.map((header, index) => ({
+    name: header[1].trim(),
+    bodyStart: (header.index ?? 0) + header[0].length,
+    end: headers[index + 1]?.index ?? text.length
+  }));
+}
+
+function normalizeConsoleEnabledLines(body: string): { text: string; count: number } {
+  let count = 0;
+  const text = body.replace(
+    /^([ \t]*Enabled[ \t]*=)([ \t]*)([^\r\n]*)(?=\r?$)/gmi,
+    (_line, assignment: string, spacing: string, remainder: string) => {
+      count += 1;
+      const commentIndex = remainder.search(/[;#]/);
+      const valuePart = commentIndex === -1 ? remainder : remainder.slice(0, commentIndex);
+      const comment = commentIndex === -1 ? '' : remainder.slice(commentIndex);
+      const trailingSpacing = valuePart.match(/[ \t]*$/)?.[0] ?? '';
+
+      if (valuePart.trim().length === 0) {
+        const prefixSpacing = spacing.slice(0, 1);
+        return `${assignment}${prefixSpacing}false${spacing.slice(prefixSpacing.length)}${comment}`;
+      }
+
+      return `${assignment}${spacing}false${trailingSpacing}${comment}`;
+    }
+  );
+  return { text, count };
+}
+
+function transformBepInExConsoleConfig(text: string): string {
+  const newline = text.includes('\r\n') ? '\r\n' : text.includes('\n') ? '\n' : '\r\n';
+  const consoleSections = findIniSectionRanges(text)
+    .filter((section) => section.name.toLowerCase() === 'logging.console');
+
+  if (consoleSections.length === 0) {
+    const separator = text.length === 0 ? '' : text.endsWith('\n') ? newline : `${newline}${newline}`;
+    return `${text}${separator}[Logging.Console]${newline}Enabled = false${newline}`;
+  }
+
+  let updated = text;
+  for (const section of [...consoleSections].reverse()) {
+    const body = text.slice(section.bodyStart, section.end);
+    const normalized = normalizeConsoleEnabledLines(body);
+    let updatedBody = normalized.text;
+    if (normalized.count === 0) {
+      if (updatedBody.length === 0 && !/[\r\n]$/.test(text.slice(0, section.bodyStart))) {
+        updatedBody = `${newline}Enabled = false${newline}`;
+      }
+      else {
+        const contentEnd = updatedBody.search(/\s*$/);
+        updatedBody = contentEnd === 0
+          ? `Enabled = false${updatedBody}`
+          : `${updatedBody.slice(0, contentEnd)}${newline}Enabled = false${updatedBody.slice(contentEnd)}`;
+      }
+    }
+    updated = `${updated.slice(0, section.bodyStart)}${updatedBody}${updated.slice(section.end)}`;
+  }
+  return updated;
+}
+
+function validateBepInExConsoleConfig(text: string, configPath: string): void {
+  const consoleSections = findIniSectionRanges(text)
+    .filter((section) => section.name.toLowerCase() === 'logging.console');
+  const valid = consoleSections.length > 0 && consoleSections.every((section) => {
+    const body = text.slice(section.bodyStart, section.end);
+    const values = [...body.matchAll(/^[ \t]*Enabled[ \t]*=[ \t]*([^\r\n]*)(?=\r?$)/gmi)];
+    return values.length > 0 && values.every((match) => {
+      const value = match[1].split(/[;#]/, 1)[0].trim().toLowerCase();
+      return value === 'false';
+    });
+  });
+
+  if (!valid) {
+    throw new Error(`BepInEx.cfg 控制台防护校验失败：${configPath}。请修复模组安装或重新安装 BepInEx 后再启动游戏。`);
+  }
+}
+
+export async function ensureBepInExConsoleDisabled(gameRoot: string): Promise<void> {
+  const configPath = path.join(gameRoot, BEPINEX_CONFIG_NAME);
+  let text: string;
+  try {
+    text = await fs.readFile(configPath, 'utf8');
+  }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      throw new Error(`未找到 BepInEx.cfg：${configPath}。请先修复模组安装或重新安装 BepInEx。`);
+    }
+    throw error;
+  }
+
+  const updated = transformBepInExConsoleConfig(text);
+  validateBepInExConsoleConfig(updated, configPath);
+  if (updated !== text) {
+    await fs.writeFile(configPath, updated, 'utf8');
+    const verified = await fs.readFile(configPath, 'utf8');
+    validateBepInExConsoleConfig(verified, configPath);
+  }
 }
 
 export async function ensureSteamAppId(gameRoot: string): Promise<void> {

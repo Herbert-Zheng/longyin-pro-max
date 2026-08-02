@@ -1,4 +1,6 @@
-# LongYinLiZhiZhuan Modding Notes
+# LongYinLiZhiZhuan Modding Notes — Historical 1.071F Reference
+
+> Historical note: this document records findings captured against game version `1.071F`. The currently supported game version is `V1.1.0f5`. Keep the details below as old-version reverse-engineering reference; do not treat addresses, signatures, or runtime behavior as current compatibility guarantees.
 
 Game version: `1.071F`
 Date captured: `2026-03-17`
@@ -620,7 +622,7 @@ If starting fresh in a future session:
 
 ## Bottom Line
 
-For `LongYinLiZhiZhuan 1.071F`, the best proven modding path is:
+For the historical `LongYinLiZhiZhuan 1.071F` build, the best proven modding path was:
 
 - `BepInEx IL2CPP` loader
 - Harmony gameplay hooks

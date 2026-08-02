@@ -98,7 +98,11 @@ $requiredInteropMembers = [ordered]@{
         'identifyMatchUIPanel',
         'sureButton'
     )
-    ItemData = @('GetTreasureRealValue')
+    TradeUIController = @('rightList', 'tradeUI', 'tradeUIType', 'TradeIconClicked', 'FreshResourceLabel')
+    ItemListController = @('itemGrid')
+    ItemIconController = @('itemData')
+    ItemData = @('GetTreasureRealValue', 'type', 'rareLv', 'itemLv')
+    ItemType = @('Material')
 }
 
 foreach ($typeName in $requiredInteropMembers.Keys) {

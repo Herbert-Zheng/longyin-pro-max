@@ -13,7 +13,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.30.0")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.31.0")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -51,6 +51,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const string ShopOwnershipSaveFolderName = "codex.longyin.shop-ownership";
     private const string ShopOwnershipOverlayPanelName = "CodexShopOwnershipOverlay";
     private const string ShopOwnershipBuyButtonName = "CodexShopOwnershipBuyButton";
+    private const string MaterialAutoBuyButtonName = "CodexMaterialAutoBuyButton";
+    private const string MaterialFilterDropdownButtonName = "CodexMaterialFilterDropdownButton";
+    private const string MaterialFilterDropdownPanelName = "CodexMaterialFilterDropdownPanel";
+    private const string MaterialRareOptionButtonPrefix = "CodexMaterialRareOptionButton:";
+    private const string MaterialItemLevelOptionButtonPrefix = "CodexMaterialItemLevelOptionButton:";
     private const string AuctionPreviewRefreshButtonName = "CodexAuctionPreviewRefreshButton";
     private const string IdentifyBestTreasureButtonName = "CodexIdentifyBestTreasureButton";
     private const int ExternalOverlayProtocolVersion = 1;
@@ -63,6 +68,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         "你让他心情很好 ， 好感多加 {0}"
     };
     private static readonly float[] OutsideBattleSpeedCycle = { 1f, 2f, 3f, 5f, 10f };
+    private static readonly string[] MaterialRareLevelNames =
+    {
+        "残品", "下品", "中品", "上品", "珍品", "极品"
+    };
+    private static readonly string[] MaterialItemLevelNames =
+    {
+        "劣质", "普通", "优质", "精良", "完美", "绝世"
+    };
 
     internal static ManualLogSource LoggerInstance = null!;
 
@@ -88,6 +101,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<int> _merchantCarryCash = null!;
     private static ConfigEntry<bool> _treasureTradeHelperEnabled = null!;
     private static ConfigEntry<bool> _treasureAutoTradeEnabled = null!;
+    private static ConfigEntry<int> _materialPurchaseMinRareLv = null!;
+    private static ConfigEntry<int> _materialPurchaseMinItemLv = null!;
     private static ConfigEntry<bool> _auctionPreviewRefreshEnabled = null!;
     private static ConfigEntry<KeyCode> _auctionPreviewRefreshHotkey = null!;
     private static ConfigEntry<bool> _auctionPreviewRefreshRequireAlt = null!;
@@ -453,6 +468,18 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static Image? _shopOwnershipOverlayIcon;
     private static Button? _shopOwnershipBuyButton;
     private static Text? _shopOwnershipBuyButtonLabel;
+    private static GameObject? _materialAutoBuyButtonRoot;
+    private static Button? _materialAutoBuyButton;
+    private static Text? _materialAutoBuyButtonLabel;
+    private static GameObject? _materialFilterDropdownButtonRoot;
+    private static Text? _materialFilterDropdownButtonLabel;
+    private static GameObject? _materialFilterDropdownPanelRoot;
+    private static readonly List<Button> _materialFilterOptionButtons = new();
+    private static readonly List<Text> _materialFilterOptionLabels = new();
+    private static bool _materialFilterDropdownOpen;
+    private static bool _materialFilterOptionsVisible;
+    private static bool _materialAutoBuyBusy;
+    private static bool _materialAutoBuyControlCreationFailed;
     private static bool _tradeActionButtonLookupWarningLogged;
     private static float _treasureTradeShopOpenedAtRealtime = -1f;
     private static bool _treasureTradeAutoProcessed;
@@ -494,6 +521,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _merchantCarryCash = Config.Bind("Commerce", "MerchantCarryCash", 100000, "Minimum cash carried by NPC shop merchants while a Shop trade window is open. Set to 0 to disable.");
         _treasureTradeHelperEnabled = Config.Bind("Commerce", "TreasureTradeHelperEnabled", true, "Shows current treasure resale estimates and skill factors inside trade shops that list treasure items.");
         _treasureAutoTradeEnabled = Config.Bind("Commerce", "TreasureAutoTradeEnabled", true, "Automatically adds unidentified treasures estimated profitable from the player-appraised parenthesized value when a trade shop opens.");
+        _materialPurchaseMinRareLv = Config.Bind("Commerce", "MaterialPurchaseMinRareLv", 0, "Minimum material rarity tier for the in-shop material sweep button. Values are clamped to 0-5.");
+        _materialPurchaseMinItemLv = Config.Bind("Commerce", "MaterialPurchaseMinItemLv", 0, "Minimum material item-quality tier for the in-shop material sweep button. Values are clamped to 0-5.");
         _auctionPreviewRefreshEnabled = Config.Bind("Auction", "PreviewRefreshEnabled", true, "Adds a free unlimited refresh button to the auction exhibit preview window.");
         _auctionPreviewRefreshHotkey = Config.Bind("Auction", "PreviewRefreshHotkey", KeyCode.R, "Main key used to refresh while the auction exhibit preview is open.");
         _auctionPreviewRefreshRequireAlt = Config.Bind("Auction", "PreviewRefreshRequireAlt", true, "When true, hold either Alt key while pressing PreviewRefreshHotkey. The default shortcut is Alt+R.");
@@ -740,6 +769,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo($"Merchant cash floor starts at {Math.Max(0, _merchantCarryCash.Value)}.");
         Log.LogInfo($"Treasure trade helper starts {(_treasureTradeHelperEnabled.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Treasure auto cart starts {(_treasureAutoTradeEnabled.Value ? "ON" : "OFF")}.");
+        Log.LogInfo(
+            $"Material sweep starts at minimum rarity {GetMaterialRareLevelName(GetMaterialPurchaseRareLevel())} " +
+            $"and minimum quality {GetMaterialItemLevelName(GetMaterialPurchaseItemLevel())}.");
         Log.LogInfo(
             $"Auction exhibit preview refresh starts {(_auctionPreviewRefreshEnabled.Value ? "ON" : "OFF")} with shortcut " +
             $"{FormatConfiguredHotkey(_auctionPreviewRefreshHotkey.Value, _auctionPreviewRefreshRequireAlt.Value)}.");
@@ -1809,7 +1841,18 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var isAuctionRefresh = string.Equals(buttonName, AuctionPreviewRefreshButtonName, StringComparison.Ordinal);
         var isIdentifyAssist = string.Equals(buttonName, IdentifyBestTreasureButtonName, StringComparison.Ordinal);
         var isShopOwnershipBuy = string.Equals(buttonName, ShopOwnershipBuyButtonName, StringComparison.Ordinal);
-        if (!isAuctionRefresh && !isIdentifyAssist && !isShopOwnershipBuy)
+        var isMaterialAutoBuy = string.Equals(buttonName, MaterialAutoBuyButtonName, StringComparison.Ordinal);
+        var isMaterialFilterDropdown = string.Equals(buttonName, MaterialFilterDropdownButtonName, StringComparison.Ordinal);
+        var isMaterialFilterOption = TryParseMaterialFilterOptionButton(
+            buttonName,
+            out var materialFilterIsRare,
+            out var materialFilterLevel);
+        if (!isAuctionRefresh &&
+            !isIdentifyAssist &&
+            !isShopOwnershipBuy &&
+            !isMaterialAutoBuy &&
+            !isMaterialFilterDropdown &&
+            !isMaterialFilterOption)
         {
             return true;
         }
@@ -1829,9 +1872,21 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             {
                 TrySelectHighestValueIdentifyTreasure(_identifyMatchController, "button");
             }
-            else
+            else if (isShopOwnershipBuy)
             {
                 OnShopOwnershipBuyButtonClicked();
+            }
+            else if (isMaterialAutoBuy)
+            {
+                OnMaterialAutoBuyButtonClicked();
+            }
+            else if (isMaterialFilterDropdown)
+            {
+                ToggleMaterialFilterDropdown();
+            }
+            else
+            {
+                SetMaterialFilterLevel(materialFilterIsRare, materialFilterLevel);
             }
         }
 
@@ -2224,7 +2279,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 if (button == null ||
                     string.Equals(buttonName, AuctionPreviewRefreshButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, IdentifyBestTreasureButtonName, StringComparison.Ordinal) ||
-                    string.Equals(buttonName, ShopOwnershipBuyButtonName, StringComparison.Ordinal))
+                    string.Equals(buttonName, ShopOwnershipBuyButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialAutoBuyButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialFilterDropdownButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialFilterDropdownPanelName, StringComparison.Ordinal) ||
+                    IsMaterialFilterOptionButtonName(buttonName) ||
+                    IsButtonInsideKnownOverlayRoot(button))
                 {
                     continue;
                 }
@@ -2252,6 +2312,38 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
 
         return fallback;
+    }
+
+    private static bool IsButtonInsideKnownOverlayRoot(Button button)
+    {
+        if (button == null)
+        {
+            return false;
+        }
+
+        return IsTransformInsideOverlayRoot(button.transform, _auctionPreviewRefreshButtonRoot) ||
+            IsTransformInsideOverlayRoot(button.transform, _identifyBestTreasureButtonRoot) ||
+            IsTransformInsideOverlayRoot(button.transform, _shopOwnershipBuyButton?.gameObject) ||
+            IsTransformInsideOverlayRoot(button.transform, _materialAutoBuyButtonRoot) ||
+            IsTransformInsideOverlayRoot(button.transform, _materialFilterDropdownButtonRoot) ||
+            IsTransformInsideOverlayRoot(button.transform, _materialFilterDropdownPanelRoot);
+    }
+
+    private static bool IsTransformInsideOverlayRoot(Transform candidate, GameObject? root)
+    {
+        if (candidate == null || root == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return candidate == root.transform || candidate.IsChildOf(root.transform);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static Button? FindTradeActionButtonTemplate(TradeUIController tradeUi)
@@ -2966,6 +3058,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         ResetTreasureTradeUiState("TradeUI.HideTradeUI");
         ResetShopOwnershipUiState("TradeUI.HideTradeUI");
+        ResetMaterialAutoBuyUiState("TradeUI.HideTradeUI");
     }
 
     private static void ItemIconOnClickPostfix(ItemIconController __instance)
@@ -2979,6 +3072,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             ResetTreasureTradeUiState(source + "/non-shop");
             ResetShopOwnershipUiState(source + "/non-shop");
+            ResetMaterialAutoBuyUiState(source + "/non-shop");
             return;
         }
 
@@ -2986,6 +3080,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _treasureTradeAutoProcessed = false;
         _treasureTradeBusy = false;
         _selectedTreasureTradeIcon = null;
+        _materialFilterDropdownOpen = false;
+        _materialAutoBuyBusy = false;
+        _materialAutoBuyControlCreationFailed = false;
     }
 
     private static void ResetTreasureTradeUiState(string source)
@@ -3017,6 +3114,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void UpdateTreasureTradeUiState()
     {
+        UpdateMaterialAutoBuyUiState();
         UpdateShopOwnershipUiState();
 
         if (!_treasureTradeHelperEnabled.Value && !_treasureAutoTradeEnabled.Value)
@@ -3636,6 +3734,608 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             catch
             {
             }
+        }
+    }
+
+    private static int ClampMaterialFilterLevel(int level)
+    {
+        return Math.Max(0, Math.Min(5, level));
+    }
+
+    private static int GetMaterialPurchaseRareLevel()
+    {
+        return ClampMaterialFilterLevel(_materialPurchaseMinRareLv.Value);
+    }
+
+    private static int GetMaterialPurchaseItemLevel()
+    {
+        return ClampMaterialFilterLevel(_materialPurchaseMinItemLv.Value);
+    }
+
+    private static string GetMaterialRareLevelName(int level)
+    {
+        return MaterialRareLevelNames[ClampMaterialFilterLevel(level)];
+    }
+
+    private static string GetMaterialItemLevelName(int level)
+    {
+        return MaterialItemLevelNames[ClampMaterialFilterLevel(level)];
+    }
+
+    private static bool IsMaterialFilterOptionButtonName(string? buttonName)
+    {
+        return !string.IsNullOrEmpty(buttonName) &&
+            (buttonName.StartsWith(MaterialRareOptionButtonPrefix, StringComparison.Ordinal) ||
+                buttonName.StartsWith(MaterialItemLevelOptionButtonPrefix, StringComparison.Ordinal));
+    }
+
+    private static bool TryParseMaterialFilterOptionButton(string? buttonName, out bool isRareLevel, out int level)
+    {
+        isRareLevel = false;
+        level = 0;
+        if (string.IsNullOrEmpty(buttonName))
+        {
+            return false;
+        }
+
+        string? numericText = null;
+        if (buttonName.StartsWith(MaterialRareOptionButtonPrefix, StringComparison.Ordinal))
+        {
+            isRareLevel = true;
+            numericText = buttonName.Substring(MaterialRareOptionButtonPrefix.Length);
+        }
+        else if (buttonName.StartsWith(MaterialItemLevelOptionButtonPrefix, StringComparison.Ordinal))
+        {
+            numericText = buttonName.Substring(MaterialItemLevelOptionButtonPrefix.Length);
+        }
+
+        return numericText != null &&
+            int.TryParse(numericText, out level) &&
+            level >= 0 &&
+            level <= 5;
+    }
+
+    private static void ResetMaterialAutoBuyUiState(string source)
+    {
+        _materialAutoBuyBusy = false;
+        _materialFilterDropdownOpen = false;
+        _materialAutoBuyControlCreationFailed = false;
+        HideMaterialAutoBuyUi();
+
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo($"[MaterialSweep] UI reset from {source}.");
+        }
+    }
+
+    private static void HideMaterialAutoBuyUi()
+    {
+        SetOverlayObjectActive(_materialAutoBuyButtonRoot, false);
+        SetOverlayObjectActive(_materialFilterDropdownButtonRoot, false);
+        SetMaterialFilterOptionsVisible(false);
+    }
+
+    private static void UpdateMaterialAutoBuyUiState()
+    {
+        if (!TryGetActiveShopTradeUi(out var tradeUi))
+        {
+            HideMaterialAutoBuyUi();
+            return;
+        }
+
+        EnsureMaterialAutoBuyControls(tradeUi);
+        if (_materialAutoBuyButtonRoot == null ||
+            _materialAutoBuyButton == null ||
+            _materialAutoBuyButtonLabel == null ||
+            _materialFilterDropdownButtonRoot == null ||
+            _materialFilterDropdownButtonLabel == null ||
+            _materialFilterDropdownPanelRoot == null)
+        {
+            return;
+        }
+
+        SetOverlayObjectActive(_materialAutoBuyButtonRoot, true);
+        SetOverlayObjectActive(_materialFilterDropdownButtonRoot, true);
+        _materialAutoBuyButton.interactable = !_materialAutoBuyBusy;
+        _materialAutoBuyButtonLabel.text = _materialAutoBuyBusy ? "正在扫货…" : "材料扫货";
+
+        var dropdownLabel =
+            $"品级≥{GetMaterialRareLevelName(GetMaterialPurchaseRareLevel())} / " +
+            $"等级≥{GetMaterialItemLevelName(GetMaterialPurchaseItemLevel())} ▼";
+        if (!string.Equals(_materialFilterDropdownButtonLabel.text, dropdownLabel, StringComparison.Ordinal))
+        {
+            _materialFilterDropdownButtonLabel.text = dropdownLabel;
+        }
+
+        SetMaterialFilterOptionsVisible(_materialFilterDropdownOpen);
+    }
+
+    private static void EnsureMaterialAutoBuyControls(TradeUIController tradeUi)
+    {
+        if (_materialAutoBuyControlCreationFailed)
+        {
+            return;
+        }
+
+        var template = tradeUi.deltaResourceLabel ?? tradeUi.leftResourceLabel ?? tradeUi.rightResourceLabel;
+        var templateRect = template?.GetComponent<RectTransform>();
+        var expectedParent = template?.transform?.parent;
+        if (template == null || templateRect == null || expectedParent == null)
+        {
+            return;
+        }
+
+        if (_materialAutoBuyButtonRoot != null &&
+            _materialAutoBuyButton != null &&
+            _materialAutoBuyButtonLabel != null &&
+            _materialFilterDropdownButtonRoot != null &&
+            _materialFilterDropdownButtonLabel != null &&
+            _materialFilterDropdownPanelRoot != null &&
+            _materialFilterOptionButtons.Count == 12 &&
+            _materialFilterOptionLabels.Count == 12 &&
+            _materialAutoBuyButtonRoot.transform.parent == expectedParent &&
+            _materialFilterDropdownButtonRoot.transform.parent == expectedParent &&
+            _materialFilterDropdownPanelRoot.transform.parent == expectedParent)
+        {
+            return;
+        }
+
+        var buttonTemplate = FindTradeActionButtonTemplate(tradeUi);
+        if (buttonTemplate == null)
+        {
+            return;
+        }
+
+        DestroyMaterialAutoBuyControls();
+        if (_materialAutoBuyControlCreationFailed)
+        {
+            return;
+        }
+
+        var creationStage = "material sweep button";
+        try
+        {
+            if (!TryCreateButtonTemplateButton(
+                    MaterialAutoBuyButtonName,
+                    template.transform.parent,
+                    buttonTemplate,
+                    templateRect.anchorMin,
+                    templateRect.anchorMax,
+                    templateRect.pivot,
+                    templateRect.anchoredPosition + new Vector2(-215f, 675f),
+                    new Vector2(250f, 42f),
+                    "材料扫货",
+                    out _materialAutoBuyButtonRoot,
+                    out _materialAutoBuyButton,
+                    out _materialAutoBuyButtonLabel) ||
+                _materialAutoBuyButtonRoot == null ||
+                _materialAutoBuyButton == null ||
+                _materialAutoBuyButtonLabel == null)
+            {
+                _materialAutoBuyControlCreationFailed = true;
+                DestroyMaterialAutoBuyControls();
+                return;
+            }
+
+            creationStage = "material filter dropdown button";
+            if (!TryCreateButtonTemplateButton(
+                    MaterialFilterDropdownButtonName,
+                    template.transform.parent,
+                    buttonTemplate,
+                    templateRect.anchorMin,
+                    templateRect.anchorMax,
+                    templateRect.pivot,
+                    templateRect.anchoredPosition + new Vector2(145f, 675f),
+                    new Vector2(440f, 42f),
+                    string.Empty,
+                    out _materialFilterDropdownButtonRoot,
+                    out var materialFilterDropdownButton,
+                    out _materialFilterDropdownButtonLabel) ||
+                _materialFilterDropdownButtonRoot == null ||
+                materialFilterDropdownButton == null ||
+                _materialFilterDropdownButtonLabel == null)
+            {
+                _materialAutoBuyControlCreationFailed = true;
+                DestroyMaterialAutoBuyControls();
+                return;
+            }
+
+            creationStage = "material control label formatting";
+            ConfigureMaterialControlButtonLabel(_materialAutoBuyButtonLabel, 20);
+            ConfigureMaterialControlButtonLabel(_materialFilterDropdownButtonLabel, 18);
+
+            creationStage = "material filter dropdown panel";
+            if (!TryCreateButtonTemplateButton(
+                    MaterialFilterDropdownPanelName,
+                    template.transform.parent,
+                    buttonTemplate,
+                    templateRect.anchorMin,
+                    templateRect.anchorMax,
+                    templateRect.pivot,
+                    templateRect.anchoredPosition + new Vector2(130f, 515f),
+                    new Vector2(540f, 230f),
+                    string.Empty,
+                    out _materialFilterDropdownPanelRoot,
+                    out var dropdownPanelButton,
+                    out var dropdownPanelLabel) ||
+                _materialFilterDropdownPanelRoot == null ||
+                dropdownPanelButton == null ||
+                dropdownPanelLabel == null)
+            {
+                _materialAutoBuyControlCreationFailed = true;
+                DestroyMaterialAutoBuyControls();
+                return;
+            }
+
+            dropdownPanelButton.interactable = false;
+            if (dropdownPanelButton.targetGraphic != null)
+            {
+                dropdownPanelButton.targetGraphic.color = new Color(0.16f, 0.10f, 0.05f, 0.92f);
+                dropdownPanelButton.targetGraphic.raycastTarget = false;
+            }
+            dropdownPanelLabel.text = string.Empty;
+            dropdownPanelLabel.enabled = false;
+
+            for (var level = 0; level <= 5; level++)
+            {
+                creationStage = $"rarity option {level}";
+                if (!TryCreateMaterialFilterOptionButton(
+                        buttonTemplate,
+                        isRareLevel: true,
+                        level))
+                {
+                    _materialAutoBuyControlCreationFailed = true;
+                    DestroyMaterialAutoBuyControls();
+                    return;
+                }
+
+                creationStage = $"item-quality option {level}";
+                if (!TryCreateMaterialFilterOptionButton(
+                        buttonTemplate,
+                        isRareLevel: false,
+                        level))
+                {
+                    _materialAutoBuyControlCreationFailed = true;
+                    DestroyMaterialAutoBuyControls();
+                    return;
+                }
+            }
+
+            creationStage = "option visual refresh";
+            _materialFilterDropdownOpen = false;
+            UpdateMaterialFilterOptionVisuals();
+            SetOverlayObjectActive(_materialAutoBuyButtonRoot, false);
+            SetOverlayObjectActive(_materialFilterDropdownButtonRoot, false);
+            SetOverlayObjectActive(_materialFilterDropdownPanelRoot, false);
+            _materialFilterOptionsVisible = false;
+            LoggerInstance.LogInfo(
+                "[MaterialSweep] Created the in-shop material sweep button and two-column threshold dropdown.");
+        }
+        catch (Exception ex)
+        {
+            _materialAutoBuyControlCreationFailed = true;
+            DestroyMaterialAutoBuyControls();
+            LoggerInstance.LogWarning(
+                $"[MaterialSweep] Could not create shop controls during {creationStage}: {ex}");
+        }
+    }
+
+    private static bool TryCreateMaterialFilterOptionButton(
+        Button buttonTemplate,
+        bool isRareLevel,
+        int level)
+    {
+        if (_materialFilterDropdownPanelRoot == null)
+        {
+            return false;
+        }
+
+        var buttonName = (isRareLevel ? MaterialRareOptionButtonPrefix : MaterialItemLevelOptionButtonPrefix) + level;
+        var optionText = isRareLevel
+            ? $"品级 ≥ {GetMaterialRareLevelName(level)}"
+            : $"等级 ≥ {GetMaterialItemLevelName(level)}";
+        var optionX = isRareLevel ? -130f : 130f;
+        var optionY = 95f - (level * 38f);
+
+        if (!TryCreateButtonTemplateButton(
+                buttonName,
+                _materialFilterDropdownPanelRoot.transform,
+                buttonTemplate,
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(optionX, optionY),
+                new Vector2(250f, 34f),
+                optionText,
+                out var optionRoot,
+                out var optionButton,
+                out var optionLabel) ||
+            optionRoot == null || optionButton == null || optionLabel == null)
+        {
+            return false;
+        }
+
+        ConfigureMaterialControlButtonLabel(optionLabel, 16);
+        _materialFilterOptionButtons.Add(optionButton);
+        _materialFilterOptionLabels.Add(optionLabel);
+        return true;
+    }
+
+    private static void ConfigureMaterialControlButtonLabel(Text label, int fontSize)
+    {
+        label.fontSize = fontSize;
+        label.resizeTextForBestFit = true;
+        label.resizeTextMinSize = 12;
+        label.resizeTextMaxSize = fontSize;
+        label.alignment = TextAnchor.MiddleCenter;
+        label.horizontalOverflow = HorizontalWrapMode.Wrap;
+        label.verticalOverflow = VerticalWrapMode.Truncate;
+        label.color = Color.white;
+        label.raycastTarget = false;
+    }
+
+    private static void DestroyMaterialAutoBuyControls()
+    {
+        var roots = new GameObject?[]
+        {
+            _materialAutoBuyButtonRoot,
+            _materialFilterDropdownButtonRoot,
+            _materialFilterDropdownPanelRoot
+        };
+
+        var destroyFailed = false;
+        foreach (var root in roots)
+        {
+            if (root == null)
+            {
+                continue;
+            }
+
+            try
+            {
+                root.SetActive(false);
+                UnityEngine.Object.Destroy(root);
+            }
+            catch (Exception ex)
+            {
+                destroyFailed = true;
+                LoggerInstance.LogWarning(
+                    $"[MaterialSweep] Failed to destroy UI root {root.name}; retaining references to prevent duplicate controls: {ex}");
+            }
+        }
+
+        if (destroyFailed)
+        {
+            _materialAutoBuyControlCreationFailed = true;
+            return;
+        }
+
+        _materialAutoBuyButtonRoot = null;
+        _materialAutoBuyButton = null;
+        _materialAutoBuyButtonLabel = null;
+        _materialFilterDropdownButtonRoot = null;
+        _materialFilterDropdownButtonLabel = null;
+        _materialFilterDropdownPanelRoot = null;
+        _materialFilterOptionButtons.Clear();
+        _materialFilterOptionLabels.Clear();
+        _materialFilterDropdownOpen = false;
+        _materialFilterOptionsVisible = false;
+    }
+
+    private static void SetMaterialFilterOptionsVisible(bool visible)
+    {
+        if (_materialFilterOptionsVisible == visible)
+        {
+            return;
+        }
+
+        _materialFilterOptionsVisible = visible;
+        SetOverlayObjectActive(_materialFilterDropdownPanelRoot, visible);
+    }
+
+    private static void UpdateMaterialFilterOptionVisuals()
+    {
+        var minRareLv = GetMaterialPurchaseRareLevel();
+        var minItemLv = GetMaterialPurchaseItemLevel();
+        for (var index = 0; index < _materialFilterOptionButtons.Count; index++)
+        {
+            var button = _materialFilterOptionButtons[index];
+            if (button?.gameObject == null ||
+                !TryParseMaterialFilterOptionButton(button.gameObject.name, out var isRareLevel, out var level))
+            {
+                continue;
+            }
+
+            var isSelected = level == (isRareLevel ? minRareLv : minItemLv);
+            if (button.targetGraphic != null)
+            {
+                button.targetGraphic.color = isSelected
+                    ? new Color(0.22f, 0.52f, 0.26f, 0.98f)
+                    : new Color(0.48f, 0.28f, 0.12f, 0.96f);
+            }
+
+            var label = index < _materialFilterOptionLabels.Count
+                ? _materialFilterOptionLabels[index]
+                : null;
+            if (label != null)
+            {
+                var baseText = isRareLevel
+                    ? $"品级 ≥ {GetMaterialRareLevelName(level)}"
+                    : $"等级 ≥ {GetMaterialItemLevelName(level)}";
+                label.text = isSelected ? $"✓ {baseText}" : baseText;
+            }
+        }
+    }
+
+    private static void ToggleMaterialFilterDropdown()
+    {
+        if (!TryGetActiveShopTradeUi(out var tradeUi))
+        {
+            _materialFilterDropdownOpen = false;
+            HideMaterialAutoBuyUi();
+            return;
+        }
+
+        EnsureMaterialAutoBuyControls(tradeUi);
+        _materialFilterDropdownOpen = !_materialFilterDropdownOpen;
+        if (_materialFilterDropdownOpen)
+        {
+            UpdateMaterialFilterOptionVisuals();
+        }
+
+        SetMaterialFilterOptionsVisible(_materialFilterDropdownOpen);
+    }
+
+    private static void SetMaterialFilterLevel(bool isRareLevel, int level)
+    {
+        var clampedLevel = ClampMaterialFilterLevel(level);
+        if (isRareLevel)
+        {
+            _materialPurchaseMinRareLv.Value = clampedLevel;
+        }
+        else
+        {
+            _materialPurchaseMinItemLv.Value = clampedLevel;
+        }
+
+        _materialFilterDropdownOpen = false;
+        UpdateMaterialFilterOptionVisuals();
+        SetMaterialFilterOptionsVisible(false);
+        UpdateMaterialAutoBuyUiState();
+
+        var message =
+            $"材料扫货条件：品级≥{GetMaterialRareLevelName(GetMaterialPurchaseRareLevel())}，" +
+            $"等级≥{GetMaterialItemLevelName(GetMaterialPurchaseItemLevel())}。";
+        PushPlayerLog(message);
+        SetExternalOverlayStatusMessage(message);
+        LoggerInstance.LogInfo($"[MaterialSweep] {message}");
+    }
+
+    private static void OnMaterialAutoBuyButtonClicked()
+    {
+        if (_materialAutoBuyBusy)
+        {
+            return;
+        }
+
+        _materialFilterDropdownOpen = false;
+        SetMaterialFilterOptionsVisible(false);
+        if (!TryGetActiveShopTradeUi(out var tradeUi))
+        {
+            PublishMaterialSweepStatus("材料扫货：当前不在商店交易界面。", warning: true);
+            return;
+        }
+
+        var minRareLv = GetMaterialPurchaseRareLevel();
+        var minItemLv = GetMaterialPurchaseItemLevel();
+        _materialAutoBuyBusy = true;
+        UpdateMaterialAutoBuyUiState();
+
+        try
+        {
+            TryAddFilteredMaterialsToTradeCart(
+                tradeUi,
+                minRareLv,
+                minItemLv,
+                out var foundMaterialCount,
+                out var selectedCount);
+
+            if (foundMaterialCount <= 0)
+            {
+                PublishMaterialSweepStatus("材料扫货：当前商店页没有材料，请先切到材料页。", warning: true);
+            }
+            else if (selectedCount <= 0)
+            {
+                PublishMaterialSweepStatus(
+                    $"材料扫货：没有满足品级≥{GetMaterialRareLevelName(minRareLv)}且等级≥{GetMaterialItemLevelName(minItemLv)}的材料。",
+                    warning: false);
+            }
+            else
+            {
+                PublishMaterialSweepStatus(
+                    $"材料扫货已把 {selectedCount} 件材料加入交易区（品级≥{GetMaterialRareLevelName(minRareLv)}，等级≥{GetMaterialItemLevelName(minItemLv)}）；请检查后手动成交。",
+                    warning: false);
+            }
+        }
+        finally
+        {
+            _materialAutoBuyBusy = false;
+            UpdateMaterialAutoBuyUiState();
+        }
+    }
+
+    private static void TryAddFilteredMaterialsToTradeCart(
+        TradeUIController tradeUi,
+        int minRareLv,
+        int minItemLv,
+        out int foundMaterialCount,
+        out int selectedCount)
+    {
+        foundMaterialCount = 0;
+        selectedCount = 0;
+        if (tradeUi == null || tradeUi.tradeUIType != TradeUIType.Shop)
+        {
+            return;
+        }
+
+        minRareLv = ClampMaterialFilterLevel(minRareLv);
+        minItemLv = ClampMaterialFilterLevel(minItemLv);
+
+        foreach (var icon in EnumerateTradeIcons(tradeUi.rightList))
+        {
+            var item = icon.itemData;
+            if (item == null || item.type != ItemType.Material)
+            {
+                continue;
+            }
+
+            foundMaterialCount++;
+            if (!IsMaterialMatchingThresholds(item, minRareLv, minItemLv))
+            {
+                continue;
+            }
+
+            try
+            {
+                tradeUi.TradeIconClicked(icon.gameObject);
+                selectedCount++;
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.LogWarning(
+                    $"[MaterialSweep] Could not add {DescribeItemSummary(item)} to the trade cart: {ex.Message}");
+            }
+        }
+
+        if (selectedCount > 0)
+        {
+            RefreshTradeUi(tradeUi);
+        }
+
+        LoggerInstance.LogInfo(
+            $"[MaterialSweep] Completed: minRareLv={minRareLv}, minItemLv={minItemLv}, " +
+            $"materials={foundMaterialCount}, added={selectedCount}. No transaction was confirmed automatically.");
+    }
+
+    private static bool IsMaterialMatchingThresholds(ItemData? item, int minRareLv, int minItemLv)
+    {
+        return item != null &&
+            item.type == ItemType.Material &&
+            item.rareLv >= ClampMaterialFilterLevel(minRareLv) &&
+            item.itemLv >= ClampMaterialFilterLevel(minItemLv);
+    }
+
+    private static void PublishMaterialSweepStatus(string message, bool warning)
+    {
+        PushPlayerLog(message);
+        SetExternalOverlayStatusMessage(message);
+        if (warning)
+        {
+            LoggerInstance.LogWarning($"[MaterialSweep] {message}");
+        }
+        else
+        {
+            LoggerInstance.LogInfo($"[MaterialSweep] {message}");
         }
     }
 

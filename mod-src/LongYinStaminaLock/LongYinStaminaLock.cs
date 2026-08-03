@@ -2887,6 +2887,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void ReopenAuctionPreview(PlotController controller)
     {
+        var itemGridRowsBefore = GetAuctionPreviewItemGridRowCount(controller);
         var hideMethod = FindCompatibleTargetMethod(controller.GetType(), nameof(PlotController.HidePlotItem), Type.EmptyTypes);
         hideMethod?.Invoke(controller, Array.Empty<object>());
 
@@ -2897,6 +2898,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
 
         clearMethod.Invoke(controller, Array.Empty<object>());
+        ClearAuctionPreviewItemGridImmediately(controller);
+        var itemGridRowsAfterCleanup = GetAuctionPreviewItemGridRowCount(controller);
 
         var showMethod = FindCompatibleTargetMethod(controller.GetType(), nameof(PlotController.ShowAuctionItem), Type.EmptyTypes);
         if (showMethod == null)
@@ -2905,6 +2908,44 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
 
         showMethod.Invoke(controller, Array.Empty<object>());
+        LoggerInstance.LogInfo(
+            $"Auction preview UI rebuilt: itemGridRows={itemGridRowsBefore}->{itemGridRowsAfterCleanup}->{GetAuctionPreviewItemGridRowCount(controller)}, " +
+            $"items={TryGetCollectionCount(controller.tempPlotShop?.allItem)}.");
+    }
+
+    private static void ClearAuctionPreviewItemGridImmediately(PlotController controller)
+    {
+        var itemGrid = controller.plotItemGrid;
+        if (itemGrid == null)
+        {
+            return;
+        }
+
+        var gridTransform = itemGrid.transform;
+        for (var index = gridTransform.childCount - 1; index >= 0; index--)
+        {
+            var child = gridTransform.GetChild(index);
+            if (child == null)
+            {
+                continue;
+            }
+
+            child.gameObject.SetActive(false);
+            child.SetParent(null, false);
+            UnityEngine.Object.Destroy(child.gameObject);
+        }
+    }
+
+    private static int GetAuctionPreviewItemGridRowCount(PlotController controller)
+    {
+        try
+        {
+            return controller.plotItemGrid?.transform.childCount ?? 0;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static string DescribeAuctionPreviewItems(PlotController controller)

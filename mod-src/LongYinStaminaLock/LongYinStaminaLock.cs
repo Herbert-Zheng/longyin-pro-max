@@ -535,7 +535,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _carryWeightCap = Config.Bind("Inventory", "CarryWeightCap", 100000f, "Minimum carry-weight cap applied to the player inventory. Set to 0 to disable.");
         _ignoreCarryWeight = Config.Bind("Inventory", "IgnoreCarryWeight", false, "When true, forces the player inventory's current carried weight to 0.");
         _merchantCarryCash = Config.Bind("Commerce", "MerchantCarryCash", 100000, "Minimum cash carried by NPC shop merchants while a Shop trade window is open. Set to 0 to disable.");
-        _treasureTradeHelperEnabled = Config.Bind("Commerce", "TreasureTradeHelperEnabled", true, "Shows current treasure resale estimates and skill factors inside trade shops that list treasure items.");
+        _treasureTradeHelperEnabled = Config.Bind("Commerce", "TreasureTradeHelperEnabled", true, "Shows a treasure-cart summary with item count, purchase cost, appraisal cost, expected resale value, and projected profit.");
         _treasureAutoTradeEnabled = Config.Bind("Commerce", "TreasureAutoTradeEnabled", true, "Automatically adds unidentified treasures estimated profitable from the player-appraised parenthesized value when a trade shop opens.");
         _materialAutoBuyEnabled = Config.Bind("Commerce", "MaterialAutoBuyEnabled", true, "Adds the in-shop material sweep button and its rarity and quality filters.");
         _shopOwnershipEnabled = Config.Bind("Commerce", "ShopOwnershipEnabled", true, "Shows the shop ownership overlay and enables buying out the current shop.");

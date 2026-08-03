@@ -105,7 +105,7 @@ test('renderer exposes controls and shortcut hints for the new commerce and assi
 
   for (const label of [
     '首次移动后揭开全部探索迷雾',
-    '显示珍宝交易估价',
+    '显示珍宝购物车汇总',
     '启用材料一键扫货',
     '扫货最低品级',
     '扫货最低等级',
@@ -130,7 +130,7 @@ test('renderer exposes controls and shortcut hints for the new commerce and assi
   assert.match(renderer, /事件难度及按等级生成的拍品会相应提高/);
   assert.match(renderer, /关闭后恢复原版随机等级/);
 
-  assert.match(renderer, /hint="在出售珍宝的商店中显示当前转售估价与技能影响。"/);
+  assert.match(renderer, /hint="在珍宝铺中汇总购物车内珍宝的数量、买入价、鉴定费、预计卖出价与预计利润。"/);
   assert.match(renderer, /hint="在商店内显示材料扫货按钮和筛选菜单；只批量加入购物车，仍需手动结账。"/);
   assert.match(renderer, /hint="0 表示不限；1–5 表示只加入达到该品级的材料。"/);
   assert.match(renderer, /hint="0 表示不限；1–5 表示只加入达到该等级的材料。"/);

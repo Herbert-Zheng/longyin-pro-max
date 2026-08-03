@@ -1766,10 +1766,10 @@ export function App() {
                 <Card title="珍宝交易" eyebrow="Treasure">
                   <div className="field-grid">
                     <CheckboxField
-                      label="显示珍宝交易估价"
+                      label="显示珍宝购物车汇总"
                       value={settings.treasureTradeHelperEnabled}
                       onChange={(value) => updateSetting('treasureTradeHelperEnabled', value)}
-                      hint="在出售珍宝的商店中显示当前转售估价与技能影响。"
+                      hint="在珍宝铺中汇总购物车内珍宝的数量、买入价、鉴定费、预计卖出价与预计利润。"
                     />
                     <CheckboxField
                       label="珍宝自动加入购物车"

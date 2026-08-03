@@ -256,6 +256,7 @@ export type HeroSpeAddDataTypeName = typeof HERO_SPE_ADD_DATA_TYPE_NAMES[number]
 
 export interface VisibleSettings {
   lockStamina: boolean;
+  revealAllOnStepTile: boolean;
   expMultiplier: number;
   battleSkillExpMultiplier: number;
   creationPointMultiplier: number;

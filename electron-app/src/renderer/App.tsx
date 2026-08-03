@@ -1629,6 +1629,13 @@ export function App() {
                         label="锁定探索体力"
                         value={settings.lockStamina}
                         onChange={(value) => updateSetting('lockStamina', value)}
+                        hint="避免探索行动消耗体力。"
+                      />
+                      <CheckboxField
+                        label="首次移动后揭开全部探索迷雾"
+                        value={settings.revealAllOnStepTile}
+                        onChange={(value) => updateSetting('revealAllOnStepTile', value)}
+                        hint="开启后，每次进入探索地图并完成第一次移动时揭开整张地图；关闭时保持原版迷雾探索。"
                       />
                     </div>
                   </div>

@@ -31,6 +31,7 @@ export const BATTLE_TURBO_HOTKEYS = [
 export function defaultSettings(): VisibleSettings {
   return {
     lockStamina: true,
+    revealAllOnStepTile: false,
     expMultiplier: 1,
     battleSkillExpMultiplier: 1,
     creationPointMultiplier: 1,

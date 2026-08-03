@@ -104,6 +104,7 @@ test('renderer exposes controls and shortcut hints for the new commerce and assi
   );
 
   for (const label of [
+    '首次移动后揭开全部探索迷雾',
     '显示珍宝交易估价',
     '启用材料一键扫货',
     '扫货最低品级',
@@ -119,6 +120,12 @@ test('renderer exposes controls and shortcut hints for the new commerce and assi
   ]) {
     assert.match(renderer, new RegExp(`label="${label}"`), `missing independent label: ${label}`);
   }
+
+  assert.match(
+    renderer,
+    /label="首次移动后揭开全部探索迷雾"[\s\S]{0,240}value=\{settings\.revealAllOnStepTile\}[\s\S]{0,240}updateSetting\('revealAllOnStepTile', value\)/
+  );
+  assert.match(renderer, /关闭时保持原版迷雾探索/);
 
   assert.match(renderer, /事件难度及按等级生成的拍品会相应提高/);
   assert.match(renderer, /关闭后恢复原版随机等级/);

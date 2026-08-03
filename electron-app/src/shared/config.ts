@@ -39,7 +39,6 @@ const REQUIRED_PLUGIN_NAMES = [
 interface MainConfigHidden {
   revealExtraFogOnMove: boolean;
   moveRevealRadius: number;
-  revealAllOnStepTile: boolean;
   treasureChestChoiceEnabled: boolean;
   treasureChestChoiceOptions: number;
   treasureChestTotalItems: number;
@@ -60,6 +59,7 @@ interface BattleConfigHidden {
 
 const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   lockStamina: true,
+  revealAllOnStepTile: false,
   expMultiplier: 1,
   battleSkillExpMultiplier: 1,
   creationPointMultiplier: 1,
@@ -120,7 +120,6 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
 const DEFAULT_MAIN_HIDDEN: MainConfigHidden = {
   revealExtraFogOnMove: true,
   moveRevealRadius: 2,
-  revealAllOnStepTile: true,
   treasureChestChoiceEnabled: true,
   treasureChestChoiceOptions: 3,
   treasureChestTotalItems: 2
@@ -612,7 +611,7 @@ function buildMainTemplate(settings = DEFAULT_VISIBLE_SETTINGS, hidden = DEFAULT
 LockStamina = ${boolText(settings.lockStamina)}
 RevealExtraFogOnMove = ${boolText(hidden.revealExtraFogOnMove)}
 MoveRevealRadius = ${hidden.moveRevealRadius}
-RevealAllOnStepTile = ${boolText(hidden.revealAllOnStepTile)}
+RevealAllOnStepTile = ${boolText(settings.revealAllOnStepTile)}
 TreasureChestChoiceEnabled = ${boolText(hidden.treasureChestChoiceEnabled)}
 TreasureChestChoiceOptions = ${hidden.treasureChestChoiceOptions}
 TreasureChestTotalItems = ${hidden.treasureChestTotalItems}
@@ -856,6 +855,7 @@ export async function removeLegacyArtifacts(gameRoot: string): Promise<void> {
 function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
   return {
     lockStamina: input.lockStamina,
+    revealAllOnStepTile: input.revealAllOnStepTile,
     expMultiplier: Math.round(clamp(input.expMultiplier, 1, 999)),
     battleSkillExpMultiplier: Math.round(clamp(input.battleSkillExpMultiplier, 1, 999)),
     creationPointMultiplier: Math.round(clamp(input.creationPointMultiplier, 1, 999)),
@@ -924,6 +924,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
 }
 
 function parseVisibleFromMain(text: string | undefined): VisibleSettings {
+  const explorationSection = getIniSectionBody(text, 'Exploration');
   const battleSection = getIniSectionBody(text, 'Battle');
   const dialogFlowSection = getIniSectionBody(text, 'DialogFlow');
   const dailySkillInsightSection = getIniSectionBody(text, 'DailySkillInsight');
@@ -935,6 +936,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
 
   return {
     lockStamina: readBool(text, 'LockStamina', DEFAULT_VISIBLE_SETTINGS.lockStamina),
+    revealAllOnStepTile: readBool(
+      explorationSection,
+      'RevealAllOnStepTile',
+      DEFAULT_VISIBLE_SETTINGS.revealAllOnStepTile
+    ),
     expMultiplier: readInt(text, 'ExpMultiplier', DEFAULT_VISIBLE_SETTINGS.expMultiplier),
     battleSkillExpMultiplier: readInt(
       battleSection ?? text,
@@ -1385,6 +1391,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
 
   let nextMain = mainText;
   nextMain = upsertIniValue(nextMain, 'LockStamina', boolText(normalized.lockStamina));
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Exploration',
+    'RevealAllOnStepTile',
+    boolText(normalized.revealAllOnStepTile)
+  );
   nextMain = removeIniSectionValue(nextMain, 'StudySkill', 'CostMultiplier');
   nextMain = removeIniSectionValue(nextMain, 'Exploration', 'TreasureChestAutoPickMostValuable');
   nextMain = removeIniValue(nextMain, 'TreasureChestAutoPickMostValuable');

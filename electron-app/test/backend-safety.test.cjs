@@ -405,7 +405,42 @@ test('reading visible settings does not create or modify game files', async (t) 
   const after = await fs.readdir(gameRoot);
 
   assert.equal(settings.lockStamina, true);
+  assert.equal(settings.revealAllOnStepTile, false);
   assert.deepEqual(after, before);
+});
+
+test('exploration full-reveal setting reads only the Exploration section and round-trips', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[WrongSection]',
+      'RevealAllOnStepTile = true',
+      '',
+      '[Exploration]',
+      'LockStamina = true',
+      'RevealAllOnStepTile = false',
+      'UnrelatedExplorationSetting = keep-me',
+      ''
+    ].join('\r\n')
+  );
+
+  const current = await readVisibleSettings(gameRoot);
+  assert.equal(current.revealAllOnStepTile, false);
+
+  const enabled = await saveVisibleSettings(gameRoot, {
+    ...current,
+    revealAllOnStepTile: true
+  });
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.equal(enabled.revealAllOnStepTile, true);
+  assert.match(text, /\[Exploration\][\s\S]*^RevealAllOnStepTile = true$/m);
+  assert.match(text, /^UnrelatedExplorationSetting = keep-me$/m);
+  assert.match(text, /\[WrongSection\]\r?\nRevealAllOnStepTile = true/);
 });
 
 test('new commerce and assist settings have safe defaults when configuration is absent', async (t) => {

@@ -61,6 +61,7 @@ const OVERLAY_EXE_NAME = 'LongYinOverlay.exe';
 
 const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   lockStamina: true,
+  revealAllOnStepTile: false,
   expMultiplier: 1,
   battleSkillExpMultiplier: 1,
   creationPointMultiplier: 1,

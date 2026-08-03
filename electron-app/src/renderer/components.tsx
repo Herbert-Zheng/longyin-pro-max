@@ -49,6 +49,7 @@ export function defaultSettings(): VisibleSettings {
     materialPurchaseMinRareLv: 0,
     materialPurchaseMinItemLv: 0,
     shopOwnershipEnabled: true,
+    auctionEventAlwaysRedEnabled: true,
     auctionPreviewRefreshEnabled: true,
     auctionPreviewRefreshHotkey: 'R',
     auctionPreviewRefreshRequireAlt: true,

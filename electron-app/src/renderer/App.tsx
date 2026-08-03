@@ -1770,6 +1770,12 @@ export function App() {
                 <Card title="拍卖与珍宝鉴定" eyebrow="Auction">
                   <div className="field-grid">
                     <CheckboxField
+                      label="拍卖会固定红色等级"
+                      value={settings.auctionEventAlwaysRedEnabled}
+                      onChange={(value) => updateSetting('auctionEventAlwaysRedEnabled', value)}
+                      hint="开启后新生成的拍卖大会固定为红色最高等级，事件难度及按等级生成的拍品会相应提高；关闭后恢复原版随机等级。"
+                    />
+                    <CheckboxField
                       label="启用拍卖预览免费刷新"
                       value={settings.auctionPreviewRefreshEnabled}
                       onChange={(value) => updateSetting('auctionPreviewRefreshEnabled', value)}

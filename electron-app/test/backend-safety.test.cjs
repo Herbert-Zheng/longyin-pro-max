@@ -421,6 +421,7 @@ test('new commerce and assist settings have safe defaults when configuration is 
       materialPurchaseMinRareLv: settings.materialPurchaseMinRareLv,
       materialPurchaseMinItemLv: settings.materialPurchaseMinItemLv,
       shopOwnershipEnabled: settings.shopOwnershipEnabled,
+      auctionEventAlwaysRedEnabled: settings.auctionEventAlwaysRedEnabled,
       auctionPreviewRefreshEnabled: settings.auctionPreviewRefreshEnabled,
       auctionPreviewRefreshHotkey: settings.auctionPreviewRefreshHotkey,
       auctionPreviewRefreshRequireAlt: settings.auctionPreviewRefreshRequireAlt,
@@ -434,6 +435,7 @@ test('new commerce and assist settings have safe defaults when configuration is 
       materialPurchaseMinRareLv: 0,
       materialPurchaseMinItemLv: 0,
       shopOwnershipEnabled: true,
+      auctionEventAlwaysRedEnabled: true,
       auctionPreviewRefreshEnabled: true,
       auctionPreviewRefreshHotkey: 'R',
       auctionPreviewRefreshRequireAlt: true,
@@ -457,6 +459,7 @@ test('new commerce and assist settings are parsed from their owning INI sections
       'MaterialPurchaseMinRareLv = 1',
       'MaterialPurchaseMinItemLv = 1',
       'ShopOwnershipEnabled = true',
+      'EventAlwaysRedEnabled = true',
       'PreviewRefreshEnabled = true',
       'PreviewRefreshHotkey = WRONG_AUCTION_KEY',
       'PreviewRefreshRequireAlt = true',
@@ -472,6 +475,7 @@ test('new commerce and assist settings are parsed from their owning INI sections
       'ShopOwnershipEnabled = false',
       '',
       '[Auction]',
+      'EventAlwaysRedEnabled = false',
       'PreviewRefreshEnabled = false',
       'PreviewRefreshHotkey = T',
       'PreviewRefreshRequireAlt = false',
@@ -493,6 +497,7 @@ test('new commerce and assist settings are parsed from their owning INI sections
       materialPurchaseMinRareLv: settings.materialPurchaseMinRareLv,
       materialPurchaseMinItemLv: settings.materialPurchaseMinItemLv,
       shopOwnershipEnabled: settings.shopOwnershipEnabled,
+      auctionEventAlwaysRedEnabled: settings.auctionEventAlwaysRedEnabled,
       auctionPreviewRefreshEnabled: settings.auctionPreviewRefreshEnabled,
       auctionPreviewRefreshHotkey: settings.auctionPreviewRefreshHotkey,
       auctionPreviewRefreshRequireAlt: settings.auctionPreviewRefreshRequireAlt,
@@ -506,6 +511,7 @@ test('new commerce and assist settings are parsed from their owning INI sections
       materialPurchaseMinRareLv: 4,
       materialPurchaseMinItemLv: 3,
       shopOwnershipEnabled: false,
+      auctionEventAlwaysRedEnabled: false,
       auctionPreviewRefreshEnabled: false,
       auctionPreviewRefreshHotkey: 'T',
       auctionPreviewRefreshRequireAlt: false,
@@ -530,6 +536,7 @@ test('saving new commerce and assist settings upserts their sections without dis
       'MaterialPurchaseMinRareLv = 91',
       'MaterialPurchaseMinItemLv = 92',
       'ShopOwnershipEnabled = decoy-shop',
+      'EventAlwaysRedEnabled = decoy-auction-event',
       'PreviewRefreshEnabled = decoy-auction',
       'PreviewRefreshHotkey = DECOY_AUCTION_KEY',
       'PreviewRefreshRequireAlt = decoy-auction-alt',
@@ -552,6 +559,7 @@ test('saving new commerce and assist settings upserts their sections without dis
     materialPurchaseMinRareLv: 5,
     materialPurchaseMinItemLv: 2,
     shopOwnershipEnabled: false,
+    auctionEventAlwaysRedEnabled: false,
     auctionPreviewRefreshEnabled: false,
     auctionPreviewRefreshHotkey: 'T',
     auctionPreviewRefreshRequireAlt: false,
@@ -566,6 +574,7 @@ test('saving new commerce and assist settings upserts their sections without dis
   assert.equal(saved.materialPurchaseMinRareLv, 5);
   assert.equal(saved.materialPurchaseMinItemLv, 2);
   assert.equal(saved.shopOwnershipEnabled, false);
+  assert.equal(saved.auctionEventAlwaysRedEnabled, false);
   assert.equal(saved.auctionPreviewRefreshEnabled, false);
   assert.equal(saved.auctionPreviewRefreshHotkey, 'T');
   assert.equal(saved.auctionPreviewRefreshRequireAlt, false);
@@ -580,6 +589,7 @@ test('saving new commerce and assist settings upserts their sections without dis
   assert.match(text, /^MaterialPurchaseMinItemLv = 2$/m);
   assert.match(text, /^ShopOwnershipEnabled = false$/m);
   assert.match(text, /^\[Auction\]$/m);
+  assert.match(text, /^EventAlwaysRedEnabled = false$/m);
   assert.match(text, /^PreviewRefreshEnabled = false$/m);
   assert.match(text, /^PreviewRefreshHotkey = T$/m);
   assert.match(text, /^PreviewRefreshRequireAlt = false$/m);
@@ -589,7 +599,7 @@ test('saving new commerce and assist settings upserts their sections without dis
   assert.match(text, /^BestValueRequireAlt = false$/m);
   assert.match(
     text,
-    /\[WrongSection\]\r?\nTreasureTradeHelperEnabled = decoy-trade\r?\nMaterialAutoBuyEnabled = decoy-material\r?\nMaterialPurchaseMinRareLv = 91\r?\nMaterialPurchaseMinItemLv = 92\r?\nShopOwnershipEnabled = decoy-shop\r?\nPreviewRefreshEnabled = decoy-auction\r?\nPreviewRefreshHotkey = DECOY_AUCTION_KEY\r?\nPreviewRefreshRequireAlt = decoy-auction-alt\r?\nBestValueAssistEnabled = decoy-identify\r?\nBestValueHotkey = DECOY_IDENTIFY_KEY\r?\nBestValueRequireAlt = decoy-identify-alt/
+    /\[WrongSection\]\r?\nTreasureTradeHelperEnabled = decoy-trade\r?\nMaterialAutoBuyEnabled = decoy-material\r?\nMaterialPurchaseMinRareLv = 91\r?\nMaterialPurchaseMinItemLv = 92\r?\nShopOwnershipEnabled = decoy-shop\r?\nEventAlwaysRedEnabled = decoy-auction-event\r?\nPreviewRefreshEnabled = decoy-auction\r?\nPreviewRefreshHotkey = DECOY_AUCTION_KEY\r?\nPreviewRefreshRequireAlt = decoy-auction-alt\r?\nBestValueAssistEnabled = decoy-identify\r?\nBestValueHotkey = DECOY_IDENTIFY_KEY\r?\nBestValueRequireAlt = decoy-identify-alt/
   );
 });
 

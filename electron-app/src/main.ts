@@ -79,6 +79,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   materialPurchaseMinRareLv: 0,
   materialPurchaseMinItemLv: 0,
   shopOwnershipEnabled: true,
+  auctionEventAlwaysRedEnabled: true,
   auctionPreviewRefreshEnabled: true,
   auctionPreviewRefreshHotkey: 'R',
   auctionPreviewRefreshRequireAlt: true,

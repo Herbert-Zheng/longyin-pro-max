@@ -78,6 +78,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   materialPurchaseMinRareLv: 0,
   materialPurchaseMinItemLv: 0,
   shopOwnershipEnabled: true,
+  auctionEventAlwaysRedEnabled: true,
   auctionPreviewRefreshEnabled: true,
   auctionPreviewRefreshHotkey: 'R',
   auctionPreviewRefreshRequireAlt: true,
@@ -647,6 +648,7 @@ MaterialPurchaseMinItemLv = ${settings.materialPurchaseMinItemLv}
 ShopOwnershipEnabled = ${boolText(settings.shopOwnershipEnabled)}
 
 [Auction]
+EventAlwaysRedEnabled = ${boolText(settings.auctionEventAlwaysRedEnabled)}
 PreviewRefreshEnabled = ${boolText(settings.auctionPreviewRefreshEnabled)}
 PreviewRefreshHotkey = ${settings.auctionPreviewRefreshHotkey}
 PreviewRefreshRequireAlt = ${boolText(settings.auctionPreviewRefreshRequireAlt)}
@@ -872,6 +874,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     materialPurchaseMinRareLv: Math.round(clamp(input.materialPurchaseMinRareLv, 0, 5)),
     materialPurchaseMinItemLv: Math.round(clamp(input.materialPurchaseMinItemLv, 0, 5)),
     shopOwnershipEnabled: input.shopOwnershipEnabled,
+    auctionEventAlwaysRedEnabled: input.auctionEventAlwaysRedEnabled,
     auctionPreviewRefreshEnabled: input.auctionPreviewRefreshEnabled,
     auctionPreviewRefreshHotkey: normalizeHotkey(
       input.auctionPreviewRefreshHotkey,
@@ -977,6 +980,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       commerceSection,
       'ShopOwnershipEnabled',
       DEFAULT_VISIBLE_SETTINGS.shopOwnershipEnabled
+    ),
+    auctionEventAlwaysRedEnabled: readBool(
+      auctionSection,
+      'EventAlwaysRedEnabled',
+      DEFAULT_VISIBLE_SETTINGS.auctionEventAlwaysRedEnabled
     ),
     auctionPreviewRefreshEnabled: readBool(
       auctionSection,
@@ -1426,6 +1434,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'Commerce',
     'ShopOwnershipEnabled',
     boolText(normalized.shopOwnershipEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Auction',
+    'EventAlwaysRedEnabled',
+    boolText(normalized.auctionEventAlwaysRedEnabled)
   );
   nextMain = upsertIniSectionValue(
     nextMain,

@@ -82,6 +82,7 @@ $requiredInteropMembers = [ordered]@{
     PlotController = @(
         'ShowAuctionItem',
         'HidePlotItem',
+        'ClearPlotItem',
         'FreshAuctionItem',
         'GenerateAuctionItem',
         'Update',
@@ -90,7 +91,9 @@ $requiredInteropMembers = [ordered]@{
         'tempPlotShop',
         'nowEvent'
     )
-    EventData = @('eventItemList', 'difficulty', 'randomSeed')
+    WorldEventController = @('GetWorldEventRandomDifficulty')
+    WorldEventDataBase = @('name', 'eventData')
+    EventData = @('eventName', 'eventItemList', 'difficulty', 'randomSeed')
     IdentifyMatchController = @(
         'ShowIdentifyMatchUI',
         'HideIdentifyMatchUI',

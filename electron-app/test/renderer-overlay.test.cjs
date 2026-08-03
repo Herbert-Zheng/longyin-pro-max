@@ -74,6 +74,7 @@ test('renderer exposes controls and shortcut hints for the new commerce and assi
     'materialPurchaseMinRareLv',
     'materialPurchaseMinItemLv',
     'shopOwnershipEnabled',
+    'auctionEventAlwaysRedEnabled',
     'auctionPreviewRefreshEnabled',
     'auctionPreviewRefreshHotkey',
     'auctionPreviewRefreshRequireAlt',
@@ -108,6 +109,7 @@ test('renderer exposes controls and shortcut hints for the new commerce and assi
     '扫货最低品级',
     '扫货最低等级',
     '启用店铺产业与买断',
+    '拍卖会固定红色等级',
     '启用拍卖预览免费刷新',
     '拍卖刷新主键',
     '拍卖刷新需要按住 Alt',
@@ -117,6 +119,9 @@ test('renderer exposes controls and shortcut hints for the new commerce and assi
   ]) {
     assert.match(renderer, new RegExp(`label="${label}"`), `missing independent label: ${label}`);
   }
+
+  assert.match(renderer, /事件难度及按等级生成的拍品会相应提高/);
+  assert.match(renderer, /关闭后恢复原版随机等级/);
 
   assert.match(renderer, /hint="在出售珍宝的商店中显示当前转售估价与技能影响。"/);
   assert.match(renderer, /hint="在商店内显示材料扫货按钮和筛选菜单；只批量加入购物车，仍需手动结账。"/);

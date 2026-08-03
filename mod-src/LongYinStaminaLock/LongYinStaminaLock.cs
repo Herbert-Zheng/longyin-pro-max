@@ -13,7 +13,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.31.0")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.32.0")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -57,6 +57,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const string MaterialRareOptionButtonPrefix = "CodexMaterialRareOptionButton:";
     private const string MaterialItemLevelOptionButtonPrefix = "CodexMaterialItemLevelOptionButton:";
     private const string AuctionPreviewRefreshButtonName = "CodexAuctionPreviewRefreshButton";
+    private const float AuctionRedEventDifficulty = 10f;
     private const string IdentifyBestTreasureButtonName = "CodexIdentifyBestTreasureButton";
     private const int ExternalOverlayProtocolVersion = 1;
     private const string ExternalOverlayStateFileName = "codex.longyin.overlay-state.json";
@@ -108,6 +109,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<bool> _auctionPreviewRefreshEnabled = null!;
     private static ConfigEntry<KeyCode> _auctionPreviewRefreshHotkey = null!;
     private static ConfigEntry<bool> _auctionPreviewRefreshRequireAlt = null!;
+    private static ConfigEntry<bool> _auctionEventAlwaysRedEnabled = null!;
     private static ConfigEntry<bool> _treasureIdentifyBestValueAssistEnabled = null!;
     private static ConfigEntry<KeyCode> _treasureIdentifyBestValueHotkey = null!;
     private static ConfigEntry<bool> _treasureIdentifyBestValueRequireAlt = null!;
@@ -530,6 +532,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _auctionPreviewRefreshEnabled = Config.Bind("Auction", "PreviewRefreshEnabled", true, "Adds a free unlimited refresh button to the auction exhibit preview window.");
         _auctionPreviewRefreshHotkey = Config.Bind("Auction", "PreviewRefreshHotkey", KeyCode.R, "Main key used to refresh while the auction exhibit preview is open.");
         _auctionPreviewRefreshRequireAlt = Config.Bind("Auction", "PreviewRefreshRequireAlt", true, "When true, hold either Alt key while pressing PreviewRefreshHotkey. The default shortcut is Alt+R.");
+        _auctionEventAlwaysRedEnabled = Config.Bind("Auction", "EventAlwaysRedEnabled", true, "When true, the 拍卖大会 world event is generated at difficulty 10, the red highest event grade, including its grade-dependent auction content.");
         _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the treasure with the highest player-appraised value shown in parentheses. Confirmation remains manual.");
         _treasureIdentifyBestValueHotkey = Config.Bind("TreasureIdentify", "BestValueHotkey", KeyCode.F, "Main key used to select the highest parenthesized appraisal value while the appraisal window is open.");
         _treasureIdentifyBestValueRequireAlt = Config.Bind("TreasureIdentify", "BestValueRequireAlt", true, "When true, hold either Alt key while pressing BestValueHotkey. The default shortcut is Alt+F.");
@@ -653,6 +656,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(ItemIconController), nameof(ItemIconController.OnClick), Type.EmptyTypes, null, nameof(ItemIconOnClickPostfix));
         var auctionPreviewShowPatched = PatchMethod(typeof(PlotController), nameof(PlotController.ShowAuctionItem), Type.EmptyTypes, null, nameof(ShowAuctionItemPostfix));
         var auctionPreviewHidePatched = PatchMethod(typeof(PlotController), nameof(PlotController.HidePlotItem), Type.EmptyTypes, null, nameof(HidePlotItemPostfix));
+        PatchMethod(typeof(WorldEventController), nameof(WorldEventController.GetWorldEventRandomDifficulty), new[] { typeof(WorldEventDataBase) }, nameof(AuctionWorldEventDifficultyPrefix), null);
         PatchMethod(typeof(PlotController), "Update", Type.EmptyTypes, null, nameof(PlotControllerUpdatePostfix));
         var auctionRefreshGatePatched = PatchMethod(typeof(PlotController), nameof(PlotController.FreshAuctionItem), Type.EmptyTypes, nameof(FreshAuctionItemPrefix), null);
         var identifyShowPatched = PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.ShowIdentifyMatchUI), new[] { typeof(float), typeof(string) }, null, nameof(ShowIdentifyMatchUiPostfix));
@@ -779,6 +783,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo(
             $"Auction exhibit preview refresh starts {(_auctionPreviewRefreshEnabled.Value ? "ON" : "OFF")} with shortcut " +
             $"{FormatConfiguredHotkey(_auctionPreviewRefreshHotkey.Value, _auctionPreviewRefreshRequireAlt.Value)}.");
+        Log.LogInfo($"Auction event fixed-red grade starts {(_auctionEventAlwaysRedEnabled.Value ? "ON" : "OFF")} at difficulty {AuctionRedEventDifficulty:0.###}.");
         Log.LogInfo(
             $"Treasure identify best-value assist starts {(_treasureIdentifyBestValueAssistEnabled.Value ? "ON" : "OFF")} with shortcut " +
             $"{FormatConfiguredHotkey(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value)}; confirmation remains manual.");
@@ -1812,6 +1817,30 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
 
         return left.itemLv.CompareTo(right.itemLv);
+    }
+
+    private static bool IsAuctionWorldEvent(WorldEventDataBase targetWorldEventDataBase)
+    {
+        if (targetWorldEventDataBase == null)
+        {
+            return false;
+        }
+
+        var templateName = targetWorldEventDataBase.name?.Trim();
+        var eventName = targetWorldEventDataBase.eventData?.eventName?.Trim();
+        return string.Equals(templateName, "拍卖大会", StringComparison.Ordinal) ||
+               string.Equals(eventName, "拍卖大会", StringComparison.Ordinal);
+    }
+
+    private static bool AuctionWorldEventDifficultyPrefix(WorldEventDataBase targetWorldEventDataBase, ref float __result)
+    {
+        if (!_auctionEventAlwaysRedEnabled.Value || !IsAuctionWorldEvent(targetWorldEventDataBase))
+        {
+            return true;
+        }
+
+        __result = AuctionRedEventDifficulty;
+        return false;
     }
 
     private static void ShowAuctionItemPostfix(PlotController __instance)
@@ -2860,6 +2889,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         var hideMethod = FindCompatibleTargetMethod(controller.GetType(), nameof(PlotController.HidePlotItem), Type.EmptyTypes);
         hideMethod?.Invoke(controller, Array.Empty<object>());
+
+        var clearMethod = FindCompatibleTargetMethod(controller.GetType(), nameof(PlotController.ClearPlotItem), Type.EmptyTypes);
+        if (clearMethod == null)
+        {
+            throw new MissingMethodException(controller.GetType().FullName, nameof(PlotController.ClearPlotItem));
+        }
+
+        clearMethod.Invoke(controller, Array.Empty<object>());
 
         var showMethod = FindCompatibleTargetMethod(controller.GetType(), nameof(PlotController.ShowAuctionItem), Type.EmptyTypes);
         if (showMethod == null)

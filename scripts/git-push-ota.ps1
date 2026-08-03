@@ -574,6 +574,22 @@ if ($LASTEXITCODE -ne 0) {
   throw '维护插件静态兼容性检查失败。'
 }
 
+$auctionEventCheck = Join-Path $RepoRoot 'scripts\check-auction-event-semantics.ps1'
+Assert-FileExists -Path $auctionEventCheck -Label '拍卖会等级语义检查脚本'
+Write-Step '执行拍卖会等级语义检查'
+& powershell -NoProfile -ExecutionPolicy Bypass -File $auctionEventCheck
+if ($LASTEXITCODE -ne 0) {
+  throw '拍卖会等级语义检查失败。'
+}
+
+$auctionPreviewCheck = Join-Path $RepoRoot 'scripts\check-auction-preview-semantics.ps1'
+Assert-FileExists -Path $auctionPreviewCheck -Label '拍卖预览刷新语义检查脚本'
+Write-Step '执行拍卖预览刷新语义检查'
+& powershell -NoProfile -ExecutionPolicy Bypass -File $auctionPreviewCheck
+if ($LASTEXITCODE -ne 0) {
+  throw '拍卖预览刷新语义检查失败。'
+}
+
 if (-not (Test-Path $zipPath)) {
   throw "未找到 OTA ZIP：$zipPath"
 }

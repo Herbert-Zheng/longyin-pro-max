@@ -139,3 +139,65 @@ test('renderer exposes controls and shortcut hints for the new commerce and assi
   assert.match(renderer, /hint="按鼠标悬浮括号内的玩家鉴定价选择最高项；最终确认仍需手动完成。"/);
   assert.equal((renderer.match(/hint="开启时快捷键为 Alt \+ 主键。"/g) ?? []).length >= 2, true);
 });
+
+test('launcher keeps primary actions visible and clearly marks unsaved settings', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+  const styles = readSource('src/renderer/styles.css');
+  const main = readSource('src/main.ts');
+  const html = readSource('index.html');
+
+  assert.match(renderer, /const settingsDirty = JSON\.stringify\(settings\) !== savedSettingsText/);
+  assert.match(renderer, /普通设置未保存/);
+  assert.match(renderer, /配置已保存/);
+  assert.match(renderer, /run\('启动游戏',[\s\S]{0,100}, false\)/);
+  assert.match(renderer, /当前未保存修改仍会保留在界面中/);
+  assert.match(styles, /\.workspace__hero\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?top:\s*16px;/);
+  assert.match(styles, /\.nav-item__desc\s*\{\s*display:\s*none;/);
+  assert.match(styles, /\.toggle__input:checked::after\s*\{[\s\S]*?translateX\(20px\)/);
+  assert.match(main, /autoHideMenuBar:\s*true/);
+  assert.match(html, /class="boot-splash"/);
+  assert.match(html, /正在读取游戏目录、模组与配置/);
+  assert.match(html, /启动界面加载超时/);
+  assert.match(main, /webContents\.on\('did-fail-load'/);
+  assert.match(main, /webContents\.on\('render-process-gone'/);
+  assert.match(main, /webContents\.on\('console-message'/);
+  assert.match(main, /renderer-ready/);
+  assert.match(html, /renderer-error/);
+  assert.match(html, /renderer-unhandledrejection/);
+});
+
+test('configuration status distinguishes disconnected, loading, failed, dirty and saved states', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+
+  for (const state of ['disconnected', 'loading', 'load-error', 'dirty', 'saved']) {
+    assert.match(renderer, new RegExp(`key: '${state}'`), `missing configuration state: ${state}`);
+  }
+
+  assert.match(renderer, /disabled=\{working !== null \|\| !gameRoot\}/);
+  assert.match(renderer, /acceptVisibleSettingsIfUnchanged/);
+  assert.match(renderer, /acceptCustomTalentPackIfUnchanged/);
+  assert.match(renderer, /run\('安装模组',[\s\S]{0,100}, false\)/);
+  assert.match(renderer, /run\('卸载模组',[\s\S]{0,100}, false\)/);
+  assert.match(renderer, /setCustomTalentsReady\(true\)/);
+});
+
+test('commerce settings use readable groups and disable dependent controls', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+
+  for (const title of ['珍宝交易', '材料扫货', '店铺与背包', '拍卖与珍宝鉴定']) {
+    assert.match(renderer, new RegExp(`title="${title}"`));
+  }
+
+  assert.match(
+    renderer,
+    /label="扫货最低品级"[\s\S]{0,400}disabled=\{!settings\.materialAutoBuyEnabled\}/
+  );
+  assert.match(
+    renderer,
+    /label="拍卖刷新主键"[\s\S]{0,500}options=\{optionsWithCurrent\(settings\.auctionPreviewRefreshHotkey, UNITY_HOTKEY_OPTIONS\)\}[\s\S]{0,220}disabled=\{!settings\.auctionPreviewRefreshEnabled\}/
+  );
+  assert.match(
+    renderer,
+    /label="最高估值选择主键"[\s\S]{0,500}options=\{optionsWithCurrent\(settings\.treasureIdentifyBestValueHotkey, UNITY_HOTKEY_OPTIONS\)\}[\s\S]{0,220}disabled=\{!settings\.treasureIdentifyBestValueAssistEnabled\}/
+  );
+});

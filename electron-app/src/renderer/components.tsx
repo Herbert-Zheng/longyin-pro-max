@@ -2,6 +2,21 @@ import type { ReactNode } from 'react';
 import type { VisibleSettings } from '../shared/types';
 
 export const HOTKEY_OPTIONS = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'];
+export const UNITY_HOTKEY_OPTIONS = [
+  ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''),
+  ...HOTKEY_OPTIONS,
+  'Insert',
+  'Home',
+  'PageUp',
+  'Delete',
+  'End',
+  'PageDown',
+  'Pause',
+  'BackQuote',
+  'Mouse3',
+  'Mouse4',
+  'Mouse5'
+];
 export const BATTLE_TURBO_HOTKEYS = [
   'F1',
   'F2',
@@ -107,9 +122,10 @@ export function FieldShell(props: {
   hint?: string;
   children: ReactNode;
   wide?: boolean;
+  disabled?: boolean;
 }) {
   return (
-    <label className={`field ${props.wide ? 'field--wide' : ''}`}>
+    <label className={`field ${props.wide ? 'field--wide' : ''} ${props.disabled ? 'field--disabled' : ''}`}>
       <span className="field__label">{props.label}</span>
       {props.children}
       {props.hint ? <span className="field__hint">{props.hint}</span> : null}
@@ -126,9 +142,10 @@ export function NumberField(props: {
   step?: number;
   hint?: string;
   suffix?: string;
+  disabled?: boolean;
 }) {
   return (
-    <FieldShell label={props.label} hint={props.hint}>
+    <FieldShell label={props.label} hint={props.hint} disabled={props.disabled}>
       <div className="field__input-row">
         <input
           className="input input--number"
@@ -136,6 +153,7 @@ export function NumberField(props: {
           min={props.min}
           max={props.max}
           step={props.step}
+          disabled={props.disabled}
           value={formatNumber(props.value)}
           onChange={(event) => props.onChange(Number(event.target.value))}
         />
@@ -150,9 +168,10 @@ export function CheckboxField(props: {
   value: boolean;
   onChange: (next: boolean) => void;
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
-    <label className="toggle">
+    <label className={`toggle ${props.disabled ? 'toggle--disabled' : ''}`}>
       <span className="toggle__copy">
         <span className="toggle__label">{props.label}</span>
         {props.hint ? <span className="toggle__hint">{props.hint}</span> : null}
@@ -161,6 +180,7 @@ export function CheckboxField(props: {
         className="toggle__input"
         type="checkbox"
         checked={props.value}
+        disabled={props.disabled}
         onChange={(event) => props.onChange(event.target.checked)}
       />
     </label>
@@ -173,10 +193,16 @@ export function SelectField(props: {
   onChange: (next: string) => void;
   options: string[];
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
-    <FieldShell label={props.label} hint={props.hint}>
-      <select className="input" value={props.value} onChange={(event) => props.onChange(event.target.value)}>
+    <FieldShell label={props.label} hint={props.hint} disabled={props.disabled}>
+      <select
+        className="input"
+        value={props.value}
+        disabled={props.disabled}
+        onChange={(event) => props.onChange(event.target.value)}
+      >
         {props.options.map((option) => (
           <option key={option} value={option}>
             {option}

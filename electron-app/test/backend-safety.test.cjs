@@ -12,6 +12,25 @@ const {
   saveVisibleSettings
 } = require('../dist/main/shared/config.js');
 const { installOwnedPayload, uninstallOwnedPayload } = require('../dist/main/shared/payload.js');
+const { reconcilePersistedValue } = require('../dist/main/shared/persisted-state.js');
+
+test('ordinary settings save response preserves edits made while the request is pending', () => {
+  const submitted = { enabled: true, multiplier: 2 };
+  const persisted = { enabled: true, multiplier: 2 };
+  const editedWhileSaving = { enabled: true, multiplier: 3 };
+
+  assert.deepEqual(reconcilePersistedValue(submitted, JSON.stringify(submitted), persisted), persisted);
+  assert.deepEqual(reconcilePersistedValue(editedWhileSaving, JSON.stringify(submitted), persisted), editedWhileSaving);
+});
+
+test('custom talent save response preserves talent edits made while the request is pending', () => {
+  const submitted = { version: 1, talents: [{ id: 'talent-a', name: '旧名称' }] };
+  const persisted = { version: 1, talents: [{ id: 'talent-a', name: '旧名称' }] };
+  const editedWhileSaving = { version: 1, talents: [{ id: 'talent-a', name: '新名称' }] };
+
+  assert.deepEqual(reconcilePersistedValue(submitted, JSON.stringify(submitted), persisted), persisted);
+  assert.deepEqual(reconcilePersistedValue(editedWhileSaving, JSON.stringify(submitted), persisted), editedWhileSaving);
+});
 
 async function createWorkspace() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'longyin-electron-test-'));

@@ -16,6 +16,7 @@ import type {
   UpdateProgressEvent,
   VisibleSettings
 } from '../shared/types';
+import { reconcilePersistedValue } from '../shared/persisted-state';
 import {
   BATTLE_TURBO_HOTKEYS,
   Card,
@@ -25,6 +26,7 @@ import {
   SelectField,
   StatusPill,
   TextField,
+  UNITY_HOTKEY_OPTIONS,
   clampText,
   defaultSettings,
   mergeSettings
@@ -122,6 +124,11 @@ function formatProgressTimestamp(value: string): string {
   }).format(date);
 }
 
+function optionsWithCurrent(current: string, options: string[]): string[] {
+  const normalized = current.trim();
+  return !normalized || options.includes(normalized) ? options : [normalized, ...options];
+}
+
 async function copyText(value: string): Promise<void> {
   await navigator.clipboard.writeText(value);
 }
@@ -160,6 +167,7 @@ function summarizeCustomTalent(talent: CustomTalentDefinition): string {
 export function App() {
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
   const [settings, setSettings] = useState<VisibleSettings>(defaultSettings());
+  const [savedSettingsText, setSavedSettingsText] = useState(() => JSON.stringify(defaultSettings()));
   const [activePage, setActivePage] = useState<NavKey>('home');
   const [working, setWorking] = useState<string | null>(null);
   const [message, setMessage] = useState('正在加载...');
@@ -184,11 +192,11 @@ export function App() {
       { key: 'home', label: '主页', eyebrow: 'Launcher', title: '主页', description: '集中处理安装、自检、保存配置与安全启动。' },
       { key: 'updates', label: '更新记录', eyebrow: 'OTA', title: '更新记录', description: '查看当前版本、GitHub Release 说明与 OTA 运行日志。' },
       { key: 'systems', label: '系统更改', eyebrow: 'Runtime', title: '系统更改', description: '整理全局运行控制、时间冻结与环境自检。' },
-      { key: 'expTalent', label: '经验值，天赋相关', eyebrow: 'Growth', title: '经验值，天赋相关', description: '把经验成长、心悟机制与突破天赋放在同一页。' },
+      { key: 'expTalent', label: '成长与天赋', eyebrow: 'Growth', title: '成长与天赋', description: '把经验成长、心悟机制与突破天赋放在同一页。' },
       { key: 'customTalent', label: '自定义天赋', eyebrow: 'Creator', title: '自定义天赋', description: '创建、编辑和管理多个自定义天赋，保存后下次启动游戏生效。' },
-      { key: 'worldExplore', label: '大地图，探索类', eyebrow: 'Explore', title: '大地图，探索类', description: '专注探索体力、世界地图坐骑与移动体验。' },
-      { key: 'tradeCraft', label: '交易，制造类', eyebrow: 'Commerce', title: '交易，制造类', description: '交易、背包与制造增产统一归档。' },
-      { key: 'socialTeam', label: '聊天，关系，组队', eyebrow: 'Social', title: '聊天，关系，组队', description: '把聊天配额、关系提升与组队辅助集中展示。' },
+      { key: 'worldExplore', label: '探索与大地图', eyebrow: 'Explore', title: '探索与大地图', description: '专注探索体力、世界地图坐骑与移动体验。' },
+      { key: 'tradeCraft', label: '交易与制造', eyebrow: 'Commerce', title: '交易与制造', description: '交易、背包与制造增产统一归档。' },
+      { key: 'socialTeam', label: '社交与组队', eyebrow: 'Social', title: '社交与组队', description: '把聊天配额、关系提升与组队辅助集中展示。' },
       { key: 'battle', label: '战斗相关', eyebrow: 'Battle', title: '战斗相关', description: '收纳战斗数值、战斗节奏与战斗加速。' }
     ],
     []
@@ -200,8 +208,24 @@ export function App() {
     setSettings((current) => mergeSettings(current, { [key]: value } as Partial<VisibleSettings>));
   };
 
+  const acceptVisibleSettings = (nextSettings: VisibleSettings) => {
+    setSettings(nextSettings);
+    setSavedSettingsText(JSON.stringify(nextSettings));
+  };
+
+  const acceptVisibleSettingsIfUnchanged = (nextSettings: VisibleSettings, submittedText: string) => {
+    setSavedSettingsText(JSON.stringify(nextSettings));
+    setSettings((current) => reconcilePersistedValue(current, submittedText, nextSettings));
+  };
+
   const replaceCustomTalentPack = (nextPack: CustomTalentPack) => {
     setCustomTalentPack(cloneCustomTalentPack(nextPack));
+  };
+
+  const acceptCustomTalentPackIfUnchanged = (nextPack: CustomTalentPack, submittedText: string) => {
+    const persistedPack = cloneCustomTalentPack(nextPack);
+    setSavedCustomTalentPackText(JSON.stringify(persistedPack));
+    setCustomTalentPack((current) => reconcilePersistedValue(current, submittedText, persistedPack));
   };
 
   const updateSelectedTalent = (updater: (talent: CustomTalentDefinition) => CustomTalentDefinition) => {
@@ -261,7 +285,7 @@ export function App() {
     setSnapshot(next);
     setInitialLoadError(null);
     if (syncSettings) {
-      setSettings(next.visibleSettings);
+      acceptVisibleSettings(next.visibleSettings);
     }
     setUpdate(next.update);
     if (!preserveMessage) {
@@ -304,19 +328,25 @@ export function App() {
     return nextHistory;
   };
 
-  const run = async (label: string, action: () => Promise<any>) => {
+  const run = async (label: string, action: () => Promise<any>, syncSettings = false) => {
+    const submittedSettingsText = JSON.stringify(settings);
     setWorking(label);
     clearError();
     try {
       const result = await action();
       if (result?.updatedSnapshot) {
         setSnapshot(result.updatedSnapshot);
-        setSettings(result.updatedSnapshot.visibleSettings);
+        if (syncSettings) {
+          acceptVisibleSettingsIfUnchanged(result.updatedSnapshot.visibleSettings, submittedSettingsText);
+        }
         setUpdate(result.updatedSnapshot.update);
         setMessage(result.message ?? label);
       }
       else {
-        await refresh(label);
+        const nextSnapshot = await refresh(label, false, false);
+        if (syncSettings) {
+          acceptVisibleSettingsIfUnchanged(nextSnapshot.visibleSettings, submittedSettingsText);
+        }
       }
       return result;
     }
@@ -428,7 +458,18 @@ export function App() {
   const selectedCustomTalent =
     customTalentPack.talents.find((talent) => talent.id === selectedCustomTalentId) ?? customTalentPack.talents[0] ?? null;
   const customTalentValidationErrors = validateCustomTalentPack(customTalentPack);
+  const settingsDirty = JSON.stringify(settings) !== savedSettingsText;
   const customTalentDirty = JSON.stringify(customTalentPack) !== savedCustomTalentPackText;
+  const customTalentWriteBlocked = !customTalentsReady && !customTalentLoadError;
+  const configurationStatus = !gameRoot
+    ? { key: 'disconnected', label: '未连接', detail: '未连接游戏目录' }
+    : customTalentLoadError
+      ? { key: 'load-error', label: '读取失败', detail: '自定义天赋读取失败' }
+      : !customTalentsReady
+        ? { key: 'loading', label: '正在读取', detail: '正在读取游戏配置' }
+        : settingsDirty || customTalentDirty
+          ? { key: 'dirty', label: '有未保存更改', detail: '配置有未保存更改' }
+          : { key: 'saved', label: '已保存', detail: '配置已保存' };
   const saveAndLaunchDisabledReason = !customTalentsReady
     ? customTalentLoadError
       ? `自定义天赋读取失败：${customTalentLoadError}`
@@ -440,12 +481,13 @@ export function App() {
         : null;
 
   const save = async () => {
+    const submittedSettingsText = JSON.stringify(settings);
     setWorking('保存中');
     clearError();
     try {
       const nextSnapshot = await window.longyin.saveSettings(settings);
       setSnapshot(nextSnapshot);
-      setSettings(nextSnapshot.visibleSettings);
+      acceptVisibleSettingsIfUnchanged(nextSnapshot.visibleSettings, submittedSettingsText);
       setUpdate(nextSnapshot.update);
       setMessage('设置已保存。');
     }
@@ -458,18 +500,18 @@ export function App() {
   };
 
   const saveCustomTalents = async () => {
+    const submittedCustomTalentText = JSON.stringify(customTalentPack);
     setWorking('应用自定义天赋');
     clearError();
     try {
       const result = await window.longyin.saveCustomTalents(customTalentPack);
-      replaceCustomTalentPack(result.pack);
-      setSavedCustomTalentPackText(JSON.stringify(result.pack));
+      acceptCustomTalentPackIfUnchanged(result.pack, submittedCustomTalentText);
       setCustomTalentLoadError(null);
+      setCustomTalentsReady(true);
       setMessage(result.message);
     }
     catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setCustomTalentLoadError(message);
       showError(message);
       setMessage('无法保存自定义天赋。');
     }
@@ -550,10 +592,14 @@ export function App() {
   };
 
   const saveAndLaunch = async () => {
-    const result = await run('保存并启动', () => window.longyin.saveAndLaunch({ settings, customTalents: customTalentPack }));
+    const submittedCustomTalentText = JSON.stringify(customTalentPack);
+    const result = await run(
+      '保存并启动',
+      () => window.longyin.saveAndLaunch({ settings, customTalents: customTalentPack }),
+      true
+    );
     if (result?.customTalents) {
-      replaceCustomTalentPack(result.customTalents);
-      setSavedCustomTalentPackText(JSON.stringify(result.customTalents));
+      acceptCustomTalentPackIfUnchanged(result.customTalents, submittedCustomTalentText);
       setCustomTalentLoadError(null);
       setCustomTalentsReady(true);
     }
@@ -576,23 +622,23 @@ export function App() {
   };
 
   const startOverlay = async () => {
-    await run('启动 Overlay', () => window.longyin.startOverlay());
+    await run('启动 Overlay', () => window.longyin.startOverlay(), false);
   };
 
   const stopOverlay = async () => {
-    await run('关闭 Overlay', () => window.longyin.stopOverlay());
+    await run('关闭 Overlay', () => window.longyin.stopOverlay(), false);
   };
 
   const install = async () => {
-    await run('安装模组', () => window.longyin.install());
+    await run('安装模组', () => window.longyin.install(), false);
   };
 
   const uninstall = async () => {
-    await run('卸载模组', () => window.longyin.uninstall());
+    await run('卸载模组', () => window.longyin.uninstall(), false);
   };
 
   const launch = async () => {
-    await run('启动游戏', () => window.longyin.launch());
+    await run('启动游戏', () => window.longyin.launch(), false);
   };
 
   const pickGameRoot = async () => {
@@ -601,7 +647,7 @@ export function App() {
     try {
       const next = await window.longyin.pickGameRoot();
       setSnapshot(next);
-      setSettings(next.visibleSettings);
+      acceptVisibleSettings(next.visibleSettings);
       setUpdate(next.update);
       setMessage('游戏目录已选择。');
     }
@@ -639,7 +685,6 @@ export function App() {
       const result = await window.longyin.applyUpdate();
       if (result?.updatedSnapshot) {
         setSnapshot(result.updatedSnapshot);
-        setSettings(result.updatedSnapshot.visibleSettings);
         setUpdate(result.updatedSnapshot.update);
         setMessage(result.message ?? '更新包已下载。请等待应用自动重启。');
       }
@@ -739,6 +784,7 @@ export function App() {
                 key={item.key}
                 className={`nav-item ${activePage === item.key ? 'nav-item--active' : ''}`}
                 onClick={() => setActivePage(item.key)}
+                aria-current={activePage === item.key ? 'page' : undefined}
               >
                 <span className="nav-item__eyebrow">{item.eyebrow}</span>
                 <strong>{item.label}</strong>
@@ -764,6 +810,12 @@ export function App() {
               <span>更新状态</span>
               <strong>{update?.updateAvailable ? `可升级到 ${update.latestVersion}` : '已是最新'}</strong>
             </div>
+            <div className="sidebar__panel-row">
+              <span>配置状态</span>
+              <strong className={configurationStatus.key === 'saved' ? 'text-good' : 'text-warn'}>
+                {configurationStatus.label}
+              </strong>
+            </div>
           </div>
         </aside>
 
@@ -776,8 +828,13 @@ export function App() {
             </div>
 
             <div className="workspace__hero-actions">
-              <button className="btn btn--primary" onClick={save} disabled={working !== null}>
-                保存设置
+              <button
+                className="btn btn--primary"
+                onClick={save}
+                disabled={working !== null || !gameRoot}
+                title={gameRoot ? '把当前普通设置写入游戏配置。' : '请先选择游戏目录。'}
+              >
+                {settingsDirty ? '保存设置 · 未保存' : '保存设置'}
               </button>
               <button
                 className="btn btn--ghost"
@@ -791,6 +848,7 @@ export function App() {
                 className={`btn btn--launch ${launchBusy ? 'btn--launching' : ''}`}
                 onClick={launch}
                 disabled={working !== null || !launchReady}
+                title={settingsDirty || customTalentDirty ? '直接启动只使用上次已保存的配置；当前未保存修改仍会保留在界面中。' : '使用当前已保存的配置启动游戏。'}
               >
                 <span className="btn--launch__glow" />
                 <span className="btn--launch__label">{launchBusy ? '启动中，请等待' : '启动游戏'}</span>
@@ -814,6 +872,14 @@ export function App() {
           <section className="status-strip">
             <div className="status-strip__label">当前状态</div>
             <div className="status-strip__value">{working ?? message}</div>
+            <div className="status-strip__badges">
+              {configurationStatus.key === 'disconnected' ? <span className="state-badge state-badge--warn">{configurationStatus.detail}</span> : null}
+              {configurationStatus.key === 'loading' ? <span className="state-badge state-badge--warn">{configurationStatus.detail}</span> : null}
+              {configurationStatus.key === 'load-error' ? <span className="state-badge state-badge--warn">{configurationStatus.detail}</span> : null}
+              {gameRoot && settingsDirty ? <span className="state-badge state-badge--warn">普通设置未保存</span> : null}
+              {gameRoot && customTalentsReady && customTalentDirty ? <span className="state-badge state-badge--warn">自定义天赋未应用</span> : null}
+              {configurationStatus.key === 'saved' ? <span className="state-badge state-badge--good">配置已保存</span> : null}
+            </div>
           </section>
 
           {copyNotice ? <div className="copy-banner">{copyNotice}</div> : null}
@@ -1347,7 +1413,7 @@ export function App() {
                           <button
                             className="btn btn--primary"
                             onClick={saveCustomTalents}
-                            disabled={working !== null || !gameRoot || customTalentValidationErrors.length > 0 || !customTalentDirty}
+                            disabled={working !== null || !gameRoot || customTalentWriteBlocked || customTalentValidationErrors.length > 0 || !customTalentDirty}
                           >
                             应用到游戏配置
                           </button>
@@ -1606,7 +1672,7 @@ export function App() {
                         <button
                           className="btn btn--primary"
                           onClick={saveCustomTalents}
-                          disabled={working !== null || !gameRoot || customTalentValidationErrors.length > 0 || !customTalentDirty}
+                          disabled={working !== null || !gameRoot || customTalentWriteBlocked || customTalentValidationErrors.length > 0 || !customTalentDirty}
                         >
                           应用到游戏配置
                         </button>
@@ -1697,16 +1763,8 @@ export function App() {
 
             {activePage === 'tradeCraft' ? (
               <div className="page-grid">
-                <Card title="交易与背包" eyebrow="Trade">
+                <Card title="珍宝交易" eyebrow="Treasure">
                   <div className="field-grid">
-                    <NumberField
-                      label="商人现金下限"
-                      value={settings.merchantCarryCash}
-                      onChange={(value) => updateSetting('merchantCarryCash', value)}
-                      min={0}
-                      max={999999999}
-                      step={1000}
-                    />
                     <CheckboxField
                       label="显示珍宝交易估价"
                       value={settings.treasureTradeHelperEnabled}
@@ -1719,6 +1777,11 @@ export function App() {
                       onChange={(value) => updateSetting('treasureAutoTradeEnabled', value)}
                       hint="进入珍宝铺时，自动把预估有利润的未鉴定珍宝加入购物车；不会替你结账。"
                     />
+                  </div>
+                </Card>
+
+                <Card title="材料扫货" eyebrow="Materials">
+                  <div className="field-grid">
                     <CheckboxField
                       label="启用材料一键扫货"
                       value={settings.materialAutoBuyEnabled}
@@ -1732,6 +1795,7 @@ export function App() {
                       min={0}
                       max={5}
                       step={1}
+                      disabled={!settings.materialAutoBuyEnabled}
                       hint="0 表示不限；1–5 表示只加入达到该品级的材料。"
                     />
                     <NumberField
@@ -1741,7 +1805,21 @@ export function App() {
                       min={0}
                       max={5}
                       step={1}
+                      disabled={!settings.materialAutoBuyEnabled}
                       hint="0 表示不限；1–5 表示只加入达到该等级的材料。"
+                    />
+                  </div>
+                </Card>
+
+                <Card title="店铺与背包" eyebrow="Shop">
+                  <div className="field-grid">
+                    <NumberField
+                      label="商人现金下限"
+                      value={settings.merchantCarryCash}
+                      onChange={(value) => updateSetting('merchantCarryCash', value)}
+                      min={0}
+                      max={999999999}
+                      step={1000}
                     />
                     <CheckboxField
                       label="启用店铺产业与买断"
@@ -1788,16 +1866,19 @@ export function App() {
                       onChange={(value) => updateSetting('auctionPreviewRefreshEnabled', value)}
                       hint="在拍卖展品预览窗口增加不限次数的免费刷新按钮。"
                     />
-                    <TextField
+                    <SelectField
                       label="拍卖刷新主键"
                       value={settings.auctionPreviewRefreshHotkey}
                       onChange={(value) => updateSetting('auctionPreviewRefreshHotkey', value)}
-                      hint="填写 Unity KeyCode 名称，例如 R、F8 或 Mouse3。"
+                      options={optionsWithCurrent(settings.auctionPreviewRefreshHotkey, UNITY_HOTKEY_OPTIONS)}
+                      disabled={!settings.auctionPreviewRefreshEnabled}
+                      hint="选择用于刷新展品的主键。"
                     />
                     <CheckboxField
                       label="拍卖刷新需要按住 Alt"
                       value={settings.auctionPreviewRefreshRequireAlt}
                       onChange={(value) => updateSetting('auctionPreviewRefreshRequireAlt', value)}
+                      disabled={!settings.auctionPreviewRefreshEnabled}
                       hint="开启时快捷键为 Alt + 主键。"
                     />
                     <CheckboxField
@@ -1806,16 +1887,19 @@ export function App() {
                       onChange={(value) => updateSetting('treasureIdentifyBestValueAssistEnabled', value)}
                       hint="按鼠标悬浮括号内的玩家鉴定价选择最高项；最终确认仍需手动完成。"
                     />
-                    <TextField
+                    <SelectField
                       label="最高估值选择主键"
                       value={settings.treasureIdentifyBestValueHotkey}
                       onChange={(value) => updateSetting('treasureIdentifyBestValueHotkey', value)}
-                      hint="填写 Unity KeyCode 名称，例如 F、F8 或 Mouse3。"
+                      options={optionsWithCurrent(settings.treasureIdentifyBestValueHotkey, UNITY_HOTKEY_OPTIONS)}
+                      disabled={!settings.treasureIdentifyBestValueAssistEnabled}
+                      hint="选择用于自动选中最高玩家鉴定价物品的主键。"
                     />
                     <CheckboxField
                       label="最高估值选择需要按住 Alt"
                       value={settings.treasureIdentifyBestValueRequireAlt}
                       onChange={(value) => updateSetting('treasureIdentifyBestValueRequireAlt', value)}
+                      disabled={!settings.treasureIdentifyBestValueAssistEnabled}
                       hint="开启时快捷键为 Alt + 主键。"
                     />
                   </div>

@@ -5,9 +5,67 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>龙胤立志传 Pro Max</title>
     <meta name="description" content="LongYinLiZhiZhuan 模组包的便携式 Electron 启动器与更新器。" />
+    <style>
+      html,
+      body,
+      #root {
+        min-height: 100%;
+        margin: 0;
+      }
+
+      .boot-splash {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(145deg, #efe3cf, #d9c7ac);
+        color: #1f271d;
+        font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+      }
+
+      .boot-splash__card {
+        padding: 22px 28px;
+        border: 1px solid rgba(39, 44, 33, 0.1);
+        border-radius: 20px;
+        background: rgba(255, 251, 245, 0.9);
+        box-shadow: 0 20px 50px rgba(56, 41, 26, 0.14);
+      }
+
+      .boot-splash__card strong,
+      .boot-splash__card span {
+        display: block;
+      }
+
+      .boot-splash__card span {
+        margin-top: 7px;
+        color: #5f655f;
+        font-size: 14px;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot-splash" role="status" aria-live="polite">
+        <div class="boot-splash__card">
+          <strong>龙胤立志传 Pro Max</strong>
+          <span>正在读取游戏目录、模组与配置，请稍候…</span>
+        </div>
+      </div>
+    </div>
+    <script>
+      window.addEventListener('error', (event) => {
+        console.error(`[LongYin] renderer-error: ${event.message} (${event.filename}:${event.lineno})`);
+      });
+      window.addEventListener('unhandledrejection', (event) => {
+        const reason = event.reason instanceof Error ? event.reason.stack || event.reason.message : String(event.reason);
+        console.error(`[LongYin] renderer-unhandledrejection: ${reason}`);
+      });
+      window.setTimeout(() => {
+        const message = document.querySelector('.boot-splash__card span');
+        if (message) {
+          message.textContent = '启动界面加载超时，请关闭后重试；若仍失败，请查看启动日志。';
+        }
+      }, 12000);
+    </script>
     <script type="module" src="/src/renderer/main.tsx"></script>
   </body>
 </html>

@@ -991,6 +991,7 @@ async function createMainWindow(): Promise<void> {
     height: 940,
     minWidth: 1120,
     minHeight: 760,
+    autoHideMenuBar: true,
     backgroundColor: '#f3efe6',
     title: '龙胤立志传 Pro Max',
     webPreferences: {
@@ -1000,8 +1001,40 @@ async function createMainWindow(): Promise<void> {
       sandbox: false
     }
   });
+  let rendererReady = false;
+  const rendererReadyTimer = setTimeout(() => {
+    if (!rendererReady) {
+      void writeStartupLog('渲染器准备超时：HTML 已加载，但未收到 renderer-ready 标记。');
+    }
+  }, 12000);
   mainWindow.once('closed', () => {
+    clearTimeout(rendererReadyTimer);
     mainWindow = null;
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+    if (isMainFrame) {
+      void writeStartupLog(`渲染页面加载失败：code=${errorCode}, description=${errorDescription}, url=${validatedUrl}`);
+    }
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    void writeStartupLog(`渲染进程退出：reason=${details.reason}, exitCode=${details.exitCode}`);
+  });
+
+  mainWindow.webContents.on('console-message', (details) => {
+    if (details.message === '[LongYin] renderer-ready') {
+      rendererReady = true;
+      clearTimeout(rendererReadyTimer);
+      void writeStartupLog('渲染器准备完成。');
+      return;
+    }
+
+    if (details.level === 'warning' || details.level === 'error') {
+      void writeStartupLog(
+        `渲染器控制台 ${details.level}：${details.message} (${details.sourceId}:${details.lineNumber})`
+      );
+    }
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

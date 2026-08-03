@@ -112,11 +112,33 @@ function Require-ScopePattern {
     }
 }
 
+function Reject-ScopePattern {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Scope,
+
+        [Parameter(Mandatory)]
+        [string]$Pattern,
+
+        [Parameter(Mandatory)]
+        [string]$FailureMessage
+    )
+
+    if ([System.Text.RegularExpressions.Regex]::IsMatch(
+        $Scope,
+        $Pattern,
+        [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+        $failures.Add($FailureMessage)
+    }
+}
+
 $selectorMethod = Get-CSharpMethodText 'TrySelectHighestValueIdentifyTreasure'
 $tradeAnalyzerMethod = Get-CSharpMethodText 'TryAnalyzeTreasureTradeIcon'
 $sellEstimatorMethod = Get-CSharpMethodText 'EstimateTreasureSellPriceFromAppraisedValue'
 $appraisedValueMethod = Get-CSharpMethodText 'TryGetTreasureAppraisedValue'
 $autoTradeMethod = Get-CSharpMethodText 'TryRunTreasureAutoTrade'
+$shopContextMethod = Get-CSharpMethodText 'TryGetTreasureTradeShopContext'
+$queueCartMethod = Get-CSharpMethodText 'QueueTreasureTradeCartItems'
 $overlayTextMethod = Get-CSharpMethodText 'BuildTreasureTradeOverlayText'
 $clickRouterMethod = Get-CSharpMethodText 'OverlayButtonOnPointerClickPrefix'
 $updateShopOwnershipMethod = Get-CSharpMethodText 'UpdateShopOwnershipUiState'
@@ -154,9 +176,16 @@ Reject-SourceText 'TryCloneAndIdentifyItem' 'The shop helper must not clone and 
 Reject-SourceText '.FullIdentify(' 'Commerce must not reintroduce full-identification probing under a renamed helper.'
 Require-ScopeText $overlayTextMethod '预计鉴后卖价' 'The derived post-appraisal sell price must be visibly labeled as an estimate.'
 Require-ScopePattern $autoTradeMethod 'opportunity\.NetProfit\s*>\s*0' 'Automatic treasure shopping must preserve the reference behavior of using positive estimated profit.'
+Reject-ScopePattern $autoTradeMethod 'if\s*\(\s*opportunities\.Count\s*<=\s*0\s*\)\s*\{[^}]*_treasureTradeAutoProcessed\s*=\s*true' 'A zero-opportunity snapshot must remain retryable instead of permanently locking treasure auto-shopping for the current shop session.'
+Require-ScopePattern $autoTradeMethod 'shopTargetCount\s*>\s*0\s*&&\s*shopIconCount\s*<\s*shopTargetCount[\s\S]*?_treasureTradeAutoRetryAtRealtime\s*=' 'Automatic treasure shopping must wait and retry until every shop item has a rendered icon instead of processing a partial first frame.'
+Require-ScopePattern $autoTradeMethod '_treasureTradeAutoProcessed\s*=\s*QueueTreasureTradeCartItems\s*\(' 'A shop session may be marked processed only from the verified queue result.'
+Require-ScopePattern $shopContextMethod 'identifyCost\s*=\s*[^;\r\n]*GetBuildingIdentifyMoney\s*\(' 'Treasure appraisal cost must come from the current building GetBuildingIdentifyMoney API.'
+Require-ScopePattern $queueCartMethod 'CountItemListItems\s*\(\s*tradeUi\.rightOutList\?\.targetItemList\s*\)[\s\S]*?TradeIconClicked\s*\([^;]+\);[\s\S]*?CountItemListItems\s*\(\s*tradeUi\.rightOutList\?\.targetItemList\s*\)' 'Each treasure cart click must be verified against the actual rightOutList item count before it is reported as added.'
+Require-ScopePattern $queueCartMethod 'matchingCountAfter\s*>\s*matchingCountBefore[\s\S]*?verifiedCount\+\+' 'A click counts as successful only when the intended item increases inside rightOutList.'
+Require-ScopePattern $queueCartMethod 'PushPlayerLog\s*\([^;]*\{verifiedCount\}' 'The player-facing auto-cart result must report verified additions rather than attempted clicks.'
 
 if ($failures.Count -gt 0) {
-    $failures | ForEach-Object { Write-Error $_ }
+    $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }
     exit 1
 }
 

@@ -486,6 +486,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool _materialAutoBuyControlCreationFailed;
     private static bool _tradeActionButtonLookupWarningLogged;
     private static float _treasureTradeShopOpenedAtRealtime = -1f;
+    private static float _treasureTradeAutoRetryAtRealtime = -1f;
     private static bool _treasureTradeAutoProcessed;
     private static bool _treasureTradeBusy;
     private static readonly HashSet<string> _treasureAppraisedValueFailureSignatures = new(StringComparer.Ordinal);
@@ -3176,6 +3177,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
 
         _treasureTradeShopOpenedAtRealtime = Time.realtimeSinceStartup;
+        _treasureTradeAutoRetryAtRealtime = -1f;
         _treasureTradeAutoProcessed = false;
         _treasureTradeBusy = false;
         _selectedTreasureTradeIcon = null;
@@ -3188,6 +3190,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         _selectedTreasureTradeIcon = null;
         _treasureTradeShopOpenedAtRealtime = -1f;
+        _treasureTradeAutoRetryAtRealtime = -1f;
         _treasureTradeAutoProcessed = false;
         _treasureTradeBusy = false;
         HideTreasureTradeOverlay();
@@ -3273,11 +3276,21 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static bool TryGetTreasureTradeShopContext(TradeUIController tradeUi, out AreaBuildingData? building, out int identifyCost)
     {
-        building = BuildingUIController.Instance?.targetBuildingData;
+        var buildingUi = BuildingUIController.Instance;
+        building = buildingUi?.targetBuildingData;
         identifyCost = 0;
         if (tradeUi == null)
         {
             return false;
+        }
+
+        try
+        {
+            identifyCost = Math.Max(0, buildingUi?.GetBuildingIdentifyMoney() ?? 0);
+        }
+        catch
+        {
+            identifyCost = 0;
         }
 
         return true;
@@ -4876,15 +4889,23 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
-        var shopTargetCount = CountItemListItems(tradeUi.rightList?.targetItemList);
-        var shopIconCount = EnumerateTradeIcons(tradeUi.rightList).Count();
-        if (shopTargetCount <= 0 && shopIconCount <= 0)
+        if (_treasureTradeAutoRetryAtRealtime >= 0f &&
+            Time.realtimeSinceStartup < _treasureTradeAutoRetryAtRealtime)
         {
             return;
         }
 
-        if (shopTargetCount > 0 && shopIconCount <= 0)
+        var shopTargetCount = CountItemListItems(tradeUi.rightList?.targetItemList);
+        var shopIconCount = EnumerateTradeIcons(tradeUi.rightList).Count();
+        if (shopTargetCount <= 0 && shopIconCount <= 0)
         {
+            _treasureTradeAutoRetryAtRealtime = Time.realtimeSinceStartup + 0.25f;
+            return;
+        }
+
+        if (shopTargetCount > 0 && shopIconCount < shopTargetCount)
+        {
+            _treasureTradeAutoRetryAtRealtime = Time.realtimeSinceStartup + 0.25f;
             return;
         }
 
@@ -4904,23 +4925,27 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         if (opportunities.Count <= 0)
         {
-            _treasureTradeAutoProcessed = true;
+            _treasureTradeAutoRetryAtRealtime = Time.realtimeSinceStartup + 0.75f;
             return;
         }
 
-        _treasureTradeAutoProcessed = true;
-        QueueTreasureTradeCartItems(tradeUi, opportunities);
+        _treasureTradeAutoProcessed = QueueTreasureTradeCartItems(tradeUi, opportunities);
+        if (!_treasureTradeAutoProcessed)
+        {
+            _treasureTradeAutoRetryAtRealtime = Time.realtimeSinceStartup + 0.35f;
+        }
     }
 
-    private static void QueueTreasureTradeCartItems(TradeUIController tradeUi, List<TreasureTradeOpportunity> opportunities)
+    private static bool QueueTreasureTradeCartItems(TradeUIController tradeUi, List<TreasureTradeOpportunity> opportunities)
     {
         if (tradeUi == null || opportunities.Count == 0)
         {
-            return;
+            return false;
         }
 
         _treasureTradeBusy = true;
-        var queuedCount = 0;
+        var verifiedCount = 0;
+        var failedCount = 0;
 
         try
         {
@@ -4928,18 +4953,34 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             {
                 if (opportunity.Icon == null || opportunity.Icon.gameObject == null)
                 {
+                    failedCount++;
                     continue;
                 }
 
+                var matchingCountBefore = CountMatchingItems(tradeUi.rightOutList?.targetItemList, opportunity.Item);
+                var cartCountBefore = CountItemListItems(tradeUi.rightOutList?.targetItemList);
                 tradeUi.TradeIconClicked(opportunity.Icon.gameObject);
-                queuedCount++;
+                var cartCountAfter = CountItemListItems(tradeUi.rightOutList?.targetItemList);
+                var matchingCountAfter = CountMatchingItems(tradeUi.rightOutList?.targetItemList, opportunity.Item);
+                var addedToCart = cartCountAfter > cartCountBefore && matchingCountAfter > matchingCountBefore;
+                if (!addedToCart)
+                {
+                    failedCount++;
+                    LoggerInstance.LogWarning(
+                        $"Treasure trade cart add was not reflected by rightOutList: item={TryGetItemDisplayName(opportunity.Item)}, " +
+                        $"cart={cartCountBefore}->{cartCountAfter}, matching={matchingCountBefore}->{matchingCountAfter}.");
+                    continue;
+                }
+
+                verifiedCount++;
                 LoggerInstance.LogInfo(
-                    $"Treasure trade cart add item={TryGetItemDisplayName(opportunity.Item)}, buy={opportunity.BuyPrice}, " +
-                    $"sellIdentified={opportunity.IdentifiedSellPrice}, net={opportunity.NetProfit}.");
+                    $"Treasure trade cart add verified: item={TryGetItemDisplayName(opportunity.Item)}, buy={opportunity.BuyPrice}, " +
+                    $"sellIdentified={opportunity.IdentifiedSellPrice}, net={opportunity.NetProfit}, cart={cartCountBefore}->{cartCountAfter}.");
             }
         }
         catch (Exception ex)
         {
+            failedCount++;
             LoggerInstance.LogWarning($"Treasure cart auto-queue failed: {ex.Message}");
         }
         finally
@@ -4948,12 +4989,15 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             RefreshTradeUi(tradeUi);
         }
 
-        if (queuedCount > 0)
+        var verifiedCartCount = CountItemListItems(tradeUi.rightOutList?.targetItemList);
+        if (verifiedCount > 0)
         {
-            PushPlayerLog($"【珍宝购物车】：已加入 {queuedCount} 件可盈利珍宝");
+            PushPlayerLog($"【珍宝购物车】：已确认加入 {verifiedCount} 件可盈利珍宝（购物车共 {verifiedCartCount} 件）");
             LoggerInstance.LogInfo(
-                $"Treasure cart auto-queue finished: count={queuedCount}.");
+                $"Treasure cart auto-queue finished: verified={verifiedCount}, failed={failedCount}, cartCount={verifiedCartCount}.");
         }
+
+        return verifiedCount > 0 && failedCount == 0;
     }
 
     private static void RefreshTradeUi(TradeUIController? tradeUi)

@@ -413,6 +413,17 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         public int IdentifyGain => IdentifiedSellPrice - CurrentSellPrice - IdentifyCost;
     }
 
+    private sealed class TreasureTradeCartSummary
+    {
+        public int CartItemCount { get; init; }
+        public int TreasureItemCount { get; set; }
+        public int UnidentifiedTreasureCount { get; set; }
+        public long BuyTotal { get; set; }
+        public long IdentifyCostTotal { get; set; }
+        public long EstimatedSellTotal { get; set; }
+        public long EstimatedProfit => EstimatedSellTotal - BuyTotal - IdentifyCostTotal;
+    }
+
     private sealed class CraftRewardSelection
     {
         public int ResultItemId { get; init; }
@@ -3374,76 +3385,70 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void UpdateTreasureTradeOverlay(TradeUIController tradeUi, int identifyCost)
     {
-        var opportunity = TryResolveTreasureTradeOpportunity(tradeUi, identifyCost);
-        if (opportunity == null)
-        {
-            EnsureTreasureTradeOverlay(tradeUi);
-            if (_treasureTradeOverlayLabel != null)
-            {
-                var baseText = identifyCost > 0
-                    ? $"<b><color=#E8B45B>珍宝倒宝助手</color></b>\n当前无未鉴定珍宝　鉴定费{TradeInfoMoneyGap}{identifyCost}"
-                    : "<b><color=#E8B45B>珍宝倒宝助手</color></b>\n当前无未鉴定珍宝";
-                SetTradeInfoLabelText(
-                    _treasureTradeOverlayLabel,
-                    _treasureTradeOverlayIcon,
-                    baseText,
-                    identifyCost > 0 ? $"鉴定费{TradeInfoMoneyGap}" : null,
-                    verticalOffset: -13f);
-                _treasureTradeOverlayLabel.gameObject.SetActive(true);
-            }
-
-            return;
-        }
-
         EnsureTreasureTradeOverlay(tradeUi);
         if (_treasureTradeOverlayLabel == null)
         {
             return;
         }
 
-        var overlayText = BuildTreasureTradeOverlayText(opportunity);
-        var moneyMarker = opportunity.IconType == TradeIconType.TradeRight ||
-            opportunity.IconType == TradeIconType.TradeRightOut
-                ? $"买价{TradeInfoMoneyGap}"
-                : $"当前卖价{TradeInfoMoneyGap}";
+        var summary = BuildTreasureTradeCartSummary(tradeUi, identifyCost);
+        var overlayText = BuildTreasureTradeCartSummaryText(summary);
+        var moneyMarker = summary.TreasureItemCount > 0 ? $"买入{TradeInfoMoneyGap}" : null;
         SetTradeInfoLabelText(
             _treasureTradeOverlayLabel,
             _treasureTradeOverlayIcon,
             overlayText,
             moneyMarker,
-            verticalOffset: 13f);
+            verticalOffset: -13f);
         _treasureTradeOverlayLabel.gameObject.SetActive(true);
     }
 
-    private static TreasureTradeOpportunity? TryResolveTreasureTradeOpportunity(TradeUIController tradeUi, int identifyCost)
+    private static TreasureTradeCartSummary BuildTreasureTradeCartSummary(TradeUIController tradeUi, int identifyCost)
     {
-        if (tradeUi == null)
+        var summary = new TreasureTradeCartSummary
         {
-            return null;
-        }
+            CartItemCount = CountItemListItems(tradeUi.rightOutList?.targetItemList)
+        };
 
-        if (TryAnalyzeTreasureTradeIcon(_selectedTreasureTradeIcon, identifyCost, out var selectedOpportunity))
+        foreach (var icon in EnumerateTradeIconsMatchingTargetList(tradeUi.rightOutList))
         {
-            return selectedOpportunity;
-        }
-
-        foreach (var icon in EnumerateTradeIcons(tradeUi.rightList))
-        {
-            if (TryAnalyzeTreasureTradeIcon(icon, identifyCost, out var rightOpportunity))
+            var item = icon.itemData;
+            if (!IsTreasureItem(item))
             {
-                return rightOpportunity;
+                continue;
             }
-        }
 
-        foreach (var icon in EnumerateTradeIcons(tradeUi.leftList))
-        {
-            if (TryAnalyzeTreasureTradeIcon(icon, identifyCost, out var leftOpportunity))
+            summary.TreasureItemCount++;
+            var buyPrice = Math.Max(0, TryGetTradePriceForItem(icon, item, buy: true, fallback: 0));
+            var estimatedSellPrice = Math.Max(0, TryGetTradePriceForItem(icon, item, buy: false, fallback: 0));
+            var itemIdentifyCost = 0;
+
+            if (IsUnidentifiedTreasure(item))
             {
-                return leftOpportunity;
+                summary.UnidentifiedTreasureCount++;
+                itemIdentifyCost = Math.Max(0, identifyCost);
+                if (TryGetTreasureAppraisedValue(item, out var appraisedValue))
+                {
+                    estimatedSellPrice = EstimateTreasureSellPriceFromAppraisedValue(
+                        item,
+                        estimatedSellPrice,
+                        appraisedValue);
+                }
             }
+
+            summary.BuyTotal += buyPrice;
+            summary.IdentifyCostTotal += itemIdentifyCost;
+            summary.EstimatedSellTotal += estimatedSellPrice;
         }
 
-        return null;
+        return summary;
+    }
+
+    private static string BuildTreasureTradeCartSummaryText(TreasureTradeCartSummary summary)
+    {
+        return
+            $"<b><color=#E8B45B>珍宝购物车</color></b>　共 {summary.CartItemCount} 件／珍宝 {summary.TreasureItemCount} 件／未鉴定 {summary.UnidentifiedTreasureCount} 件\n" +
+            $"买入{TradeInfoMoneyGap}{summary.BuyTotal}　鉴定 {summary.IdentifyCostTotal}　预计卖出(括号估价) {summary.EstimatedSellTotal}　预计利润 {FormatSignedLong(summary.EstimatedProfit)}";
     }
 
     private static bool TryAnalyzeTreasureTradeIcon(ItemIconController? icon, int identifyCost, out TreasureTradeOpportunity? opportunity)
@@ -3512,21 +3517,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var sellRatio = Math.Max(0d, (double)currentSellPrice / baseValue);
         var estimated = (int)Math.Round(appraisedValue * sellRatio, MidpointRounding.AwayFromZero);
         return Math.Max(currentSellPrice, estimated);
-    }
-
-    private static string BuildTreasureTradeOverlayText(TreasureTradeOpportunity opportunity)
-    {
-        var name = TryGetItemDisplayName(opportunity.Item);
-        var priceLine = opportunity.IconType == TradeIconType.TradeRight || opportunity.IconType == TradeIconType.TradeRightOut
-            ? $"买价{TradeInfoMoneyGap}{opportunity.BuyPrice}　现卖 {opportunity.CurrentSellPrice}"
-            : $"当前卖价{TradeInfoMoneyGap}{opportunity.CurrentSellPrice}";
-        var profitLine = opportunity.IconType == TradeIconType.TradeRight || opportunity.IconType == TradeIconType.TradeRightOut
-            ? $"鉴定费 {opportunity.IdentifyCost}　预计净利 {FormatSignedInt(opportunity.NetProfit)}"
-            : $"鉴定费 {opportunity.IdentifyCost}　预计鉴后净增 {FormatSignedInt(opportunity.IdentifyGain)}";
-
-        return
-            $"<b><color=#E8B45B>珍宝倒宝助手</color></b>　{name}　{priceLine}　括号估价 {opportunity.AppraisedValue}\n" +
-            $"预计鉴后卖价 {opportunity.IdentifiedSellPrice}　{profitLine}　技能买/卖 x{opportunity.SkillBuyFactor:0.###} / x{opportunity.SkillSellFactor:0.###}";
     }
 
     private static void EnsureTreasureTradeOverlay(TradeUIController tradeUi)
@@ -3737,12 +3727,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         string? moneyMarker,
         float verticalOffset)
     {
-        if (string.Equals(label.text, text, StringComparison.Ordinal))
+        if (!string.Equals(label.text, text, StringComparison.Ordinal))
         {
-            return;
+            label.text = text;
         }
 
-        label.text = text;
         AlignTradeInfoIcon(label, icon, moneyMarker, verticalOffset);
     }
 
@@ -5202,6 +5191,50 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
     }
 
+    private static IEnumerable<ItemIconController> EnumerateTradeIconsMatchingTargetList(ItemListController? listController)
+    {
+        var allItems = listController?.targetItemList?.allItem;
+        var itemCount = TryGetCollectionCount(allItems);
+        if (itemCount <= 0)
+        {
+            yield break;
+        }
+
+        var unmatchedItems = new List<ItemData>(itemCount);
+        for (var index = 0; index < itemCount; index++)
+        {
+            if (TryGetIndexedValue(allItems!, index) is ItemData item)
+            {
+                unmatchedItems.Add(item);
+            }
+        }
+
+        foreach (var icon in EnumerateTradeIcons(listController))
+        {
+            var matchingIndex = -1;
+            for (var index = 0; index < unmatchedItems.Count; index++)
+            {
+                if (AreItemsEquivalent(unmatchedItems[index], icon.itemData))
+                {
+                    matchingIndex = index;
+                    break;
+                }
+            }
+
+            if (matchingIndex < 0)
+            {
+                continue;
+            }
+
+            unmatchedItems.RemoveAt(matchingIndex);
+            yield return icon;
+            if (unmatchedItems.Count == 0)
+            {
+                yield break;
+            }
+        }
+    }
+
     private static float GetSkillTradeFactor(bool buy)
     {
         var player = TryGetPlayerHero();
@@ -5341,6 +5374,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     }
 
     private static string FormatSignedInt(int value)
+    {
+        return value > 0 ? $"+{value}" : value.ToString();
+    }
+
+    private static string FormatSignedLong(long value)
     {
         return value > 0 ? $"+{value}" : value.ToString();
     }

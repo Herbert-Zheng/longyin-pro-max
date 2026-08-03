@@ -61,6 +61,7 @@ function Get-CSharpMethodText {
 function Require-ScopeText {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$Scope,
 
         [Parameter(Mandatory)]
@@ -78,6 +79,7 @@ function Require-ScopeText {
 function Reject-ScopeText {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$Scope,
 
         [Parameter(Mandatory)]
@@ -95,6 +97,7 @@ function Reject-ScopeText {
 function Require-ScopePattern {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$Scope,
 
         [Parameter(Mandatory)]
@@ -115,6 +118,7 @@ function Require-ScopePattern {
 function Reject-ScopePattern {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$Scope,
 
         [Parameter(Mandatory)]
@@ -139,7 +143,10 @@ $appraisedValueMethod = Get-CSharpMethodText 'TryGetTreasureAppraisedValue'
 $autoTradeMethod = Get-CSharpMethodText 'TryRunTreasureAutoTrade'
 $shopContextMethod = Get-CSharpMethodText 'TryGetTreasureTradeShopContext'
 $queueCartMethod = Get-CSharpMethodText 'QueueTreasureTradeCartItems'
-$overlayTextMethod = Get-CSharpMethodText 'BuildTreasureTradeOverlayText'
+$updateOverlayMethod = Get-CSharpMethodText 'UpdateTreasureTradeOverlay'
+$cartSummaryMethod = Get-CSharpMethodText 'BuildTreasureTradeCartSummary'
+$cartSummaryTextMethod = Get-CSharpMethodText 'BuildTreasureTradeCartSummaryText'
+$setTradeInfoLabelTextMethod = Get-CSharpMethodText 'SetTradeInfoLabelText'
 $clickRouterMethod = Get-CSharpMethodText 'OverlayButtonOnPointerClickPrefix'
 $updateShopOwnershipMethod = Get-CSharpMethodText 'UpdateShopOwnershipUiState'
 $ensureShopOwnershipMethod = Get-CSharpMethodText 'EnsureShopOwnershipOverlay'
@@ -174,7 +181,6 @@ Reject-ScopeText $sellEstimatorMethod '.Clone(' 'The sell-price estimator must n
 Reject-ScopeText $sellEstimatorMethod '.FullIdentify(' 'The sell-price estimator must not fully identify shop items.'
 Reject-SourceText 'TryCloneAndIdentifyItem' 'The shop helper must not clone and fully identify shop items during its per-frame overlay refresh.'
 Reject-SourceText '.FullIdentify(' 'Commerce must not reintroduce full-identification probing under a renamed helper.'
-Require-ScopeText $overlayTextMethod '预计鉴后卖价' 'The derived post-appraisal sell price must be visibly labeled as an estimate.'
 Require-ScopePattern $autoTradeMethod 'opportunity\.NetProfit\s*>\s*0' 'Automatic treasure shopping must preserve the reference behavior of using positive estimated profit.'
 Reject-ScopePattern $autoTradeMethod 'if\s*\(\s*opportunities\.Count\s*<=\s*0\s*\)\s*\{[^}]*_treasureTradeAutoProcessed\s*=\s*true' 'A zero-opportunity snapshot must remain retryable instead of permanently locking treasure auto-shopping for the current shop session.'
 Require-ScopePattern $autoTradeMethod 'shopTargetCount\s*>\s*0\s*&&\s*shopIconCount\s*<\s*shopTargetCount[\s\S]*?_treasureTradeAutoRetryAtRealtime\s*=' 'Automatic treasure shopping must wait and retry until every shop item has a rendered icon instead of processing a partial first frame.'
@@ -183,6 +189,18 @@ Require-ScopePattern $shopContextMethod 'identifyCost\s*=\s*[^;\r\n]*GetBuilding
 Require-ScopePattern $queueCartMethod 'CountItemListItems\s*\(\s*tradeUi\.rightOutList\?\.targetItemList\s*\)[\s\S]*?TradeIconClicked\s*\([^;]+\);[\s\S]*?CountItemListItems\s*\(\s*tradeUi\.rightOutList\?\.targetItemList\s*\)' 'Each treasure cart click must be verified against the actual rightOutList item count before it is reported as added.'
 Require-ScopePattern $queueCartMethod 'matchingCountAfter\s*>\s*matchingCountBefore[\s\S]*?verifiedCount\+\+' 'A click counts as successful only when the intended item increases inside rightOutList.'
 Require-ScopePattern $queueCartMethod 'PushPlayerLog\s*\([^;]*\{verifiedCount\}' 'The player-facing auto-cart result must report verified additions rather than attempted clicks.'
+Require-ScopeText $cartSummaryMethod 'CountItemListItems(tradeUi.rightOutList?.targetItemList)' 'The treasure assistant cart summary must take its authoritative total count from the actual rightOutList cart.'
+Require-ScopeText $cartSummaryMethod 'EnumerateTradeIconsMatchingTargetList(tradeUi.rightOutList)' 'The treasure assistant must aggregate only icons that still correspond to actual rightOutList cart entries.'
+Require-ScopePattern $cartSummaryMethod 'BuyTotal\s*\+=' 'The cart summary must add every treasure buy price into a total.'
+Require-ScopePattern $cartSummaryMethod 'IdentifyCostTotal\s*\+=' 'The cart summary must add appraisal costs for unidentified treasures.'
+Require-ScopePattern $cartSummaryMethod 'EstimatedSellTotal\s*\+=' 'The cart summary must add estimated post-appraisal sell proceeds.'
+Require-ScopePattern $updateOverlayMethod 'BuildTreasureTradeCartSummary\s*\([\s\S]*?BuildTreasureTradeCartSummaryText\s*\(' 'The visible treasure assistant must be driven by the live cart aggregate rather than a selected shop item.'
+Require-ScopeText $updateOverlayMethod 'verticalOffset: -13f' 'The treasure money icon must align with the second summary line that contains the buy amount.'
+Reject-ScopeText $updateOverlayMethod 'TryResolveTreasureTradeOpportunity' 'The visible treasure assistant must no longer fall back to a selected or first shop item.'
+Require-ScopePattern $setTradeInfoLabelTextMethod 'if\s*\(\s*!string\.Equals\(label\.text,\s*text,[^)]*\)\s*\)[\s\S]*?label\.text\s*=\s*text;[\s\S]*?AlignTradeInfoIcon\(' 'Money icon alignment must still run when the visible summary text has not changed.'
+foreach ($label in @('购物车', '珍宝', '未鉴定', '买入', '鉴定', '预计卖出', '预计利润')) {
+    Require-ScopeText $cartSummaryTextMethod $label "The live cart summary text is missing its '$label' aggregate label."
+}
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }

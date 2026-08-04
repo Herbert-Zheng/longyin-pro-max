@@ -107,12 +107,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<int> _materialPurchaseMinRareLv = null!;
     private static ConfigEntry<int> _materialPurchaseMinItemLv = null!;
     private static ConfigEntry<bool> _auctionPreviewRefreshEnabled = null!;
-    private static ConfigEntry<KeyCode> _auctionPreviewRefreshHotkey = null!;
-    private static ConfigEntry<bool> _auctionPreviewRefreshRequireAlt = null!;
     private static ConfigEntry<bool> _auctionEventAlwaysRedEnabled = null!;
     private static ConfigEntry<bool> _treasureIdentifyBestValueAssistEnabled = null!;
-    private static ConfigEntry<KeyCode> _treasureIdentifyBestValueHotkey = null!;
-    private static ConfigEntry<bool> _treasureIdentifyBestValueRequireAlt = null!;
     private static ConfigEntry<int> _luckyMoneyHitChancePercent = null!;
     private static ConfigEntry<int> _extraRelationshipGainChancePercent = null!;
     private static ConfigEntry<bool> _teamAutoFavorEnabled = null!;
@@ -542,12 +538,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _materialPurchaseMinRareLv = Config.Bind("Commerce", "MaterialPurchaseMinRareLv", 0, "Minimum material rarity tier for the in-shop material sweep button. Values are clamped to 0-5.");
         _materialPurchaseMinItemLv = Config.Bind("Commerce", "MaterialPurchaseMinItemLv", 0, "Minimum material item-quality tier for the in-shop material sweep button. Values are clamped to 0-5.");
         _auctionPreviewRefreshEnabled = Config.Bind("Auction", "PreviewRefreshEnabled", true, "Adds a free unlimited refresh button to the auction exhibit preview window.");
-        _auctionPreviewRefreshHotkey = Config.Bind("Auction", "PreviewRefreshHotkey", KeyCode.W, "Main key used to refresh while the auction exhibit preview is open.");
-        _auctionPreviewRefreshRequireAlt = Config.Bind("Auction", "PreviewRefreshRequireAlt", true, "When true, hold either Alt key while pressing PreviewRefreshHotkey. The default shortcut is Alt+W.");
         _auctionEventAlwaysRedEnabled = Config.Bind("Auction", "EventAlwaysRedEnabled", true, "When true, the 拍卖大会 world event is generated at difficulty 10, the red highest event grade, including its grade-dependent auction content.");
         _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the treasure with the highest player-appraised value shown in parentheses. Confirmation remains manual.");
-        _treasureIdentifyBestValueHotkey = Config.Bind("TreasureIdentify", "BestValueHotkey", KeyCode.F, "Main key used to select the highest parenthesized appraisal value while the appraisal window is open.");
-        _treasureIdentifyBestValueRequireAlt = Config.Bind("TreasureIdentify", "BestValueRequireAlt", true, "When true, hold either Alt key while pressing BestValueHotkey. The default shortcut is Alt+F.");
         _luckyMoneyHitChancePercent = Config.Bind("MoneyLuck", "LuckyHitChancePercent", 0, "Chance from 0 to 100 that a player money transaction triggers a lucky bonus.");
         _extraRelationshipGainChancePercent = Config.Bind("Relationship", "ExtraRelationshipGainChancePercent", 0, "Chance from 0 to 100 that positive relationship gain becomes double.");
         _teamAutoFavorEnabled = Config.Bind("Relationship", "TeamAutoFavorEnabled", true, "When true, current player teammates automatically gain favor each elapsed in-game day.");
@@ -792,13 +784,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo(
             $"Material sweep starts at minimum rarity {GetMaterialRareLevelName(GetMaterialPurchaseRareLevel())} " +
             $"and minimum quality {GetMaterialItemLevelName(GetMaterialPurchaseItemLevel())}.");
-        Log.LogInfo(
-            $"Auction exhibit preview refresh starts {(_auctionPreviewRefreshEnabled.Value ? "ON" : "OFF")} with shortcut " +
-            $"{FormatConfiguredHotkey(_auctionPreviewRefreshHotkey.Value, _auctionPreviewRefreshRequireAlt.Value)}.");
+        Log.LogInfo($"Auction exhibit preview refresh button starts {(_auctionPreviewRefreshEnabled.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Auction event fixed-red grade starts {(_auctionEventAlwaysRedEnabled.Value ? "ON" : "OFF")} at difficulty {AuctionRedEventDifficulty:0.###}.");
-        Log.LogInfo(
-            $"Treasure identify best-value assist starts {(_treasureIdentifyBestValueAssistEnabled.Value ? "ON" : "OFF")} with shortcut " +
-            $"{FormatConfiguredHotkey(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value)}; confirmation remains manual.");
+        Log.LogInfo($"Treasure identify best-value button starts {(_treasureIdentifyBestValueAssistEnabled.Value ? "ON" : "OFF")}; confirmation remains manual.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
         Log.LogInfo($"Extra relationship gain chance starts at {ClampPercent(_extraRelationshipGainChancePercent.Value)}%.");
         Log.LogInfo($"Team auto favor starts {(_teamAutoFavorEnabled.Value ? "ON" : "OFF")} at +{FormatConfigFloat(Math.Max(0f, _teamAutoFavorPerDay.Value))}/day.");
@@ -1907,11 +1895,26 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return false;
         }
 
-        if (eventData == null || eventData.button == PointerEventData.InputButton.Left)
+        if ((isAuctionRefresh || isIdentifyAssist) &&
+            (eventData == null || eventData.button != PointerEventData.InputButton.Left))
+        {
+            return false;
+        }
+
+        var isLeftOrSyntheticClick = eventData == null;
+        if (eventData != null)
+        {
+            isLeftOrSyntheticClick = eventData.button == PointerEventData.InputButton.Left;
+        }
+
+        if (isLeftOrSyntheticClick)
         {
             if (isAuctionRefresh)
             {
-                TryRefreshAuctionPreview("button");
+                if (_auctionPreviewRefreshEnabled.Value)
+                {
+                    TryRefreshAuctionPreview("button");
+                }
             }
             else if (isIdentifyAssist)
             {
@@ -2046,11 +2049,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         EnsureAuctionPreviewRefreshButton(controller);
         SetOverlayObjectActive(_auctionPreviewRefreshButtonRoot, true);
-
-        if (IsConfiguredHotkeyPressed(_auctionPreviewRefreshHotkey.Value, _auctionPreviewRefreshRequireAlt.Value))
-        {
-            TryRefreshAuctionPreview("hotkey");
-        }
     }
 
     private static void UpdateTreasureIdentifyBestValueAssist()
@@ -2070,11 +2068,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         EnsureIdentifyBestTreasureButton(controller);
         SetOverlayObjectActive(_identifyBestTreasureButtonRoot, true);
-
-        if (IsConfiguredHotkeyPressed(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value))
-        {
-            TrySelectHighestValueIdentifyTreasure(controller, "hotkey");
-        }
     }
 
     private static bool IsAuctionPreviewVisible()
@@ -2147,16 +2140,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
     }
 
-    private static bool IsConfiguredHotkeyPressed(KeyCode key, bool requireAlt)
-    {
-        if (key == KeyCode.None || !Input.GetKeyDown(key))
-        {
-            return false;
-        }
-
-        return !requireAlt || Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
-    }
-
     private static void ScheduleAuctionPreviewRefreshButton()
     {
         if (_auctionPreviewRefreshButtonRoot != null)
@@ -2180,11 +2163,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _auctionPreviewRefreshButtonReadyAt = Time.unscaledTime + 0.35f;
     }
 
-    private static string FormatConfiguredHotkey(KeyCode key, bool requireAlt)
-    {
-        return requireAlt ? $"Alt+{key}" : key.ToString();
-    }
-
     private static void EnsureAuctionPreviewRefreshButton(PlotController controller)
     {
         if (!_auctionPreviewRefreshEnabled.Value)
@@ -2197,8 +2175,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             _auctionPreviewRefreshButton != null &&
             _auctionPreviewRefreshButtonLabel != null)
         {
-            _auctionPreviewRefreshButtonLabel.text =
-                $"免费刷新展品\n{FormatConfiguredHotkey(_auctionPreviewRefreshHotkey.Value, _auctionPreviewRefreshRequireAlt.Value)}";
+            _auctionPreviewRefreshButtonLabel.text = "免费刷新展品";
             SetOverlayObjectActive(_auctionPreviewRefreshButtonRoot, true);
             return;
         }
@@ -2214,8 +2191,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var buttonParent = canvas?.rootCanvas?.transform ?? canvas?.transform ?? plotPanel?.transform ??
             grid.transform.parent ?? grid.transform;
         var buttonTemplate = FindUiButtonTemplate(plotPanel ?? grid);
-        var buttonText =
-            $"免费刷新展品\n{FormatConfiguredHotkey(_auctionPreviewRefreshHotkey.Value, _auctionPreviewRefreshRequireAlt.Value)}";
+        const string buttonText = "免费刷新展品";
         var created = buttonTemplate != null &&
             TryCreateButtonTemplateButton(
                 AuctionPreviewRefreshButtonName,
@@ -2271,8 +2247,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             _identifyBestTreasureButton != null &&
             _identifyBestTreasureButtonLabel != null)
         {
-            _identifyBestTreasureButtonLabel.text =
-                $"自动选择最高价\n{FormatConfiguredHotkey(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value)}";
+            _identifyBestTreasureButtonLabel.text = "自动选择最高估价";
             SetOverlayObjectActive(_identifyBestTreasureButtonRoot, true);
             return;
         }
@@ -2300,7 +2275,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 sureButtonRect.pivot,
                 position,
                 new Vector2(width, height),
-                $"自动选择最高价\n{FormatConfiguredHotkey(_treasureIdentifyBestValueHotkey.Value, _treasureIdentifyBestValueRequireAlt.Value)}",
+                "自动选择最高估价",
                 out _identifyBestTreasureButtonRoot,
                 out _identifyBestTreasureButton,
                 out _identifyBestTreasureButtonLabel))

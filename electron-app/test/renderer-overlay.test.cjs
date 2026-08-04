@@ -66,7 +66,7 @@ test('OTA completion is only emitted after the restarted app consumes the update
   assert.doesNotMatch(main, /更新包已准备完成[^\n]+emitUpdateProgress\('complete'/);
 });
 
-test('renderer exposes controls and shortcut hints for the new commerce and assist settings', () => {
+test('renderer exposes commerce and assist toggles without legacy shortcut controls', () => {
   const renderer = readSource('src/renderer/App.tsx');
   const controlBindings = [
     'treasureTradeHelperEnabled',
@@ -76,11 +76,7 @@ test('renderer exposes controls and shortcut hints for the new commerce and assi
     'shopOwnershipEnabled',
     'auctionEventAlwaysRedEnabled',
     'auctionPreviewRefreshEnabled',
-    'auctionPreviewRefreshHotkey',
-    'auctionPreviewRefreshRequireAlt',
-    'treasureIdentifyBestValueAssistEnabled',
-    'treasureIdentifyBestValueHotkey',
-    'treasureIdentifyBestValueRequireAlt'
+    'treasureIdentifyBestValueAssistEnabled'
   ];
 
   for (const binding of controlBindings) {
@@ -112,11 +108,7 @@ test('renderer exposes controls and shortcut hints for the new commerce and assi
     '启用店铺产业与买断',
     '拍卖会固定红色等级',
     '启用拍卖预览免费刷新',
-    '拍卖刷新主键',
-    '拍卖刷新需要按住 Alt',
-    '启用鉴宝最高鉴定价辅助',
-    '最高估值选择主键',
-    '最高估值选择需要按住 Alt'
+    '启用鉴宝最高鉴定价辅助'
   ]) {
     assert.match(renderer, new RegExp(`label="${label}"`), `missing independent label: ${label}`);
   }
@@ -137,7 +129,15 @@ test('renderer exposes controls and shortcut hints for the new commerce and assi
   assert.match(renderer, /hint="在商店界面显示产业信息与买断按钮；关闭后隐藏相关入口。"/);
   assert.match(renderer, /hint="在拍卖展品预览窗口增加不限次数的免费刷新按钮。"/);
   assert.match(renderer, /hint="按鼠标悬浮括号内的玩家鉴定价选择最高项；最终确认仍需手动完成。"/);
-  assert.equal((renderer.match(/hint="开启时快捷键为 Alt \+ 主键。"/g) ?? []).length >= 2, true);
+
+  for (const removedBinding of [
+    'auctionPreviewRefreshHotkey',
+    'auctionPreviewRefreshRequireAlt',
+    'treasureIdentifyBestValueHotkey',
+    'treasureIdentifyBestValueRequireAlt'
+  ]) {
+    assert.doesNotMatch(renderer, new RegExp(removedBinding), `legacy renderer binding remains: ${removedBinding}`);
+  }
 });
 
 test('launcher keeps primary actions visible and clearly marks unsaved settings', () => {
@@ -181,7 +181,7 @@ test('configuration status distinguishes disconnected, loading, failed, dirty an
   assert.match(renderer, /setCustomTalentsReady\(true\)/);
 });
 
-test('commerce settings use readable groups and disable dependent controls', () => {
+test('commerce settings use readable groups without legacy shortcut controls', () => {
   const renderer = readSource('src/renderer/App.tsx');
 
   for (const title of ['珍宝交易', '材料扫货', '店铺与背包', '拍卖与珍宝鉴定']) {
@@ -192,12 +192,6 @@ test('commerce settings use readable groups and disable dependent controls', () 
     renderer,
     /label="扫货最低品级"[\s\S]{0,400}disabled=\{!settings\.materialAutoBuyEnabled\}/
   );
-  assert.match(
-    renderer,
-    /label="拍卖刷新主键"[\s\S]{0,500}options=\{optionsWithCurrent\(settings\.auctionPreviewRefreshHotkey, UNITY_HOTKEY_OPTIONS\)\}[\s\S]{0,220}disabled=\{!settings\.auctionPreviewRefreshEnabled\}/
-  );
-  assert.match(
-    renderer,
-    /label="最高估值选择主键"[\s\S]{0,500}options=\{optionsWithCurrent\(settings\.treasureIdentifyBestValueHotkey, UNITY_HOTKEY_OPTIONS\)\}[\s\S]{0,220}disabled=\{!settings\.treasureIdentifyBestValueAssistEnabled\}/
-  );
+  assert.doesNotMatch(renderer, /拍卖刷新主键|拍卖刷新需要按住 Alt/);
+  assert.doesNotMatch(renderer, /最高估值选择主键|最高估值选择需要按住 Alt/);
 });

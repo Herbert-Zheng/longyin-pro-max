@@ -462,7 +462,7 @@ test('exploration full-reveal setting reads only the Exploration section and rou
   assert.match(text, /\[WrongSection\]\r?\nRevealAllOnStepTile = true/);
 });
 
-test('new commerce and assist settings have safe defaults when configuration is absent', async (t) => {
+test('commerce and assist toggles have safe defaults without legacy shortcut fields', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
@@ -477,11 +477,7 @@ test('new commerce and assist settings have safe defaults when configuration is 
       shopOwnershipEnabled: settings.shopOwnershipEnabled,
       auctionEventAlwaysRedEnabled: settings.auctionEventAlwaysRedEnabled,
       auctionPreviewRefreshEnabled: settings.auctionPreviewRefreshEnabled,
-      auctionPreviewRefreshHotkey: settings.auctionPreviewRefreshHotkey,
-      auctionPreviewRefreshRequireAlt: settings.auctionPreviewRefreshRequireAlt,
-      treasureIdentifyBestValueAssistEnabled: settings.treasureIdentifyBestValueAssistEnabled,
-      treasureIdentifyBestValueHotkey: settings.treasureIdentifyBestValueHotkey,
-      treasureIdentifyBestValueRequireAlt: settings.treasureIdentifyBestValueRequireAlt
+      treasureIdentifyBestValueAssistEnabled: settings.treasureIdentifyBestValueAssistEnabled
     },
     {
       treasureTradeHelperEnabled: true,
@@ -491,16 +487,20 @@ test('new commerce and assist settings have safe defaults when configuration is 
       shopOwnershipEnabled: true,
       auctionEventAlwaysRedEnabled: true,
       auctionPreviewRefreshEnabled: true,
-      auctionPreviewRefreshHotkey: 'W',
-      auctionPreviewRefreshRequireAlt: true,
-      treasureIdentifyBestValueAssistEnabled: true,
-      treasureIdentifyBestValueHotkey: 'F',
-      treasureIdentifyBestValueRequireAlt: true
+      treasureIdentifyBestValueAssistEnabled: true
     }
   );
+  for (const removedKey of [
+    'auctionPreviewRefreshHotkey',
+    'auctionPreviewRefreshRequireAlt',
+    'treasureIdentifyBestValueHotkey',
+    'treasureIdentifyBestValueRequireAlt'
+  ]) {
+    assert.equal(Object.hasOwn(settings, removedKey), false, `legacy field remains: ${removedKey}`);
+  }
 });
 
-test('new commerce and assist settings are parsed from their owning INI sections', async (t) => {
+test('commerce and assist settings ignore legacy shortcut values in every INI section', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await writeFile(
@@ -553,11 +553,7 @@ test('new commerce and assist settings are parsed from their owning INI sections
       shopOwnershipEnabled: settings.shopOwnershipEnabled,
       auctionEventAlwaysRedEnabled: settings.auctionEventAlwaysRedEnabled,
       auctionPreviewRefreshEnabled: settings.auctionPreviewRefreshEnabled,
-      auctionPreviewRefreshHotkey: settings.auctionPreviewRefreshHotkey,
-      auctionPreviewRefreshRequireAlt: settings.auctionPreviewRefreshRequireAlt,
-      treasureIdentifyBestValueAssistEnabled: settings.treasureIdentifyBestValueAssistEnabled,
-      treasureIdentifyBestValueHotkey: settings.treasureIdentifyBestValueHotkey,
-      treasureIdentifyBestValueRequireAlt: settings.treasureIdentifyBestValueRequireAlt
+      treasureIdentifyBestValueAssistEnabled: settings.treasureIdentifyBestValueAssistEnabled
     },
     {
       treasureTradeHelperEnabled: false,
@@ -567,16 +563,20 @@ test('new commerce and assist settings are parsed from their owning INI sections
       shopOwnershipEnabled: false,
       auctionEventAlwaysRedEnabled: false,
       auctionPreviewRefreshEnabled: false,
-      auctionPreviewRefreshHotkey: 'T',
-      auctionPreviewRefreshRequireAlt: false,
-      treasureIdentifyBestValueAssistEnabled: false,
-      treasureIdentifyBestValueHotkey: 'G',
-      treasureIdentifyBestValueRequireAlt: false
+      treasureIdentifyBestValueAssistEnabled: false
     }
   );
+  for (const removedKey of [
+    'auctionPreviewRefreshHotkey',
+    'auctionPreviewRefreshRequireAlt',
+    'treasureIdentifyBestValueHotkey',
+    'treasureIdentifyBestValueRequireAlt'
+  ]) {
+    assert.equal(Object.hasOwn(settings, removedKey), false, `legacy field was parsed: ${removedKey}`);
+  }
 });
 
-test('saving new commerce and assist settings upserts their sections without discarding unrelated values', async (t) => {
+test('saving commerce and assist settings removes owning-section shortcuts without touching decoys', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
@@ -592,15 +592,39 @@ test('saving new commerce and assist settings upserts their sections without dis
       'ShopOwnershipEnabled = decoy-shop',
       'EventAlwaysRedEnabled = decoy-auction-event',
       'PreviewRefreshEnabled = decoy-auction',
+      '## decoy auction shortcut comment must stay',
       'PreviewRefreshHotkey = DECOY_AUCTION_KEY',
       'PreviewRefreshRequireAlt = decoy-auction-alt',
       'BestValueAssistEnabled = decoy-identify',
+      '## decoy appraisal shortcut comment must stay',
       'BestValueHotkey = DECOY_IDENTIFY_KEY',
       'BestValueRequireAlt = decoy-identify-alt',
       '',
       '[Commerce]',
       'MerchantCarryCash = 43210',
       'UnrelatedFutureSetting = keep-me',
+      '',
+      '[Auction]',
+      '## unrelated user note: preserve me',
+      '## Main key used to refresh while the auction exhibit preview is open.',
+      '# Setting type: KeyCode',
+      '# Default value: W',
+      '# Acceptable values: A, B, C',
+      'PreviewRefreshHotkey = T',
+      '## When true, hold either Alt key while pressing PreviewRefreshHotkey. The default shortcut is Alt+W.',
+      '# Setting type: Boolean',
+      '# Default value: true',
+      '',
+      '[TreasureIdentify]',
+      '# another custom comment that must survive migration',
+      '## Main key used to select the highest parenthesized appraisal value while the appraisal window is open.',
+      '# Setting type: KeyCode',
+      '# Default value: F',
+      '# Acceptable values: A, B, C',
+      'BestValueHotkey = G',
+      '## When true, hold either Alt key while pressing BestValueHotkey. The default shortcut is Alt+F.',
+      '# Setting type: Boolean',
+      '# Default value: true',
       ''
     ].join('\r\n')
   );
@@ -615,11 +639,7 @@ test('saving new commerce and assist settings upserts their sections without dis
     shopOwnershipEnabled: false,
     auctionEventAlwaysRedEnabled: false,
     auctionPreviewRefreshEnabled: false,
-    auctionPreviewRefreshHotkey: 'T',
-    auctionPreviewRefreshRequireAlt: false,
-    treasureIdentifyBestValueAssistEnabled: false,
-    treasureIdentifyBestValueHotkey: 'G',
-    treasureIdentifyBestValueRequireAlt: false
+    treasureIdentifyBestValueAssistEnabled: false
   });
   const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
 
@@ -630,11 +650,15 @@ test('saving new commerce and assist settings upserts their sections without dis
   assert.equal(saved.shopOwnershipEnabled, false);
   assert.equal(saved.auctionEventAlwaysRedEnabled, false);
   assert.equal(saved.auctionPreviewRefreshEnabled, false);
-  assert.equal(saved.auctionPreviewRefreshHotkey, 'T');
-  assert.equal(saved.auctionPreviewRefreshRequireAlt, false);
   assert.equal(saved.treasureIdentifyBestValueAssistEnabled, false);
-  assert.equal(saved.treasureIdentifyBestValueHotkey, 'G');
-  assert.equal(saved.treasureIdentifyBestValueRequireAlt, false);
+  for (const removedKey of [
+    'auctionPreviewRefreshHotkey',
+    'auctionPreviewRefreshRequireAlt',
+    'treasureIdentifyBestValueHotkey',
+    'treasureIdentifyBestValueRequireAlt'
+  ]) {
+    assert.equal(Object.hasOwn(saved, removedKey), false, `legacy field was returned: ${removedKey}`);
+  }
   assert.match(text, /^UnrelatedFutureSetting = keep-me$/m);
   assert.match(text, /^MerchantCarryCash = 43210$/m);
   assert.match(text, /^TreasureTradeHelperEnabled = false$/m);
@@ -645,15 +669,21 @@ test('saving new commerce and assist settings upserts their sections without dis
   assert.match(text, /^\[Auction\]$/m);
   assert.match(text, /^EventAlwaysRedEnabled = false$/m);
   assert.match(text, /^PreviewRefreshEnabled = false$/m);
-  assert.match(text, /^PreviewRefreshHotkey = T$/m);
-  assert.match(text, /^PreviewRefreshRequireAlt = false$/m);
   assert.match(text, /^\[TreasureIdentify\]$/m);
   assert.match(text, /^BestValueAssistEnabled = false$/m);
-  assert.match(text, /^BestValueHotkey = G$/m);
-  assert.match(text, /^BestValueRequireAlt = false$/m);
+  assert.doesNotMatch(text, /\[Auction\][\s\S]*?^PreviewRefreshHotkey\s*=/m);
+  assert.doesNotMatch(text, /\[Auction\][\s\S]*?^PreviewRefreshRequireAlt\s*=/m);
+  assert.doesNotMatch(text, /\[TreasureIdentify\][\s\S]*?^BestValueHotkey\s*=/m);
+  assert.doesNotMatch(text, /\[TreasureIdentify\][\s\S]*?^BestValueRequireAlt\s*=/m);
+  assert.doesNotMatch(text, /Main key used to (?:refresh|select)/);
+  assert.doesNotMatch(text, /default shortcut is Alt\+[WF]/);
+  assert.match(text, /^## unrelated user note: preserve me$/m);
+  assert.match(text, /^# another custom comment that must survive migration$/m);
+  assert.match(text, /^## decoy auction shortcut comment must stay$/m);
+  assert.match(text, /^## decoy appraisal shortcut comment must stay$/m);
   assert.match(
     text,
-    /\[WrongSection\]\r?\nTreasureTradeHelperEnabled = decoy-trade\r?\nMaterialAutoBuyEnabled = decoy-material\r?\nMaterialPurchaseMinRareLv = 91\r?\nMaterialPurchaseMinItemLv = 92\r?\nShopOwnershipEnabled = decoy-shop\r?\nEventAlwaysRedEnabled = decoy-auction-event\r?\nPreviewRefreshEnabled = decoy-auction\r?\nPreviewRefreshHotkey = DECOY_AUCTION_KEY\r?\nPreviewRefreshRequireAlt = decoy-auction-alt\r?\nBestValueAssistEnabled = decoy-identify\r?\nBestValueHotkey = DECOY_IDENTIFY_KEY\r?\nBestValueRequireAlt = decoy-identify-alt/
+    /\[WrongSection\]\r?\nTreasureTradeHelperEnabled = decoy-trade\r?\nMaterialAutoBuyEnabled = decoy-material\r?\nMaterialPurchaseMinRareLv = 91\r?\nMaterialPurchaseMinItemLv = 92\r?\nShopOwnershipEnabled = decoy-shop\r?\nEventAlwaysRedEnabled = decoy-auction-event\r?\nPreviewRefreshEnabled = decoy-auction\r?\n## decoy auction shortcut comment must stay\r?\nPreviewRefreshHotkey = DECOY_AUCTION_KEY\r?\nPreviewRefreshRequireAlt = decoy-auction-alt\r?\nBestValueAssistEnabled = decoy-identify\r?\n## decoy appraisal shortcut comment must stay\r?\nBestValueHotkey = DECOY_IDENTIFY_KEY\r?\nBestValueRequireAlt = decoy-identify-alt/
   );
 });
 

@@ -80,11 +80,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   shopOwnershipEnabled: true,
   auctionEventAlwaysRedEnabled: true,
   auctionPreviewRefreshEnabled: true,
-  auctionPreviewRefreshHotkey: 'W',
-  auctionPreviewRefreshRequireAlt: true,
   treasureIdentifyBestValueAssistEnabled: true,
-  treasureIdentifyBestValueHotkey: 'F',
-  treasureIdentifyBestValueRequireAlt: true,
   luckyHitChancePercent: 0,
   extraRelationshipGainChancePercent: 0,
   teamAutoFavorEnabled: true,
@@ -580,8 +576,25 @@ function removeIniSectionValue(text: string, section: string, key: string): stri
   const sectionPattern = createIniSectionPattern(section);
 
   return text.replace(sectionPattern, (_match, header: string, body: string) => {
-    const nextBody = body.replace(new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*.*(?:\\r?\\n)?`, 'gmi'), '');
+    const keyPattern = new RegExp(
+      `^[\\t ]*${escapeRegex(key)}\\s*=\\s*.*(?:\\r?\\n)?`,
+      'gmi'
+    );
+    const nextBody = body.replace(keyPattern, '');
     return `${header}${nextBody}`;
+  });
+}
+
+function removeIniSectionCommentBlock(text: string, section: string, firstCommentLine: string): string {
+  const sectionPattern = createIniSectionPattern(section);
+
+  return text.replace(sectionPattern, (_match, header: string, body: string) => {
+    const commentBlockPattern = new RegExp(
+      `^[\\t ]*##[\\t ]*${escapeRegex(firstCommentLine)}[\\t ]*(?:\\r?\\n|$)` +
+        `(?:[\\t ]*#[\\t ]*(?:Setting type:|Default value:|Acceptable values:)[^\\r\\n]*(?:\\r?\\n|$))*`,
+      'gmi'
+    );
+    return `${header}${body.replace(commentBlockPattern, '')}`;
   });
 }
 
@@ -649,13 +662,9 @@ ShopOwnershipEnabled = ${boolText(settings.shopOwnershipEnabled)}
 [Auction]
 EventAlwaysRedEnabled = ${boolText(settings.auctionEventAlwaysRedEnabled)}
 PreviewRefreshEnabled = ${boolText(settings.auctionPreviewRefreshEnabled)}
-PreviewRefreshHotkey = ${settings.auctionPreviewRefreshHotkey}
-PreviewRefreshRequireAlt = ${boolText(settings.auctionPreviewRefreshRequireAlt)}
 
 [TreasureIdentify]
 BestValueAssistEnabled = ${boolText(settings.treasureIdentifyBestValueAssistEnabled)}
-BestValueHotkey = ${settings.treasureIdentifyBestValueHotkey}
-BestValueRequireAlt = ${boolText(settings.treasureIdentifyBestValueRequireAlt)}
 
 [MoneyLuck]
 LuckyHitChancePercent = ${settings.luckyHitChancePercent}
@@ -876,17 +885,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     shopOwnershipEnabled: input.shopOwnershipEnabled,
     auctionEventAlwaysRedEnabled: input.auctionEventAlwaysRedEnabled,
     auctionPreviewRefreshEnabled: input.auctionPreviewRefreshEnabled,
-    auctionPreviewRefreshHotkey: normalizeHotkey(
-      input.auctionPreviewRefreshHotkey,
-      DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshHotkey
-    ),
-    auctionPreviewRefreshRequireAlt: input.auctionPreviewRefreshRequireAlt,
     treasureIdentifyBestValueAssistEnabled: input.treasureIdentifyBestValueAssistEnabled,
-    treasureIdentifyBestValueHotkey: normalizeHotkey(
-      input.treasureIdentifyBestValueHotkey,
-      DEFAULT_VISIBLE_SETTINGS.treasureIdentifyBestValueHotkey
-    ),
-    treasureIdentifyBestValueRequireAlt: input.treasureIdentifyBestValueRequireAlt,
     luckyHitChancePercent: Math.round(clamp(input.luckyHitChancePercent, 0, 100)),
     extraRelationshipGainChancePercent: Math.round(clamp(input.extraRelationshipGainChancePercent, 0, 100)),
     teamAutoFavorEnabled: input.teamAutoFavorEnabled,
@@ -997,30 +996,10 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       'PreviewRefreshEnabled',
       DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshEnabled
     ),
-    auctionPreviewRefreshHotkey: readString(
-      auctionSection,
-      'PreviewRefreshHotkey',
-      DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshHotkey
-    ),
-    auctionPreviewRefreshRequireAlt: readBool(
-      auctionSection,
-      'PreviewRefreshRequireAlt',
-      DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshRequireAlt
-    ),
     treasureIdentifyBestValueAssistEnabled: readBool(
       treasureIdentifySection,
       'BestValueAssistEnabled',
       DEFAULT_VISIBLE_SETTINGS.treasureIdentifyBestValueAssistEnabled
-    ),
-    treasureIdentifyBestValueHotkey: readString(
-      treasureIdentifySection,
-      'BestValueHotkey',
-      DEFAULT_VISIBLE_SETTINGS.treasureIdentifyBestValueHotkey
-    ),
-    treasureIdentifyBestValueRequireAlt: readBool(
-      treasureIdentifySection,
-      'BestValueRequireAlt',
-      DEFAULT_VISIBLE_SETTINGS.treasureIdentifyBestValueRequireAlt
     ),
     luckyHitChancePercent: readInt(text, 'LuckyHitChancePercent', DEFAULT_VISIBLE_SETTINGS.luckyHitChancePercent),
     extraRelationshipGainChancePercent: readInt(
@@ -1459,12 +1438,17 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'PreviewRefreshEnabled',
     boolText(normalized.auctionPreviewRefreshEnabled)
   );
-  nextMain = upsertIniSectionValue(nextMain, 'Auction', 'PreviewRefreshHotkey', normalized.auctionPreviewRefreshHotkey);
-  nextMain = upsertIniSectionValue(
+  nextMain = removeIniSectionValue(nextMain, 'Auction', 'PreviewRefreshHotkey');
+  nextMain = removeIniSectionValue(nextMain, 'Auction', 'PreviewRefreshRequireAlt');
+  nextMain = removeIniSectionCommentBlock(
     nextMain,
     'Auction',
-    'PreviewRefreshRequireAlt',
-    boolText(normalized.auctionPreviewRefreshRequireAlt)
+    'Main key used to refresh while the auction exhibit preview is open.'
+  );
+  nextMain = removeIniSectionCommentBlock(
+    nextMain,
+    'Auction',
+    'When true, hold either Alt key while pressing PreviewRefreshHotkey. The default shortcut is Alt+W.'
   );
   nextMain = upsertIniSectionValue(
     nextMain,
@@ -1472,17 +1456,17 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'BestValueAssistEnabled',
     boolText(normalized.treasureIdentifyBestValueAssistEnabled)
   );
-  nextMain = upsertIniSectionValue(
+  nextMain = removeIniSectionValue(nextMain, 'TreasureIdentify', 'BestValueHotkey');
+  nextMain = removeIniSectionValue(nextMain, 'TreasureIdentify', 'BestValueRequireAlt');
+  nextMain = removeIniSectionCommentBlock(
     nextMain,
     'TreasureIdentify',
-    'BestValueHotkey',
-    normalized.treasureIdentifyBestValueHotkey
+    'Main key used to select the highest parenthesized appraisal value while the appraisal window is open.'
   );
-  nextMain = upsertIniSectionValue(
+  nextMain = removeIniSectionCommentBlock(
     nextMain,
     'TreasureIdentify',
-    'BestValueRequireAlt',
-    boolText(normalized.treasureIdentifyBestValueRequireAlt)
+    'When true, hold either Alt key while pressing BestValueHotkey. The default shortcut is Alt+F.'
   );
   nextMain = upsertIniSectionValue(nextMain, 'MoneyLuck', 'LuckyHitChancePercent', String(normalized.luckyHitChancePercent));
   nextMain = removeIniSectionValue(nextMain, 'Commerce', 'LuckyHitChancePercent');

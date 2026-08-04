@@ -17,6 +17,9 @@
     "build:renderer": "vite build",
     "build:manifest": "node scripts/generate-update-manifest.mjs",
     "test:backend": "npm run build:main && node --test test/backend-safety.test.cjs test/update-safety.test.cjs test/renderer-overlay.test.cjs",
+    "test:renderer-smoke:harness": "node --test test/renderer-smoke-harness.test.cjs",
+    "test:renderer-smoke": "npm run build:main && npm run build:renderer && node scripts/check-renderer-smoke.mjs",
+    "test:renderer-smoke:existing-profile": "npm run build:main && npm run build:renderer && node scripts/check-renderer-smoke.mjs --existing-profile",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "start": "electron ."
   },

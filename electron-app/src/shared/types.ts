@@ -277,11 +277,7 @@ export interface VisibleSettings {
   shopOwnershipEnabled: boolean;
   auctionEventAlwaysRedEnabled: boolean;
   auctionPreviewRefreshEnabled: boolean;
-  auctionPreviewRefreshHotkey: string;
-  auctionPreviewRefreshRequireAlt: boolean;
   treasureIdentifyBestValueAssistEnabled: boolean;
-  treasureIdentifyBestValueHotkey: string;
-  treasureIdentifyBestValueRequireAlt: boolean;
   luckyHitChancePercent: number;
   extraRelationshipGainChancePercent: number;
   teamAutoFavorEnabled: boolean;

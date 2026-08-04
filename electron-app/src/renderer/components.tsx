@@ -2,21 +2,6 @@ import type { ReactNode } from 'react';
 import type { VisibleSettings } from '../shared/types';
 
 export const HOTKEY_OPTIONS = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'];
-export const UNITY_HOTKEY_OPTIONS = [
-  ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''),
-  ...HOTKEY_OPTIONS,
-  'Insert',
-  'Home',
-  'PageUp',
-  'Delete',
-  'End',
-  'PageDown',
-  'Pause',
-  'BackQuote',
-  'Mouse3',
-  'Mouse4',
-  'Mouse5'
-];
 export const BATTLE_TURBO_HOTKEYS = [
   'F1',
   'F2',
@@ -67,11 +52,7 @@ export function defaultSettings(): VisibleSettings {
     shopOwnershipEnabled: true,
     auctionEventAlwaysRedEnabled: true,
     auctionPreviewRefreshEnabled: true,
-    auctionPreviewRefreshHotkey: 'W',
-    auctionPreviewRefreshRequireAlt: true,
     treasureIdentifyBestValueAssistEnabled: true,
-    treasureIdentifyBestValueHotkey: 'F',
-    treasureIdentifyBestValueRequireAlt: true,
     luckyHitChancePercent: 0,
     extraRelationshipGainChancePercent: 0,
     teamAutoFavorEnabled: true,

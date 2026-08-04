@@ -26,7 +26,6 @@ import {
   SelectField,
   StatusPill,
   TextField,
-  UNITY_HOTKEY_OPTIONS,
   clampText,
   defaultSettings,
   mergeSettings
@@ -1866,41 +1865,11 @@ export function App() {
                       onChange={(value) => updateSetting('auctionPreviewRefreshEnabled', value)}
                       hint="在拍卖展品预览窗口增加不限次数的免费刷新按钮。"
                     />
-                    <SelectField
-                      label="拍卖刷新主键"
-                      value={settings.auctionPreviewRefreshHotkey}
-                      onChange={(value) => updateSetting('auctionPreviewRefreshHotkey', value)}
-                      options={optionsWithCurrent(settings.auctionPreviewRefreshHotkey, UNITY_HOTKEY_OPTIONS)}
-                      disabled={!settings.auctionPreviewRefreshEnabled}
-                      hint="选择用于刷新展品的主键。"
-                    />
-                    <CheckboxField
-                      label="拍卖刷新需要按住 Alt"
-                      value={settings.auctionPreviewRefreshRequireAlt}
-                      onChange={(value) => updateSetting('auctionPreviewRefreshRequireAlt', value)}
-                      disabled={!settings.auctionPreviewRefreshEnabled}
-                      hint="开启时快捷键为 Alt + 主键。"
-                    />
                     <CheckboxField
                       label="启用鉴宝最高鉴定价辅助"
                       value={settings.treasureIdentifyBestValueAssistEnabled}
                       onChange={(value) => updateSetting('treasureIdentifyBestValueAssistEnabled', value)}
                       hint="按鼠标悬浮括号内的玩家鉴定价选择最高项；最终确认仍需手动完成。"
-                    />
-                    <SelectField
-                      label="最高估值选择主键"
-                      value={settings.treasureIdentifyBestValueHotkey}
-                      onChange={(value) => updateSetting('treasureIdentifyBestValueHotkey', value)}
-                      options={optionsWithCurrent(settings.treasureIdentifyBestValueHotkey, UNITY_HOTKEY_OPTIONS)}
-                      disabled={!settings.treasureIdentifyBestValueAssistEnabled}
-                      hint="选择用于自动选中最高玩家鉴定价物品的主键。"
-                    />
-                    <CheckboxField
-                      label="最高估值选择需要按住 Alt"
-                      value={settings.treasureIdentifyBestValueRequireAlt}
-                      onChange={(value) => updateSetting('treasureIdentifyBestValueRequireAlt', value)}
-                      disabled={!settings.treasureIdentifyBestValueAssistEnabled}
-                      hint="开启时快捷键为 Alt + 主键。"
                     />
                   </div>
                 </Card>

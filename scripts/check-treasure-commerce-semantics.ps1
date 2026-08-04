@@ -164,7 +164,7 @@ Require-ScopePattern $clickRouterMethod 'isIdentifyAssist[\s\S]*?_treasureIdenti
 Require-ScopeText $selectorMethod '!_treasureIdentifyBestValueAssistEnabled.Value' 'The treasure identify selection action must have a final BestValueAssistEnabled gate.'
 
 Reject-SourceText '自动选中真品' 'The appraisal control still claims to select a genuine item instead of the highest displayed value.'
-Require-SourceText '自动选择最高价' 'The appraisal control must say that it selects the highest-priced item.'
+Require-SourceText '自动选择最高估价' 'The appraisal control must say that it selects the highest player-appraised item.'
 Require-SourceText 'TryGetTreasureAppraisedValue' 'Appraisal and commerce must share an explicitly named player-appraised value helper.'
 Require-SourceText '括号估价' 'The treasure trade overlay must expose the same parenthesized appraisal value used by the appraisal mini-game.'
 Reject-SourceText 'EstimateTreasureSellPriceFromRealValue' 'The old real-value wording must not remain in the trade estimate implementation.'

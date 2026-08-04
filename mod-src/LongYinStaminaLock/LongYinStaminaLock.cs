@@ -14,7 +14,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.32.0")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.33.0")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -61,6 +61,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const float AuctionRedEventDifficulty = 10f;
     private const string IdentifyBestTreasureButtonName = "CodexIdentifyBestTreasureButton";
     private const string BreakthroughRerollButtonName = "CodexBreakthroughRerollButton";
+    private const string CraftRerollButtonName = "CodexCraftResultRerollButton";
+    private const string SpeEnhanceRerollButtonName = "CodexSpeEnhanceRerollButton";
     private const int ExternalOverlayProtocolVersion = 1;
     private const string ExternalOverlayStateFileName = "codex.longyin.overlay-state.json";
     private const string ExternalOverlayCommandFileName = "codex.longyin.overlay-command.json";
@@ -112,6 +114,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<bool> _auctionEventAlwaysRedEnabled = null!;
     private static ConfigEntry<bool> _treasureIdentifyBestValueAssistEnabled = null!;
     private static ConfigEntry<bool> _breakthroughRerollEnabled = null!;
+    private static ConfigEntry<bool> _craftRerollEnabled = null!;
     private static ConfigEntry<int> _luckyMoneyHitChancePercent = null!;
     private static ConfigEntry<int> _extraRelationshipGainChancePercent = null!;
     private static ConfigEntry<bool> _teamAutoFavorEnabled = null!;
@@ -439,6 +442,25 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         public bool Consumed { get; set; }
     }
 
+    private sealed class CraftRerollSeed
+    {
+        public ItemData? OriginalItem { get; init; }
+        public int CraftType { get; init; }
+        public int TargetSubType { get; init; }
+        public int TargetFoodSubType { get; init; }
+        public int TargetWeaponType { get; init; }
+        public int ItemType { get; init; }
+        public int ItemLevel { get; init; }
+        public int RareLevel { get; init; }
+        public int Value { get; init; }
+        public int SubType { get; init; }
+        public int LittleType { get; init; }
+        public int AttriType { get; init; }
+        public float BuildingLevel { get; init; }
+        public HeroData? TargetHero { get; init; }
+        public string RuntimeTypeName { get; init; } = string.Empty;
+    }
+
     private sealed class BookWriterCompletionState
     {
         public bool WasWorking { get; init; }
@@ -488,6 +510,24 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static int _breakthroughRerollExpectedChoiceCount;
     private static int _breakthroughRerollSessionToken;
     private static int _breakthroughRerollPendingSessionToken = -1;
+    private static CraftUIController? _craftRerollController;
+    private static List<CraftRerollSeed>? _craftRerollInitialSeed;
+    private static string _craftRerollFingerprint = string.Empty;
+    private static GameObject? _craftRerollButtonRoot;
+    private static Button? _craftRerollButton;
+    private static Text? _craftRerollButtonLabel;
+    private static bool _craftRerollHooksReady;
+    private static bool _craftRerollReady;
+    private static bool _craftRerollBusy;
+    private static int _craftRerollExpectedResultCount;
+    private static SpeEnhanceEquipController? _speEnhanceRerollController;
+    private static GameObject? _speEnhanceRerollButtonRoot;
+    private static Button? _speEnhanceRerollButton;
+    private static Text? _speEnhanceRerollButtonLabel;
+    private static bool _speEnhanceRerollHooksReady;
+    private static bool _speEnhanceRerollReady;
+    private static bool _speEnhanceRerollBusy;
+    private static int _speEnhanceRerollExpectedChoiceCount;
     private static GameObject? _shopOwnershipOverlayRoot;
     private static Text? _shopOwnershipOverlayLabel;
     private static Image? _shopOwnershipOverlayIcon;
@@ -555,6 +595,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _auctionEventAlwaysRedEnabled = Config.Bind("Auction", "EventAlwaysRedEnabled", true, "When true, the 拍卖大会 world event is generated at difficulty 10, the red highest event grade, including its grade-dependent auction content.");
         _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the treasure with the highest player-appraised value shown in parentheses. Confirmation remains manual.");
         _breakthroughRerollEnabled = Config.Bind("Breakthrough", "RerollEnabled", true, "Adds a button that rebuilds the current breakthrough choices without confirming a choice or consuming money, items, or time.");
+        _craftRerollEnabled = Config.Bind("Craft", "RerollEnabled", true, "Adds preview-only buttons that rebuild normal crafting or special-enhancement choices without confirming, consuming materials, spending money, or advancing time.");
         _luckyMoneyHitChancePercent = Config.Bind("MoneyLuck", "LuckyHitChancePercent", 0, "Chance from 0 to 100 that a player money transaction triggers a lucky bonus.");
         _extraRelationshipGainChancePercent = Config.Bind("Relationship", "ExtraRelationshipGainChancePercent", 0, "Chance from 0 to 100 that positive relationship gain becomes double.");
         _teamAutoFavorEnabled = Config.Bind("Relationship", "TeamAutoFavorEnabled", true, "When true, current player teammates automatically gain favor each elapsed in-game day.");
@@ -689,10 +730,29 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var breakthroughConfirmPatched = PatchMethod(typeof(BreakThroughController), nameof(BreakThroughController.StartBreakThroughButtonClicked), Type.EmptyTypes, nameof(BreakthroughConfirmationPrefix), null);
         var breakthroughHidePatched = PatchMethod(typeof(BreakThroughController), nameof(BreakThroughController.UnshowBreakThroughPanel), Type.EmptyTypes, nameof(BreakthroughPanelClosingPrefix), null);
         PatchMethod(typeof(DebateUIController), nameof(DebateUIController.ChangePatient), new[] { typeof(bool), typeof(float) }, nameof(DebateChangePatientPrefix), null);
-        PatchMethod(typeof(CraftUIController), nameof(CraftUIController.OpenCraftUI), new[] { typeof(CraftType), typeof(AreaBuildingData), typeof(bool) }, null, nameof(OpenCraftUiPostfix));
-        PatchMethod(typeof(CraftUIController), nameof(CraftUIController.HideCraftUI), Type.EmptyTypes, null, nameof(HideCraftUiPostfix));
+        var craftOpenPatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.OpenCraftUI), new[] { typeof(CraftType), typeof(AreaBuildingData), typeof(bool) }, null, nameof(CraftUiOpenPostfix));
+        var craftHidePatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.HideCraftUI), Type.EmptyTypes, nameof(CraftUiHidePrefix), nameof(HideCraftUiPostfix));
+        var craftResultsShownPatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.ShowCraftResultChoosePanel), Type.EmptyTypes, null, nameof(CraftResultsShownPostfix));
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.GetMaretialExtraCraftRate), Type.EmptyTypes, null, nameof(GetCraftMaterialExtraCraftRatePostfix));
-        PatchMethod(typeof(CraftUIController), nameof(CraftUIController.CraftResultChoosen), new[] { typeof(int) }, null, nameof(CraftUiResultChoosenPostfix));
+        var craftConfirmPatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.CraftResultChoosen), new[] { typeof(int) }, nameof(CraftResultChoosenPrefix), nameof(CraftUiResultChoosenPostfix));
+        var craftGenerationStartPatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.CraftButtonClicked), Type.EmptyTypes, nameof(CraftContextChangingPrefix), null);
+        var craftClearAllMaterialPatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.ClearAllCraftMaterial), Type.EmptyTypes, nameof(CraftContextChangingPrefix), null);
+        var craftClearMaterialPatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.ClearCraftMaterial), Type.EmptyTypes, nameof(CraftContextChangingPrefix), null);
+        var craftClearMaterialSubPatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.ClearCraftMaterialSub), Type.EmptyTypes, nameof(CraftContextChangingPrefix), null);
+        var craftMaterialChosenPatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.CraftMaterialChoosen), Type.EmptyTypes, nameof(CraftContextChangingPrefix), null);
+        var craftMaterialSubChosenPatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.CraftMaterialChoosenSub), Type.EmptyTypes, nameof(CraftContextChangingPrefix), null);
+        var craftFoodSubtypePatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.ChangeFoodSubTypeChoose), new[] { typeof(GameObject) }, nameof(CraftContextChangingPrefix), null);
+        var craftResourceCostPatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.ChangeResourceCostID), new[] { typeof(GameObject) }, nameof(CraftContextChangingPrefix), null);
+        var craftSubtypePatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.ChangeSubTypeChoose), new[] { typeof(GameObject) }, nameof(CraftContextChangingPrefix), null);
+        var craftWeaponTypePatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.ChangeWeaponTypeChoose), new[] { typeof(GameObject) }, nameof(CraftContextChangingPrefix), null);
+        var craftForceTogglePatched = PatchMethod(typeof(CraftUIController), nameof(CraftUIController.ForceCraftToggleButtonClicked), Type.EmptyTypes, nameof(CraftContextChangingPrefix), null);
+        var speEnhanceOpenPatched = PatchMethod(typeof(SpeEnhanceEquipController), nameof(SpeEnhanceEquipController.ShowSpeEnhanceEquipUI), Type.EmptyTypes, null, nameof(SpeEnhanceOpenPostfix));
+        var speEnhanceHidePatched = PatchMethod(typeof(SpeEnhanceEquipController), nameof(SpeEnhanceEquipController.HideSpeEnhanceEquipUI), Type.EmptyTypes, nameof(SpeEnhanceHidePrefix), null);
+        var speEnhanceGeneratePatched = PatchMethod(typeof(SpeEnhanceEquipController), nameof(SpeEnhanceEquipController.GenerateChoice), Type.EmptyTypes, null, nameof(SpeEnhanceGenerateChoicePostfix));
+        var speEnhanceTargetPatched = PatchMethod(typeof(SpeEnhanceEquipController), nameof(SpeEnhanceEquipController.EnhanceTargetChoosen), Type.EmptyTypes, nameof(SpeEnhanceTargetChangingPrefix), null);
+        var speEnhanceClearTargetPatched = PatchMethod(typeof(SpeEnhanceEquipController), nameof(SpeEnhanceEquipController.ClearEnhanceTarget), Type.EmptyTypes, nameof(SpeEnhanceTargetChangingPrefix), null);
+        var speEnhanceConfirmPatched = PatchMethod(typeof(SpeEnhanceEquipController), nameof(SpeEnhanceEquipController.EnhanceButtonClicked), Type.EmptyTypes, nameof(SpeEnhanceConfirmPrefix), null);
+        var speEnhanceFinishPatched = PatchMethod(typeof(SpeEnhanceEquipController), nameof(SpeEnhanceEquipController.FinishSpeEnhance), Type.EmptyTypes, nameof(SpeEnhanceConfirmPrefix), null);
         PatchMethod(typeof(ItemData), nameof(ItemData.GetMaterialExtraCraftRate), Type.EmptyTypes, null, nameof(GetItemMaterialExtraCraftRatePostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.RealStartReadBook), Type.EmptyTypes, nameof(ReadBookTaskStartPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.ReadBookChoosen), Type.EmptyTypes, nameof(ReadBookTracePrefix), null);
@@ -726,7 +786,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var mailDeliveryPatched = PatchMethod(typeof(GameController), nameof(GameController.GetNewMail), new[] { typeof(MailData), typeof(HeroData) }, null, nameof(GetNewMailPostfix));
         PatchMethod(typeof(StudySkillController), nameof(StudySkillController.RealStartStudySkill), Type.EmptyTypes, nameof(RealStartStudySkillPrefix), null);
         PatchMethod(typeof(StudySkillController), nameof(StudySkillController.FinishStudySkill), new[] { typeof(float) }, null, nameof(FinishStudySkillPostfix));
-        PatchMethod(typeof(PlotController), nameof(PlotController.CraftResultChoosen), new[] { typeof(ItemData) }, nameof(CraftResultChoosenPrefix), nameof(CraftResultChoosenPostfix));
+        PatchMethod(typeof(PlotController), nameof(PlotController.CraftResultChoosen), new[] { typeof(ItemData) }, nameof(PlotCraftResultChoosenPrefix), nameof(CraftResultChoosenPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.SetPlotItem), new[] { typeof(ItemData), typeof(bool) }, null, nameof(SetPlotItemPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.PlayerGetPlotItem), Type.EmptyTypes, nameof(PlayerGetPlotItemPrefix), nameof(PlayerGetPlotItemPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.PlayerGetPlotItemSimple), Type.EmptyTypes, nameof(PlayerGetPlotItemSimplePrefix), nameof(PlayerGetPlotItemSimplePostfix));
@@ -765,6 +825,55 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         else
         {
             LoggerInstance.LogInfo("[Compatibility] Breakthrough reroll: ENABLED (all required lifecycle, click, update, and load hooks patched).");
+        }
+        _craftRerollHooksReady = craftOpenPatched &&
+            craftHidePatched &&
+            craftResultsShownPatched &&
+            craftConfirmPatched &&
+            craftGenerationStartPatched &&
+            craftClearAllMaterialPatched &&
+            craftClearMaterialPatched &&
+            craftClearMaterialSubPatched &&
+            craftMaterialChosenPatched &&
+            craftMaterialSubChosenPatched &&
+            craftFoodSubtypePatched &&
+            craftResourceCostPatched &&
+            craftSubtypePatched &&
+            craftWeaponTypePatched &&
+            craftForceTogglePatched &&
+            overlayButtonPointerPatched &&
+            gameControllerUpdatePatched &&
+            loadRecentGamePatched &&
+            loadGamePatched &&
+            loadAllGameDataPatched;
+        if (!_craftRerollHooksReady)
+        {
+            DisableCraftReroll("one or more required normal-craft lifecycle, result, click, update, or load hooks were unavailable");
+        }
+        else
+        {
+            LoggerInstance.LogInfo("[Compatibility] Normal crafting reroll: ENABLED (preview-only lifecycle is fully patched).");
+        }
+
+        _speEnhanceRerollHooksReady = speEnhanceOpenPatched &&
+            speEnhanceHidePatched &&
+            speEnhanceGeneratePatched &&
+            speEnhanceTargetPatched &&
+            speEnhanceClearTargetPatched &&
+            speEnhanceConfirmPatched &&
+            speEnhanceFinishPatched &&
+            overlayButtonPointerPatched &&
+            gameControllerUpdatePatched &&
+            loadRecentGamePatched &&
+            loadGamePatched &&
+            loadAllGameDataPatched;
+        if (!_speEnhanceRerollHooksReady)
+        {
+            DisableSpeEnhanceReroll("one or more required special-enhance lifecycle, choice, click, update, or load hooks were unavailable");
+        }
+        else
+        {
+            LoggerInstance.LogInfo("[Compatibility] Special enhancement reroll: ENABLED (preview-only lifecycle is fully patched).");
         }
         PatchMethod(typeof(GameController), nameof(GameController.ChangeDay), Type.EmptyTypes, nameof(CalendarChangePrefix), nameof(CalendarChangePostfix));
         PatchMethod(typeof(GameController), nameof(GameController.ChangeDay), new[] { typeof(int) }, nameof(CalendarChangePrefix), nameof(CalendarChangePostfix));
@@ -1919,6 +2028,10 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var isIdentifyAssist = string.Equals(buttonName, IdentifyBestTreasureButtonName, StringComparison.Ordinal);
         var isBreakthroughReroll = string.Equals(buttonName, BreakthroughRerollButtonName, StringComparison.Ordinal) &&
             __instance == _breakthroughRerollButton;
+        var isCraftReroll = string.Equals(buttonName, CraftRerollButtonName, StringComparison.Ordinal) &&
+            __instance == _craftRerollButton;
+        var isSpeEnhanceReroll = string.Equals(buttonName, SpeEnhanceRerollButtonName, StringComparison.Ordinal) &&
+            __instance == _speEnhanceRerollButton;
         var isShopOwnershipBuy = string.Equals(buttonName, ShopOwnershipBuyButtonName, StringComparison.Ordinal);
         var isMaterialAutoBuy = string.Equals(buttonName, MaterialAutoBuyButtonName, StringComparison.Ordinal);
         var isMaterialFilterDropdown = string.Equals(buttonName, MaterialFilterDropdownButtonName, StringComparison.Ordinal);
@@ -1929,6 +2042,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         if (!isAuctionRefresh &&
             !isIdentifyAssist &&
             !isBreakthroughReroll &&
+            !isCraftReroll &&
+            !isSpeEnhanceReroll &&
             !isShopOwnershipBuy &&
             !isMaterialAutoBuy &&
             !isMaterialFilterDropdown &&
@@ -1942,7 +2057,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return false;
         }
 
-        if ((isAuctionRefresh || isIdentifyAssist || isBreakthroughReroll) &&
+        if ((isAuctionRefresh || isIdentifyAssist || isBreakthroughReroll || isCraftReroll || isSpeEnhanceReroll) &&
             (eventData == null || eventData.button != PointerEventData.InputButton.Left))
         {
             return false;
@@ -1975,6 +2090,20 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 if (_breakthroughRerollEnabled.Value)
                 {
                     TryRerollBreakthroughChoices();
+                }
+            }
+            else if (isCraftReroll)
+            {
+                if (_craftRerollEnabled.Value)
+                {
+                    TryRerollCraftResults();
+                }
+            }
+            else if (isSpeEnhanceReroll)
+            {
+                if (_craftRerollEnabled.Value)
+                {
+                    TryRerollSpeEnhanceChoices();
                 }
             }
             else if (isShopOwnershipBuy)
@@ -2534,6 +2663,1155 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         LoggerInstance.LogWarning($"[Compatibility] Breakthrough reroll DISABLED safely: {reason}.");
     }
 
+    private static void CraftResultsShownPostfix(CraftUIController __instance)
+    {
+        try
+        {
+            if (!_craftRerollEnabled.Value || !_craftRerollHooksReady || _craftRerollBusy)
+            {
+                return;
+            }
+
+            CaptureCraftRerollSession(__instance);
+        }
+        catch (Exception ex)
+        {
+            DisableCraftReroll($"result-ready postfix failed: {ex.Message}");
+        }
+    }
+
+    private static void SpeEnhanceOpenPostfix(SpeEnhanceEquipController __instance)
+    {
+        ResetSpeEnhanceRerollState("SpeEnhanceEquipController.ShowSpeEnhanceEquipUI");
+        _speEnhanceRerollController = __instance;
+    }
+
+    private static void SpeEnhanceHidePrefix()
+    {
+        ResetSpeEnhanceRerollState("SpeEnhanceEquipController.HideSpeEnhanceEquipUI");
+    }
+
+    private static void SpeEnhanceTargetChangingPrefix()
+    {
+        ResetSpeEnhanceRerollState("SpeEnhanceEquipController target changed");
+    }
+
+    private static void SpeEnhanceConfirmPrefix()
+    {
+        ResetSpeEnhanceRerollState("SpeEnhanceEquipController confirmation");
+    }
+
+    private static void SpeEnhanceGenerateChoicePostfix(SpeEnhanceEquipController __instance)
+    {
+        try
+        {
+            if (!_craftRerollEnabled.Value || !_speEnhanceRerollHooksReady)
+            {
+                ResetSpeEnhanceRerollState("special-enhance choices generated while unavailable");
+                return;
+            }
+
+            if (!IsSpeEnhanceRerollUiVisible(__instance))
+            {
+                ResetSpeEnhanceRerollState("special-enhance choices generated outside its visible UI");
+                return;
+            }
+
+            var activeCount = CountSpeEnhanceChoices(__instance, requireActive: true);
+            if (activeCount <= 0)
+            {
+                if (_speEnhanceRerollBusy)
+                {
+                    DisableSpeEnhanceReroll("GenerateChoice completed without active choices");
+                }
+
+                return;
+            }
+
+            if (_speEnhanceRerollBusy &&
+                _speEnhanceRerollExpectedChoiceCount > 0 &&
+                activeCount != _speEnhanceRerollExpectedChoiceCount)
+            {
+                DisableSpeEnhanceReroll(
+                    $"choice count changed during regeneration: expected={_speEnhanceRerollExpectedChoiceCount}, actual={activeCount}");
+                return;
+            }
+
+            _speEnhanceRerollController = __instance;
+            _speEnhanceRerollExpectedChoiceCount = activeCount;
+            if (!_speEnhanceRerollBusy)
+            {
+                _speEnhanceRerollReady = true;
+            }
+
+            if (_traceMode.Value)
+            {
+                LoggerInstance.LogInfo($"[CraftReroll] Special-enhance choices ready: active={activeCount}.");
+            }
+        }
+        catch (Exception ex)
+        {
+            DisableSpeEnhanceReroll($"choice-ready postfix failed: {ex.Message}");
+        }
+    }
+
+    private static void UpdateCraftRerollAssist()
+    {
+        if (!_craftRerollEnabled.Value)
+        {
+            ResetCraftRerollState("feature disabled by configuration");
+            ResetSpeEnhanceRerollState("feature disabled by configuration");
+            return;
+        }
+
+        CraftUIController? craftController = null;
+        var craftVisible = false;
+        try
+        {
+            craftController = CraftUIController.Instance;
+            craftVisible = IsCraftRerollUiVisible(craftController);
+        }
+        catch (Exception ex)
+        {
+            DisableCraftReroll($"update normal-craft path failed: {ex.Message}");
+        }
+
+        SpeEnhanceEquipController? speEnhanceController = null;
+        var speEnhanceVisible = false;
+        try
+        {
+            speEnhanceController = SpeEnhanceEquipController.Instance;
+            speEnhanceVisible = IsSpeEnhanceRerollUiVisible(speEnhanceController);
+        }
+        catch (Exception ex)
+        {
+            DisableSpeEnhanceReroll($"update special-enhance path failed: {ex.Message}");
+        }
+
+        if (craftVisible && speEnhanceVisible)
+        {
+            SetOverlayObjectActive(_craftRerollButtonRoot, false);
+            SetOverlayObjectActive(_speEnhanceRerollButtonRoot, false);
+            return;
+        }
+
+        try
+        {
+            if (!_craftRerollHooksReady || !craftVisible || craftController == null)
+            {
+                if (!craftVisible)
+                {
+                    ResetCraftRerollState("normal crafting UI closed");
+                }
+                else
+                {
+                    SetOverlayObjectActive(_craftRerollButtonRoot, false);
+                }
+            }
+            else
+            {
+                UpdateNormalCraftRerollAssist(craftController);
+            }
+        }
+        catch (Exception ex)
+        {
+            DisableCraftReroll($"update normal-craft path failed: {ex.Message}");
+        }
+
+        try
+        {
+            if (!_speEnhanceRerollHooksReady || !speEnhanceVisible || speEnhanceController == null)
+            {
+                if (!speEnhanceVisible)
+                {
+                    ResetSpeEnhanceRerollState("special-enhance UI closed");
+                }
+                else
+                {
+                    SetOverlayObjectActive(_speEnhanceRerollButtonRoot, false);
+                }
+            }
+            else
+            {
+                UpdateSpeEnhanceRerollAssist(speEnhanceController);
+            }
+        }
+        catch (Exception ex)
+        {
+            DisableSpeEnhanceReroll($"update special-enhance path failed: {ex.Message}");
+        }
+    }
+
+    private static void UpdateNormalCraftRerollAssist(CraftUIController controller)
+    {
+        if (_craftRerollController != controller ||
+            _craftRerollInitialSeed == null ||
+            _craftRerollInitialSeed.Count == 0)
+        {
+            SetOverlayObjectActive(_craftRerollButtonRoot, false);
+            return;
+        }
+
+        var currentFingerprint = BuildCraftRerollFingerprint(controller);
+        if (!string.Equals(currentFingerprint, _craftRerollFingerprint, StringComparison.Ordinal))
+        {
+            ResetCraftRerollState("normal crafting material or target context changed");
+            return;
+        }
+
+        var resultCount = controller.craftResultList?.Count ?? 0;
+        var canShow = _craftRerollReady &&
+            !_craftRerollBusy &&
+            resultCount == _craftRerollExpectedResultCount &&
+            IsOwnedCraftResultPanel(
+                controller,
+                _craftRerollExpectedResultCount,
+                requirePopulated: true,
+                out _,
+                out _);
+        if (!canShow)
+        {
+            SetOverlayObjectActive(_craftRerollButtonRoot, false);
+            return;
+        }
+
+        if (!EnsureCraftRerollButton(controller))
+        {
+            DisableCraftReroll("a safe visual-only normal-craft button could not be created");
+            return;
+        }
+
+        if (_craftRerollButtonLabel != null)
+        {
+            _craftRerollButtonLabel.text = $"刷新{GetCraftRerollActionName(controller.craftType)}词条";
+        }
+
+        if (_craftRerollButton != null)
+        {
+            _craftRerollButton.interactable = true;
+        }
+
+        SetOverlayObjectActive(_craftRerollButtonRoot, true);
+    }
+
+    private static void UpdateSpeEnhanceRerollAssist(SpeEnhanceEquipController controller)
+    {
+        var activeCount = CountSpeEnhanceChoices(controller, requireActive: true);
+        if (!_speEnhanceRerollBusy && activeCount > 0)
+        {
+            if (_speEnhanceRerollController != controller)
+            {
+                ResetSpeEnhanceRerollState("special-enhance controller changed");
+            }
+
+            _speEnhanceRerollController = controller;
+            _speEnhanceRerollExpectedChoiceCount = activeCount;
+            _speEnhanceRerollReady = true;
+        }
+
+        if (!_speEnhanceRerollReady ||
+            _speEnhanceRerollBusy ||
+            activeCount <= 0 ||
+            activeCount != _speEnhanceRerollExpectedChoiceCount)
+        {
+            SetOverlayObjectActive(_speEnhanceRerollButtonRoot, false);
+            return;
+        }
+
+        if (!EnsureSpeEnhanceRerollButton(controller))
+        {
+            DisableSpeEnhanceReroll("a safe visual-only special-enhance button could not be created");
+            return;
+        }
+
+        if (_speEnhanceRerollButtonLabel != null)
+        {
+            _speEnhanceRerollButtonLabel.text = "刷新特殊强化词条";
+        }
+
+        if (_speEnhanceRerollButton != null)
+        {
+            _speEnhanceRerollButton.interactable = true;
+        }
+
+        SetOverlayObjectActive(_speEnhanceRerollButtonRoot, true);
+    }
+
+    private static bool TryRerollCraftResults()
+    {
+        try
+        {
+            var controller = _craftRerollController;
+            if (!_craftRerollEnabled.Value ||
+                !_craftRerollHooksReady ||
+                !_craftRerollReady ||
+                _craftRerollBusy ||
+                controller == null ||
+                controller != CraftUIController.Instance ||
+                !IsCraftRerollUiVisible(controller) ||
+                !IsOwnedCraftResultPanel(
+                    controller,
+                    _craftRerollExpectedResultCount,
+                    requirePopulated: true,
+                    out _,
+                    out _) ||
+                _craftRerollInitialSeed == null ||
+                _craftRerollInitialSeed.Count == 0 ||
+                !string.Equals(BuildCraftRerollFingerprint(controller), _craftRerollFingerprint, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (!TryBuildCraftRerollResults(controller, out var replacement))
+            {
+                return false;
+            }
+
+            var typeAndIndexValidated = ValidateCraftRerollResults(replacement);
+            if (!typeAndIndexValidated)
+            {
+                return false;
+            }
+
+            var previousResults = controller.craftResultList;
+            _craftRerollBusy = true;
+            _craftRerollReady = false;
+            if (_craftRerollButton != null)
+            {
+                _craftRerollButton.interactable = false;
+            }
+
+            SetOverlayObjectActive(_craftRerollButtonRoot, false);
+            try
+            {
+                controller.craftResultList = replacement;
+                var clearedCount = ClearCraftResultCandidateItemsImmediately(
+                    controller,
+                    _craftRerollExpectedResultCount,
+                    requirePopulated: true);
+                if (clearedCount != _craftRerollExpectedResultCount)
+                {
+                    throw new InvalidOperationException(
+                        $"candidate cleanup was incomplete: expected={_craftRerollExpectedResultCount}, cleared={clearedCount}");
+                }
+
+                controller.ShowCraftResultChoosePanel();
+                if (!ValidateCraftRerollResults(controller.craftResultList) ||
+                    !IsOwnedCraftResultPanel(
+                        controller,
+                        _craftRerollExpectedResultCount,
+                        requirePopulated: true,
+                        out _,
+                        out _))
+                {
+                    throw new InvalidOperationException(
+                        $"rebuilt normal-craft UI was incomplete or no longer owned; expected={_craftRerollExpectedResultCount}; {DescribeCraftResultUiState(controller)}");
+                }
+
+                _craftRerollBusy = false;
+                _craftRerollReady = true;
+                LoggerInstance.LogInfo(
+                    $"[CraftReroll] Replaced {_craftRerollExpectedResultCount} normal-craft preview slots without confirmation or resource use.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                controller.craftResultList = previousResults;
+                try
+                {
+                    if (IsOwnedCraftResultPanel(
+                            controller,
+                            _craftRerollExpectedResultCount,
+                            requirePopulated: false,
+                            out _,
+                            out _))
+                    {
+                        ClearCraftResultCandidateItemsImmediately(
+                            controller,
+                            _craftRerollExpectedResultCount,
+                            requirePopulated: false);
+                        controller.ShowCraftResultChoosePanel();
+                    }
+                    else
+                    {
+                        LoggerInstance.LogWarning(
+                            "[CraftReroll] Previous preview UI restore skipped because the owned CraftResult structure was unavailable.");
+                    }
+                }
+                catch (Exception restoreEx)
+                {
+                    LoggerInstance.LogWarning($"[CraftReroll] Previous preview UI restore also failed: {restoreEx.Message}");
+                }
+
+                DisableCraftReroll($"normal-craft preview transaction failed and was rolled back: {ex.Message}");
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            DisableCraftReroll($"normal-craft action failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool TryRerollSpeEnhanceChoices()
+    {
+        try
+        {
+            var controller = _speEnhanceRerollController;
+            if (!_craftRerollEnabled.Value ||
+                !_speEnhanceRerollHooksReady ||
+                !_speEnhanceRerollReady ||
+                _speEnhanceRerollBusy ||
+                controller == null ||
+                controller != SpeEnhanceEquipController.Instance ||
+                !IsSpeEnhanceRerollUiVisible(controller))
+            {
+                return false;
+            }
+
+            var originalChoiceCount = CountSpeEnhanceChoices(controller, requireActive: true);
+            if (originalChoiceCount <= 0 || originalChoiceCount != _speEnhanceRerollExpectedChoiceCount)
+            {
+                return false;
+            }
+
+            _speEnhanceRerollBusy = true;
+            _speEnhanceRerollReady = false;
+            if (_speEnhanceRerollButton != null)
+            {
+                _speEnhanceRerollButton.interactable = false;
+            }
+
+            SetOverlayObjectActive(_speEnhanceRerollButtonRoot, false);
+            controller.ClearAllChoice();
+            controller.GenerateChoice();
+            controller.RefreshEnhanceButtonState();
+
+            var activeCount = controller.enhanceChoiceGrid
+                .GetComponentsInChildren<SpeEnhanceEquipChoiceController>(includeInactive: false)
+                .Count(choice => choice?.gameObject != null && choice.gameObject.activeInHierarchy);
+            if (activeCount != originalChoiceCount)
+            {
+                DisableSpeEnhanceReroll(
+                    $"special-enhance candidate count changed: expected={originalChoiceCount}, active={activeCount}");
+                return false;
+            }
+
+            _speEnhanceRerollExpectedChoiceCount = activeCount;
+            _speEnhanceRerollBusy = false;
+            _speEnhanceRerollReady = true;
+            LoggerInstance.LogInfo(
+                $"[CraftReroll] Rebuilt {activeCount} special-enhance preview choices without confirmation or resource use.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            DisableSpeEnhanceReroll($"special-enhance action failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool CaptureCraftRerollSession(CraftUIController controller)
+    {
+        if (!_craftRerollEnabled.Value ||
+            !_craftRerollHooksReady ||
+            controller.targetBuilding == null ||
+            controller.craftResultList == null ||
+            controller.craftResultList.Count <= 0)
+        {
+            return false;
+        }
+
+        var resultCount = controller.craftResultList.Count;
+        if (!IsOwnedCraftResultPanel(
+                controller,
+                resultCount,
+                requirePopulated: true,
+                out _,
+                out var ownedSlots) ||
+            ownedSlots.Count != resultCount)
+        {
+            LoggerInstance.LogWarning(
+                $"[CraftReroll] ShowCraftResultChoosePanel did not expose an owned craft result panel; {DescribeCraftResultUiState(controller)}");
+            return false;
+        }
+
+        var rowCount = ownedSlots.Count;
+        if (rowCount != resultCount)
+        {
+            LoggerInstance.LogWarning(
+                $"[CraftReroll] Candidate data/UI counts differ before capture: results={resultCount}, slots={rowCount}; {DescribeCraftResultUiState(controller)}");
+            return false;
+        }
+
+        var fingerprint = BuildCraftRerollFingerprint(controller);
+        if (_craftRerollController == controller &&
+            _craftRerollInitialSeed is not null &&
+            _craftRerollInitialSeed.Count == resultCount &&
+            string.Equals(_craftRerollFingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            _craftRerollReady = !_craftRerollBusy;
+            return true;
+        }
+
+        var targetHero = ResolveCraftRerollTargetHero();
+        var snapshots = new List<CraftRerollSeed>(resultCount);
+        for (var index = 0; index < resultCount; index++)
+        {
+            var item = controller.craftResultList[index];
+            var equipment = item?.equipmentData;
+            snapshots.Add(new CraftRerollSeed
+            {
+                OriginalItem = item,
+                CraftType = (int)controller.craftType,
+                TargetSubType = controller.targetSubType,
+                TargetFoodSubType = controller.targetFoodSubType,
+                TargetWeaponType = controller.targetWeaponType,
+                ItemType = item == null ? -1 : (int)item.type,
+                ItemLevel = item?.itemLv ?? -1,
+                RareLevel = item?.rareLv ?? -1,
+                Value = item?.value ?? 0,
+                SubType = item?.subType ?? -1,
+                LittleType = equipment?.littleType ?? -1,
+                AttriType = equipment?.attriType ?? -1,
+                BuildingLevel = controller.targetBuilding.lv,
+                TargetHero = targetHero,
+                RuntimeTypeName = item?.GetType().FullName ?? "null"
+            });
+        }
+
+        _craftRerollController = controller;
+        _craftRerollInitialSeed = snapshots;
+        _craftRerollFingerprint = fingerprint;
+        _craftRerollExpectedResultCount = resultCount;
+        _craftRerollBusy = false;
+        _craftRerollReady = true;
+        LoggerInstance.LogInfo(
+            $"[CraftReroll] Captured immutable normal-craft seed list: count={resultCount}, building.lv={controller.targetBuilding.lv}, hero={TryGetHeroId(targetHero)}.");
+        return true;
+    }
+
+    private static string BuildCraftRerollFingerprint(CraftUIController controller)
+    {
+        var material = DescribeCraftRerollMaterial(controller.craftMaterialData);
+        var materialSub = DescribeCraftRerollMaterial(controller.craftMaterialDataSub);
+        var targetBuilding = controller.targetBuilding;
+        var hero = ResolveCraftRerollTargetHero();
+        var targetRuntimeTypes = new List<string>();
+        var results = controller.craftResultList;
+        if (results != null)
+        {
+            for (var index = 0; index < results.Count; index++)
+            {
+                var target = results[index];
+                targetRuntimeTypes.Add(target?.GetType().FullName ?? "null");
+            }
+        }
+
+        return string.Join(
+            "|",
+            $"controller={controller.GetHashCode()}",
+            $"craftType={(int)controller.craftType}",
+            $"material={material}",
+            $"materialSub={materialSub}",
+            $"resourceCostID={controller.resourceCostID}",
+            $"targetSubType={controller.targetSubType}",
+            $"targetFoodSubType={controller.targetFoodSubType}",
+            $"targetWeaponType={controller.targetWeaponType}",
+            $"targetBuilding={targetBuilding?.areaID ?? -1}:{targetBuilding?.buildingID ?? -1}:lv={targetBuilding?.lv ?? -1}",
+            $"targetHero={TryGetHeroId(hero)}",
+            $"useMoney={controller.useMoney}",
+            $"forceCraft={controller.forceCraft}",
+            $"targetRuntimeTypes={string.Join(",", targetRuntimeTypes)}");
+    }
+
+    private static string DescribeCraftRerollMaterial(ItemData? material)
+    {
+        if (material == null)
+        {
+            return "null";
+        }
+
+        return $"{material.GetType().FullName}:{material.itemID}:{material.itemLv}:{material.rareLv}:{material.value}:{material.subType}";
+    }
+
+    private static HeroData? ResolveCraftRerollTargetHero()
+    {
+        var heroDetailController = HeroDetailController.Instance;
+        return heroDetailController?.nowShowHero;
+    }
+
+    private static bool TryBuildCraftRerollResults(
+        CraftUIController controller,
+        out Il2CppSystem.Collections.Generic.List<ItemData> replacement)
+    {
+        replacement = new Il2CppSystem.Collections.Generic.List<ItemData>();
+        if (_craftRerollInitialSeed is null ||
+            _craftRerollInitialSeed.Count == 0 ||
+            controller.targetBuilding == null)
+        {
+            return false;
+        }
+
+        var gameController = GameController.Instance;
+        if (gameController == null)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < _craftRerollInitialSeed.Count; index++)
+        {
+            var original = _craftRerollInitialSeed[index];
+            var seed = original;
+            if (seed.OriginalItem == null)
+            {
+                replacement.Add(null);
+                continue;
+            }
+
+            var subType = ResolveCraftRerollSubType(seed);
+            var littleType = ResolveCraftRerollLittleType(seed, subType);
+            var weaponType = ResolveCraftRerollWeaponType(seed, subType);
+            ItemData? candidate;
+            try
+            {
+                candidate = gameController.GenerateRandomItemValue(
+                    seed.Value,
+                    seed.ItemType,
+                    seed.BuildingLevel,
+                    subType,
+                    littleType,
+                    seed.TargetHero,
+                    weaponType);
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.LogWarning(
+                    $"[CraftReroll] Slot {replacement.Count} generation failed; original same-index preview retained: {ex.Message}");
+                replacement.Add(original.OriginalItem);
+                continue;
+            }
+
+            if (!IsCraftRerollCandidateCompatible(seed, candidate))
+            {
+                if (_traceMode.Value)
+                {
+                    LoggerInstance.LogWarning(
+                        $"[CraftReroll] Slot {replacement.Count} generated an incompatible family; original same-index preview retained.");
+                }
+
+                candidate = seed.OriginalItem;
+            }
+
+            replacement.Add(candidate);
+        }
+
+        return replacement.Count == _craftRerollInitialSeed.Count;
+    }
+
+    private static bool ValidateCraftRerollResults(Il2CppSystem.Collections.Generic.List<ItemData>? results)
+    {
+        if (results == null ||
+            _craftRerollInitialSeed == null ||
+            results.Count != _craftRerollInitialSeed.Count ||
+            results.Count != _craftRerollExpectedResultCount)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < _craftRerollInitialSeed.Count; index++)
+        {
+            if (!IsCraftRerollCandidateCompatible(_craftRerollInitialSeed[index], results[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsCraftRerollCandidateCompatible(CraftRerollSeed seed, ItemData? candidate)
+    {
+        if (seed.OriginalItem == null)
+        {
+            return candidate == null;
+        }
+
+        if (candidate == null ||
+            (int)candidate.type != seed.ItemType ||
+            !string.Equals(candidate.GetType().FullName, seed.RuntimeTypeName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var expectedSubType = ResolveCraftRerollSubType(seed);
+        if (candidate.subType != expectedSubType)
+        {
+            return false;
+        }
+
+        var sourceEquipment = seed.OriginalItem.equipmentData;
+        if (sourceEquipment == null)
+        {
+            return candidate.equipmentData == null;
+        }
+
+        var candidateEquipment = candidate.equipmentData;
+        if (candidateEquipment == null)
+        {
+            return false;
+        }
+
+        var expectedLittleType = ResolveCraftRerollLittleType(seed, expectedSubType);
+        return expectedLittleType < 0 || candidateEquipment.littleType == expectedLittleType;
+    }
+
+    private static int ResolveCraftRerollSubType(CraftRerollSeed seed)
+    {
+        if (seed.CraftType == (int)CraftType.Equipment && seed.TargetSubType >= 0)
+        {
+            return seed.TargetSubType;
+        }
+
+        return seed.SubType;
+    }
+
+    private static int ResolveCraftRerollLittleType(CraftRerollSeed seed, int resolvedSubType)
+    {
+        if (seed.CraftType == (int)CraftType.Equipment &&
+            resolvedSubType == 0 &&
+            seed.TargetWeaponType >= 0 &&
+            seed.TargetWeaponType <= 5)
+        {
+            return -1;
+        }
+
+        if (seed.CraftType == (int)CraftType.Food && seed.TargetFoodSubType >= 0)
+        {
+            return seed.TargetFoodSubType;
+        }
+
+        return seed.LittleType;
+    }
+
+    private static int ResolveCraftRerollWeaponType(CraftRerollSeed seed, int resolvedSubType)
+    {
+        if (seed.CraftType == (int)CraftType.Equipment &&
+            resolvedSubType == 0 &&
+            seed.TargetWeaponType >= 0 &&
+            seed.TargetWeaponType <= 5)
+        {
+            return seed.TargetWeaponType;
+        }
+
+        return seed.AttriType;
+    }
+
+    private static string GetCraftRerollActionName(CraftType craftType)
+    {
+        return craftType switch
+        {
+            CraftType.Equipment => "打造",
+            CraftType.Food => "烹饪",
+            CraftType.Med => "炼药",
+            _ => "制造"
+        };
+    }
+
+    private static bool IsOwnedCraftResultPanel(
+        CraftUIController? controller,
+        int expectedCount,
+        bool requirePopulated,
+        out Transform? ownedResultRoot,
+        out List<Transform> ownedSlots)
+    {
+        ownedResultRoot = null;
+        ownedSlots = null!;
+        if (controller == null ||
+            controller != CraftUIController.Instance ||
+            controller.creaftUIPanel == null ||
+            !controller.creaftUIPanel.activeInHierarchy ||
+            expectedCount <= 0 ||
+            controller.craftResultList == null ||
+            controller.craftResultList.Count != expectedCount)
+        {
+            return false;
+        }
+
+        var panelRoot = controller.creaftUIPanel.transform;
+        var resultRoot = panelRoot.Find("CraftResult");
+        if (resultRoot == null ||
+            resultRoot.parent != panelRoot ||
+            resultRoot.gameObject == null ||
+            !resultRoot.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        ownedSlots = new List<Transform>(expectedCount);
+
+        var numericSlotCount = 0;
+        for (var childIndex = 0; childIndex < resultRoot.childCount; childIndex++)
+        {
+            var child = resultRoot.GetChild(childIndex);
+            if (child?.gameObject == null ||
+                !int.TryParse(child.gameObject.name, out var parsedIndex))
+            {
+                continue;
+            }
+
+            if (parsedIndex < 0 || parsedIndex >= expectedCount)
+            {
+                return false;
+            }
+
+            numericSlotCount++;
+        }
+
+        if (numericSlotCount != expectedCount)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < expectedCount; index++)
+        {
+            var slot = resultRoot.Find(index.ToString());
+            var itemContainer = slot?.Find("ItemIcon");
+            var confirmButton = slot?.Find("Button");
+            if (slot == null ||
+                slot.parent != resultRoot ||
+                slot.gameObject == null ||
+                !slot.gameObject.activeInHierarchy ||
+                itemContainer == null ||
+                itemContainer.parent != slot ||
+                itemContainer.gameObject == null ||
+                !itemContainer.gameObject.activeInHierarchy ||
+                confirmButton == null ||
+                confirmButton.parent != slot ||
+                confirmButton.gameObject == null ||
+                !confirmButton.gameObject.activeInHierarchy ||
+                requirePopulated && itemContainer.childCount != 1)
+            {
+                return false;
+            }
+
+            ownedSlots.Add(slot);
+        }
+
+        ownedResultRoot = resultRoot;
+        return ownedSlots.Count == expectedCount;
+    }
+
+    private static string DescribeCraftResultUiState(CraftUIController controller)
+    {
+        try
+        {
+            var panel = controller.creaftUIPanel;
+            var resultRoot = panel?.transform.Find("CraftResult");
+            var slotStates = new List<string>();
+            if (resultRoot != null)
+            {
+                for (var childIndex = 0; childIndex < resultRoot.childCount; childIndex++)
+                {
+                    var child = resultRoot.GetChild(childIndex);
+                    if (child?.gameObject == null ||
+                        !int.TryParse(child.gameObject.name, out _))
+                    {
+                        continue;
+                    }
+
+                    var itemContainer = child.Find("ItemIcon");
+                    slotStates.Add(
+                        $"{child.gameObject.name}:active={child.gameObject.activeInHierarchy}:items={itemContainer?.childCount ?? -1}:button={child.Find("Button") != null}");
+                }
+            }
+
+            return $"craftPanelActive={panel?.activeInHierarchy}, " +
+                $"resultRootActive={resultRoot?.gameObject?.activeInHierarchy}, " +
+                $"resultChildren={resultRoot?.childCount ?? -1}, " +
+                $"resultCount={controller.craftResultList?.Count ?? -1}, " +
+                $"slots=[{string.Join(";", slotStates)}]";
+        }
+        catch (Exception ex)
+        {
+            return $"CraftResult UI probe failed: {ex.Message}";
+        }
+    }
+
+    private static int ClearCraftResultCandidateItemsImmediately(
+        CraftUIController controller,
+        int expectedCount,
+        bool requirePopulated)
+    {
+        if (controller == null ||
+            controller != _craftRerollController ||
+            expectedCount <= 0)
+        {
+            return 0;
+        }
+
+        if (!IsOwnedCraftResultPanel(
+                controller,
+                expectedCount,
+                requirePopulated,
+                out _,
+                out var ownedSlots))
+        {
+            return 0;
+        }
+
+        var clearedCount = 0;
+        foreach (var slot in ownedSlots)
+        {
+            var itemContainer = slot.Find("ItemIcon");
+            if (itemContainer == null || itemContainer.parent != slot)
+            {
+                return 0;
+            }
+
+            for (var childIndex = itemContainer.childCount - 1; childIndex >= 0; childIndex--)
+            {
+                var candidate = itemContainer.GetChild(childIndex);
+                if (candidate?.gameObject == null)
+                {
+                    continue;
+                }
+
+                candidate.gameObject.SetActive(false);
+                candidate.SetParent(null, false);
+                UnityEngine.Object.Destroy(candidate.gameObject);
+                clearedCount++;
+            }
+        }
+
+        return clearedCount;
+    }
+
+    private static int CountSpeEnhanceChoices(SpeEnhanceEquipController? controller, bool requireActive)
+    {
+        if (controller?.enhanceChoiceGrid == null)
+        {
+            return 0;
+        }
+
+        var choices = controller.enhanceChoiceGrid
+            .GetComponentsInChildren<SpeEnhanceEquipChoiceController>(includeInactive: true);
+        if (choices == null)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        foreach (var choice in choices)
+        {
+            if (choice?.gameObject == null ||
+                requireActive && !choice.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            count++;
+        }
+
+        return count;
+    }
+
+    private static bool EnsureCraftRerollButton(CraftUIController controller)
+    {
+        var buttonHost = ResolveCraftRerollButtonHost(controller);
+        if (buttonHost == null)
+        {
+            return false;
+        }
+
+        if (_craftRerollButtonRoot != null &&
+            _craftRerollButton != null &&
+            _craftRerollButtonLabel != null &&
+            _craftRerollButtonRoot.transform.parent == buttonHost)
+        {
+            return true;
+        }
+
+        DestroyCraftRerollButton();
+        var buttonTemplate = FindUiButtonTemplate(buttonHost.gameObject);
+        var labelTemplate = FindUiTextTemplate(buttonHost.gameObject);
+        if (labelTemplate == null)
+        {
+            return false;
+        }
+
+        return TryCreateSafeStyledButton(
+            CraftRerollButtonName,
+            buttonHost,
+            buttonTemplate,
+            labelTemplate,
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0f, -330f),
+            new Vector2(240f, 52f),
+            $"刷新{GetCraftRerollActionName(controller.craftType)}词条",
+            out _craftRerollButtonRoot,
+            out _craftRerollButton,
+            out _craftRerollButtonLabel);
+    }
+
+    private static Transform? ResolveCraftRerollButtonHost(CraftUIController controller)
+    {
+        var expectedCount = _craftRerollExpectedResultCount > 0
+            ? _craftRerollExpectedResultCount
+            : controller.craftResultList?.Count ?? 0;
+        if (IsOwnedCraftResultPanel(
+                controller,
+                expectedCount,
+                requirePopulated: true,
+                out var resultRoot,
+                out _) &&
+            resultRoot != null)
+        {
+            return resultRoot;
+        }
+
+        return null;
+    }
+
+    private static bool EnsureSpeEnhanceRerollButton(SpeEnhanceEquipController controller)
+    {
+        if (_speEnhanceRerollButtonRoot != null &&
+            _speEnhanceRerollButton != null &&
+            _speEnhanceRerollButtonLabel != null &&
+            _speEnhanceRerollButtonRoot.transform.parent == controller.speEnhanceEquipUI.transform)
+        {
+            return true;
+        }
+
+        DestroySpeEnhanceRerollButton();
+        var buttonTemplate = FindUiButtonTemplate(controller.speEnhanceEquipUI);
+        var labelTemplate = FindUiTextTemplate(controller.speEnhanceEquipUI);
+        if (labelTemplate == null)
+        {
+            return false;
+        }
+
+        return TryCreateSafeStyledButton(
+            SpeEnhanceRerollButtonName,
+            controller.speEnhanceEquipUI.transform,
+            buttonTemplate,
+            labelTemplate,
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0f, -330f),
+            new Vector2(260f, 52f),
+            "刷新特殊强化词条",
+            out _speEnhanceRerollButtonRoot,
+            out _speEnhanceRerollButton,
+            out _speEnhanceRerollButtonLabel);
+    }
+
+    private static bool IsCraftRerollUiVisible(CraftUIController? controller)
+    {
+        if (controller == null)
+        {
+            return false;
+        }
+
+        var expectedCount = _craftRerollExpectedResultCount > 0
+            ? _craftRerollExpectedResultCount
+            : controller.craftResultList?.Count ?? 0;
+        return IsOwnedCraftResultPanel(
+            controller,
+            expectedCount,
+            requirePopulated: true,
+            out _,
+            out _);
+    }
+
+    private static bool IsSpeEnhanceRerollUiVisible(SpeEnhanceEquipController? controller)
+    {
+        return controller?.speEnhanceEquipUI != null && controller.speEnhanceEquipUI.activeInHierarchy;
+    }
+
+    private static void ResetCraftRerollState(string source)
+    {
+        var hadState = _craftRerollController != null ||
+            _craftRerollInitialSeed != null ||
+            _craftRerollReady ||
+            _craftRerollBusy ||
+            _craftRerollButtonRoot != null;
+        _craftRerollController = null;
+        _craftRerollInitialSeed = null;
+        _craftRerollFingerprint = string.Empty;
+        _craftRerollExpectedResultCount = 0;
+        _craftRerollReady = false;
+        _craftRerollBusy = false;
+        DestroyCraftRerollButton();
+
+        if (hadState && _traceMode != null && _traceMode.Value)
+        {
+            LoggerInstance.LogInfo($"[CraftReroll] Normal-craft session reset from {source}.");
+        }
+    }
+
+    private static void ResetSpeEnhanceRerollState(string source)
+    {
+        var hadState = _speEnhanceRerollController != null ||
+            _speEnhanceRerollReady ||
+            _speEnhanceRerollBusy ||
+            _speEnhanceRerollButtonRoot != null;
+        _speEnhanceRerollController = null;
+        _speEnhanceRerollExpectedChoiceCount = 0;
+        _speEnhanceRerollReady = false;
+        _speEnhanceRerollBusy = false;
+        DestroySpeEnhanceRerollButton();
+
+        if (hadState && _traceMode != null && _traceMode.Value)
+        {
+            LoggerInstance.LogInfo($"[CraftReroll] Special-enhance session reset from {source}.");
+        }
+    }
+
+    private static void DestroyCraftRerollButton()
+    {
+        if (_craftRerollButtonRoot != null)
+        {
+            _craftRerollButtonRoot.SetActive(false);
+            UnityEngine.Object.Destroy(_craftRerollButtonRoot);
+        }
+
+        _craftRerollButtonRoot = null;
+        _craftRerollButton = null;
+        _craftRerollButtonLabel = null;
+    }
+
+    private static void DestroySpeEnhanceRerollButton()
+    {
+        if (_speEnhanceRerollButtonRoot != null)
+        {
+            _speEnhanceRerollButtonRoot.SetActive(false);
+            UnityEngine.Object.Destroy(_speEnhanceRerollButtonRoot);
+        }
+
+        _speEnhanceRerollButtonRoot = null;
+        _speEnhanceRerollButton = null;
+        _speEnhanceRerollButtonLabel = null;
+    }
+
+    private static void DisableCraftReroll(string reason)
+    {
+        _craftRerollHooksReady = false;
+        ResetCraftRerollState("safe degraded mode");
+        LoggerInstance.LogWarning($"[Compatibility] Normal crafting reroll DISABLED safely: {reason}.");
+    }
+
+    private static void DisableSpeEnhanceReroll(string reason)
+    {
+        _speEnhanceRerollHooksReady = false;
+        ResetSpeEnhanceRerollState("safe degraded mode");
+        LoggerInstance.LogWarning($"[Compatibility] Special enhancement reroll DISABLED safely: {reason}.");
+    }
+
     private static bool IsAuctionPreviewVisible()
     {
         try
@@ -2779,6 +4057,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                     string.Equals(buttonName, AuctionPreviewRefreshButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, IdentifyBestTreasureButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, BreakthroughRerollButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, CraftRerollButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, SpeEnhanceRerollButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, ShopOwnershipBuyButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, MaterialAutoBuyButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, MaterialFilterDropdownButtonName, StringComparison.Ordinal) ||
@@ -2824,6 +4104,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return IsTransformInsideOverlayRoot(button.transform, _auctionPreviewRefreshButtonRoot) ||
             IsTransformInsideOverlayRoot(button.transform, _identifyBestTreasureButtonRoot) ||
             IsTransformInsideOverlayRoot(button.transform, _breakthroughRerollButtonRoot) ||
+            IsTransformInsideOverlayRoot(button.transform, _craftRerollButtonRoot) ||
+            IsTransformInsideOverlayRoot(button.transform, _speEnhanceRerollButtonRoot) ||
             IsTransformInsideOverlayRoot(button.transform, _shopOwnershipBuyButton?.gameObject) ||
             IsTransformInsideOverlayRoot(button.transform, _materialAutoBuyButtonRoot) ||
             IsTransformInsideOverlayRoot(button.transform, _materialFilterDropdownButtonRoot) ||
@@ -2914,7 +4196,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                     (_identifyBestTreasureButtonRoot != null &&
                         candidate.transform.IsChildOf(_identifyBestTreasureButtonRoot.transform)) ||
                     (_breakthroughRerollButtonRoot != null &&
-                        candidate.transform.IsChildOf(_breakthroughRerollButtonRoot.transform)))
+                        candidate.transform.IsChildOf(_breakthroughRerollButtonRoot.transform)) ||
+                    (_craftRerollButtonRoot != null &&
+                        candidate.transform.IsChildOf(_craftRerollButtonRoot.transform)) ||
+                    (_speEnhanceRerollButtonRoot != null &&
+                        candidate.transform.IsChildOf(_speEnhanceRerollButtonRoot.transform)))
                 {
                     continue;
                 }
@@ -3919,9 +5205,25 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return true;
     }
 
-    private static void OpenCraftUiPostfix()
+    private static void CraftUiOpenPostfix(CraftUIController __instance)
     {
         ResetCraftRewardTracking("CraftUI.OpenCraftUI");
+        ResetCraftRerollState("CraftUI.OpenCraftUI");
+    }
+
+    private static void CraftUiHidePrefix()
+    {
+        ResetCraftRerollState("CraftUI.HideCraftUI");
+    }
+
+    private static void CraftContextChangingPrefix()
+    {
+        ResetCraftRerollState("CraftUI material, subtype, target, or generation context changed");
+    }
+
+    private static void CraftResultChoosenPrefix(CraftUIController __instance, int id)
+    {
+        ResetCraftRerollState($"CraftUI.CraftResultChoosen({id})");
     }
 
     private static void HideCraftUiPostfix()
@@ -6991,7 +8293,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
     }
 
-    private static void CraftResultChoosenPrefix(ref ItemData craftResult)
+    private static void PlotCraftResultChoosenPrefix(ref ItemData craftResult)
     {
         if (!_craftRandomPickUpgradeEnabled.Value)
         {
@@ -7303,6 +8605,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static void ShowStartMenuPostfix()
     {
         ResetBreakthroughRerollState("StartMenu.ShowStartMenu");
+        ResetCraftRerollState("StartMenu.ShowStartMenu");
+        ResetSpeEnhanceRerollState("StartMenu.ShowStartMenu");
         ClearShopOwnershipRuntimeState("StartMenu.ShowStartMenu");
         ResetStudySkillTimeScalingState("StartMenu.ShowStartMenu");
     }
@@ -7310,6 +8614,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static void ShowMainMenuPostfix()
     {
         ResetBreakthroughRerollState("GameTitle.ShowMainMenu");
+        ResetCraftRerollState("GameTitle.ShowMainMenu");
+        ResetSpeEnhanceRerollState("GameTitle.ShowMainMenu");
         ClearShopOwnershipRuntimeState("GameTitle.ShowMainMenu");
         ResetStudySkillTimeScalingState("GameTitle.ShowMainMenu");
     }
@@ -7369,6 +8675,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static void LoadRecentGamePrefix(SaveLoadMenuController __instance)
     {
         ResetBreakthroughRerollState("SaveLoadMenu.LoadRecentGame");
+        ResetCraftRerollState("SaveLoadMenu.LoadRecentGame");
+        ResetSpeEnhanceRerollState("SaveLoadMenu.LoadRecentGame");
         int? saveSlotId = null;
         try
         {
@@ -7391,6 +8699,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static void LoadGamePrefix(int saveID)
     {
         ResetBreakthroughRerollState("SaveLoadMenu.LoadGame");
+        ResetCraftRerollState("SaveLoadMenu.LoadGame");
+        ResetSpeEnhanceRerollState("SaveLoadMenu.LoadGame");
         if (saveID < 0)
         {
             LoggerInstance.LogWarning($"Shop ownership load sync skipped because load slot {saveID} is invalid.");
@@ -7775,6 +9085,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         UpdateAuctionPreviewRefreshAssist();
         UpdateTreasureIdentifyBestValueAssist();
         UpdateBreakthroughRerollAssist();
+        UpdateCraftRerollAssist();
         TrySyncExternalOverlay();
 
         if (Input.GetKeyDown(_dialogFastForwardAssistHotkey.Value))
@@ -7918,6 +9229,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static void LoadAllGameDataPostfix()
     {
         ResetBreakthroughRerollState("GameDataController.LoadAllGameData");
+        ResetCraftRerollState("GameDataController.LoadAllGameData");
+        ResetSpeEnhanceRerollState("GameDataController.LoadAllGameData");
         LoadCustomTalentPackFromDisk();
         TryGetHeroTagDatabase("LoadAllGameData", out _);
 

@@ -279,6 +279,7 @@ export interface VisibleSettings {
   auctionPreviewRefreshEnabled: boolean;
   treasureIdentifyBestValueAssistEnabled: boolean;
   breakthroughRerollEnabled: boolean;
+  craftRerollEnabled: boolean;
   luckyHitChancePercent: number;
   extraRelationshipGainChancePercent: number;
   teamAutoFavorEnabled: boolean;

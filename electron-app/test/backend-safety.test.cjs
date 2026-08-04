@@ -507,6 +507,55 @@ test('breakthrough reroll reads only its owning section and round-trips', async 
   assert.doesNotMatch(text, /\[Breakthrough\][\s\S]*?^(?:RerollHotkey|RerollRequireAlt)\s*=/m);
 });
 
+test('craft reroll defaults enabled without shortcut settings', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const settings = await readVisibleSettings(gameRoot);
+
+  assert.equal(settings.craftRerollEnabled, true);
+  assert.equal(Object.hasOwn(settings, 'craftRerollHotkey'), false);
+  assert.equal(Object.hasOwn(settings, 'craftRerollRequireAlt'), false);
+});
+
+test('craft reroll reads only the Craft section and round-trips', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[WrongSection]',
+      'RerollEnabled = false',
+      '',
+      '[Breakthrough]',
+      'RerollEnabled = false',
+      '',
+      '[Craft]',
+      'RerollEnabled = true',
+      'UnrelatedCraftSetting = keep-me',
+      ''
+    ].join('\r\n')
+  );
+
+  const current = await readVisibleSettings(gameRoot);
+  assert.equal(current.craftRerollEnabled, true);
+
+  const saved = await saveVisibleSettings(gameRoot, {
+    ...current,
+    craftRerollEnabled: false
+  });
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.equal(saved.craftRerollEnabled, false);
+  assert.match(text, /\[Craft\][\s\S]*?^RerollEnabled = false$/m);
+  assert.match(text, /^UnrelatedCraftSetting = keep-me$/m);
+  assert.match(text, /\[WrongSection\]\r?\nRerollEnabled = false/);
+  assert.match(text, /\[Breakthrough\]\r?\nRerollEnabled = false/);
+  assert.doesNotMatch(text, /\[Craft\][\s\S]*?^(?:RerollHotkey|RerollRequireAlt)\s*=/m);
+});
+
 test('commerce and assist toggles have safe defaults without legacy shortcut fields', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));

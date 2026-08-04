@@ -82,6 +82,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   auctionPreviewRefreshEnabled: true,
   treasureIdentifyBestValueAssistEnabled: true,
   breakthroughRerollEnabled: true,
+  craftRerollEnabled: true,
   luckyHitChancePercent: 0,
   extraRelationshipGainChancePercent: 0,
   teamAutoFavorEnabled: true,
@@ -684,6 +685,7 @@ PlayerDamageTakenMultiplier = ${formatFloat(settings.debatePlayerDamageTakenMult
 EnemyDamageTakenMultiplier = ${formatFloat(settings.debateEnemyDamageTakenMultiplier)}
 
 [Craft]
+RerollEnabled = ${boolText(settings.craftRerollEnabled)}
 RandomPickUpgrade = ${boolText(settings.craftRandomPickUpgrade)}
 Tier1ExtraItems = ${settings.craftTier1ExtraItems}
 Tier2ExtraItems = ${settings.craftTier2ExtraItems}
@@ -891,6 +893,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     auctionPreviewRefreshEnabled: input.auctionPreviewRefreshEnabled,
     treasureIdentifyBestValueAssistEnabled: input.treasureIdentifyBestValueAssistEnabled,
     breakthroughRerollEnabled: input.breakthroughRerollEnabled,
+    craftRerollEnabled: input.craftRerollEnabled,
     luckyHitChancePercent: Math.round(clamp(input.luckyHitChancePercent, 0, 100)),
     extraRelationshipGainChancePercent: Math.round(clamp(input.extraRelationshipGainChancePercent, 0, 100)),
     teamAutoFavorEnabled: input.teamAutoFavorEnabled,
@@ -938,6 +941,7 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
   const auctionSection = getIniSectionBody(text, 'Auction');
   const treasureIdentifySection = getIniSectionBody(text, 'TreasureIdentify');
   const breakthroughSection = getIniSectionBody(text, 'Breakthrough');
+  const craftSection = getIniSectionBody(text, 'Craft');
 
   return {
     lockStamina: readBool(text, 'LockStamina', DEFAULT_VISIBLE_SETTINGS.lockStamina),
@@ -1011,6 +1015,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       breakthroughSection,
       'RerollEnabled',
       DEFAULT_VISIBLE_SETTINGS.breakthroughRerollEnabled
+    ),
+    craftRerollEnabled: readBool(
+      craftSection,
+      'RerollEnabled',
+      DEFAULT_VISIBLE_SETTINGS.craftRerollEnabled
     ),
     luckyHitChancePercent: readInt(text, 'LuckyHitChancePercent', DEFAULT_VISIBLE_SETTINGS.luckyHitChancePercent),
     extraRelationshipGainChancePercent: readInt(
@@ -1472,6 +1481,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'Breakthrough',
     'RerollEnabled',
     boolText(normalized.breakthroughRerollEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Craft',
+    'RerollEnabled',
+    boolText(normalized.craftRerollEnabled)
   );
   nextMain = removeIniSectionValue(nextMain, 'TreasureIdentify', 'BestValueHotkey');
   nextMain = removeIniSectionValue(nextMain, 'TreasureIdentify', 'BestValueRequireAlt');

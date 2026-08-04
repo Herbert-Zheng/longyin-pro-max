@@ -5,6 +5,7 @@ mod-prototype/dist/
 mod-prototype/release-build/
 mod-prototype/_codex_temp_reflect/
 mod-prototype/*/artifacts/
+artifacts/
 mod-prototype/mod-prototype/
 electron-app/node_modules/
 electron-app/dist/

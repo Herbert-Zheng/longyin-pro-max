@@ -151,6 +151,17 @@ test('growth settings expose breakthrough reroll as a button-only toggle', () =>
   assert.doesNotMatch(renderer, /breakthroughReroll(?:Hotkey|RequireAlt)/);
 });
 
+test('trade and craft settings expose craft reroll as a button-only toggle', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+
+  assert.match(
+    renderer,
+    /label="刷新打造词条按钮"[\s\S]{0,240}value=\{settings\.craftRerollEnabled\}[\s\S]{0,240}updateSetting\('craftRerollEnabled', value\)/
+  );
+  assert.match(renderer, /启用后只在普通打造和特殊强化候选界面显示“刷新打造词条”按钮，不会自动打造或消耗材料；保存后需重新启动游戏生效。/);
+  assert.doesNotMatch(renderer, /craftReroll(?:Hotkey|RequireAlt)/);
+});
+
 test('launcher keeps primary actions visible and clearly marks unsaved settings', () => {
   const renderer = readSource('src/renderer/App.tsx');
   const styles = readSource('src/renderer/styles.css');

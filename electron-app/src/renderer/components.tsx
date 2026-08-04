@@ -54,6 +54,7 @@ export function defaultSettings(): VisibleSettings {
     auctionPreviewRefreshEnabled: true,
     treasureIdentifyBestValueAssistEnabled: true,
     breakthroughRerollEnabled: true,
+    craftRerollEnabled: true,
     luckyHitChancePercent: 0,
     extraRelationshipGainChancePercent: 0,
     teamAutoFavorEnabled: true,

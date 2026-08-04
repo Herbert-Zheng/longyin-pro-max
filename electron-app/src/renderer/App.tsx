@@ -1888,6 +1888,12 @@ export function App() {
                 <Card title="制造增产" eyebrow="Craft">
                   <div className="field-grid">
                     <CheckboxField
+                      label="刷新打造词条按钮"
+                      value={settings.craftRerollEnabled}
+                      onChange={(value) => updateSetting('craftRerollEnabled', value)}
+                      hint="启用后只在普通打造和特殊强化候选界面显示“刷新打造词条”按钮，不会自动打造或消耗材料；保存后需重新启动游戏生效。"
+                    />
+                    <CheckboxField
                       label="追加材料按大阶增产"
                       value={settings.craftRandomPickUpgrade}
                       onChange={(value) => updateSetting('craftRandomPickUpgrade', value)}

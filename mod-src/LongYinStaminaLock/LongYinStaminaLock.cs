@@ -3459,7 +3459,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 if (TryGetTreasureAppraisedValue(item, out var appraisedValue))
                 {
                     estimatedSellPrice = EstimateTreasureSellPriceFromAppraisedValue(
-                        item,
                         estimatedSellPrice,
                         appraisedValue);
                 }
@@ -3509,7 +3508,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var skillBuyFactor = GetSkillTradeFactor(buy: true);
         var skillSellFactor = GetSkillTradeFactor(buy: false);
         var identifiedSellPrice = EstimateTreasureSellPriceFromAppraisedValue(
-            item,
             currentSellPrice,
             appraisedValue);
 
@@ -3530,22 +3528,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return true;
     }
 
-    private static int EstimateTreasureSellPriceFromAppraisedValue(ItemData item, int currentSellPrice, int appraisedValue)
+    private static int EstimateTreasureSellPriceFromAppraisedValue(int currentSellPrice, int appraisedValue)
     {
-        if (appraisedValue <= 0)
-        {
-            return Math.Max(0, currentSellPrice);
-        }
-
-        var baseValue = Math.Max(1, item.value);
-        if (currentSellPrice <= 0)
-        {
-            return Math.Max(appraisedValue, 0);
-        }
-
-        var sellRatio = Math.Max(0d, (double)currentSellPrice / baseValue);
-        var estimated = (int)Math.Round(appraisedValue * sellRatio, MidpointRounding.AwayFromZero);
-        return Math.Max(currentSellPrice, estimated);
+        return Math.Max(Math.Max(0, currentSellPrice), Math.Max(0, appraisedValue));
     }
 
     private static void EnsureTreasureTradeOverlay(TradeUIController tradeUi)

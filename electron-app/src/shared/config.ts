@@ -81,6 +81,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   auctionEventAlwaysRedEnabled: true,
   auctionPreviewRefreshEnabled: true,
   treasureIdentifyBestValueAssistEnabled: true,
+  breakthroughRerollEnabled: true,
   luckyHitChancePercent: 0,
   extraRelationshipGainChancePercent: 0,
   teamAutoFavorEnabled: true,
@@ -666,6 +667,9 @@ PreviewRefreshEnabled = ${boolText(settings.auctionPreviewRefreshEnabled)}
 [TreasureIdentify]
 BestValueAssistEnabled = ${boolText(settings.treasureIdentifyBestValueAssistEnabled)}
 
+[Breakthrough]
+RerollEnabled = ${boolText(settings.breakthroughRerollEnabled)}
+
 [MoneyLuck]
 LuckyHitChancePercent = ${settings.luckyHitChancePercent}
 
@@ -886,6 +890,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     auctionEventAlwaysRedEnabled: input.auctionEventAlwaysRedEnabled,
     auctionPreviewRefreshEnabled: input.auctionPreviewRefreshEnabled,
     treasureIdentifyBestValueAssistEnabled: input.treasureIdentifyBestValueAssistEnabled,
+    breakthroughRerollEnabled: input.breakthroughRerollEnabled,
     luckyHitChancePercent: Math.round(clamp(input.luckyHitChancePercent, 0, 100)),
     extraRelationshipGainChancePercent: Math.round(clamp(input.extraRelationshipGainChancePercent, 0, 100)),
     teamAutoFavorEnabled: input.teamAutoFavorEnabled,
@@ -932,6 +937,7 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
   const commerceSection = getIniSectionBody(text, 'Commerce');
   const auctionSection = getIniSectionBody(text, 'Auction');
   const treasureIdentifySection = getIniSectionBody(text, 'TreasureIdentify');
+  const breakthroughSection = getIniSectionBody(text, 'Breakthrough');
 
   return {
     lockStamina: readBool(text, 'LockStamina', DEFAULT_VISIBLE_SETTINGS.lockStamina),
@@ -1000,6 +1006,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       treasureIdentifySection,
       'BestValueAssistEnabled',
       DEFAULT_VISIBLE_SETTINGS.treasureIdentifyBestValueAssistEnabled
+    ),
+    breakthroughRerollEnabled: readBool(
+      breakthroughSection,
+      'RerollEnabled',
+      DEFAULT_VISIBLE_SETTINGS.breakthroughRerollEnabled
     ),
     luckyHitChancePercent: readInt(text, 'LuckyHitChancePercent', DEFAULT_VISIBLE_SETTINGS.luckyHitChancePercent),
     extraRelationshipGainChancePercent: readInt(
@@ -1455,6 +1466,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'TreasureIdentify',
     'BestValueAssistEnabled',
     boolText(normalized.treasureIdentifyBestValueAssistEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Breakthrough',
+    'RerollEnabled',
+    boolText(normalized.breakthroughRerollEnabled)
   );
   nextMain = removeIniSectionValue(nextMain, 'TreasureIdentify', 'BestValueHotkey');
   nextMain = removeIniSectionValue(nextMain, 'TreasureIdentify', 'BestValueRequireAlt');

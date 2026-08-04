@@ -1308,6 +1308,17 @@ export function App() {
                   </div>
                 </Card>
 
+                <Card title="突破词条刷新" eyebrow="Breakthrough">
+                  <div className="field-grid">
+                    <CheckboxField
+                      label="刷新突破词条按钮"
+                      value={settings.breakthroughRerollEnabled}
+                      onChange={(value) => updateSetting('breakthroughRerollEnabled', value)}
+                      hint="启用后只在突破候选界面显示“刷新突破词条”按钮，不会自动刷新；保存后需重新启动游戏生效。"
+                    />
+                  </div>
+                </Card>
+
                 <Card title="突破成功额外天赋" eyebrow="Talent">
                   <div className="field-grid">
                     <CheckboxField

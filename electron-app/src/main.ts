@@ -83,6 +83,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   auctionEventAlwaysRedEnabled: true,
   auctionPreviewRefreshEnabled: true,
   treasureIdentifyBestValueAssistEnabled: true,
+  breakthroughRerollEnabled: true,
   luckyHitChancePercent: 0,
   extraRelationshipGainChancePercent: 0,
   teamAutoFavorEnabled: true,

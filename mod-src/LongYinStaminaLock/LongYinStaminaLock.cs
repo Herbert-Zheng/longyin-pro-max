@@ -9,6 +9,7 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
 using HarmonyLib;
+using Il2CppInterop.Runtime;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -59,6 +60,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const string AuctionPreviewRefreshButtonName = "CodexAuctionPreviewRefreshButton";
     private const float AuctionRedEventDifficulty = 10f;
     private const string IdentifyBestTreasureButtonName = "CodexIdentifyBestTreasureButton";
+    private const string BreakthroughRerollButtonName = "CodexBreakthroughRerollButton";
     private const int ExternalOverlayProtocolVersion = 1;
     private const string ExternalOverlayStateFileName = "codex.longyin.overlay-state.json";
     private const string ExternalOverlayCommandFileName = "codex.longyin.overlay-command.json";
@@ -109,6 +111,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<bool> _auctionPreviewRefreshEnabled = null!;
     private static ConfigEntry<bool> _auctionEventAlwaysRedEnabled = null!;
     private static ConfigEntry<bool> _treasureIdentifyBestValueAssistEnabled = null!;
+    private static ConfigEntry<bool> _breakthroughRerollEnabled = null!;
     private static ConfigEntry<int> _luckyMoneyHitChancePercent = null!;
     private static ConfigEntry<int> _extraRelationshipGainChancePercent = null!;
     private static ConfigEntry<bool> _teamAutoFavorEnabled = null!;
@@ -474,6 +477,17 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static Button? _identifyBestTreasureButton;
     private static Text? _identifyBestTreasureButtonLabel;
     private static bool _identifyMatchOpen;
+    private static BreakThroughController? _breakthroughRerollController;
+    private static GameObject? _breakthroughRerollButtonRoot;
+    private static Button? _breakthroughRerollButton;
+    private static Text? _breakthroughRerollButtonLabel;
+    private static bool _breakthroughRerollHooksReady;
+    private static bool _breakthroughRerollReady;
+    private static bool _breakthroughRerollBusy;
+    private static int _breakthroughRerollPendingFrame = -1;
+    private static int _breakthroughRerollExpectedChoiceCount;
+    private static int _breakthroughRerollSessionToken;
+    private static int _breakthroughRerollPendingSessionToken = -1;
     private static GameObject? _shopOwnershipOverlayRoot;
     private static Text? _shopOwnershipOverlayLabel;
     private static Image? _shopOwnershipOverlayIcon;
@@ -540,6 +554,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _auctionPreviewRefreshEnabled = Config.Bind("Auction", "PreviewRefreshEnabled", true, "Adds a free unlimited refresh button to the auction exhibit preview window.");
         _auctionEventAlwaysRedEnabled = Config.Bind("Auction", "EventAlwaysRedEnabled", true, "When true, the 拍卖大会 world event is generated at difficulty 10, the red highest event grade, including its grade-dependent auction content.");
         _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the treasure with the highest player-appraised value shown in parentheses. Confirmation remains manual.");
+        _breakthroughRerollEnabled = Config.Bind("Breakthrough", "RerollEnabled", true, "Adds a button that rebuilds the current breakthrough choices without confirming a choice or consuming money, items, or time.");
         _luckyMoneyHitChancePercent = Config.Bind("MoneyLuck", "LuckyHitChancePercent", 0, "Chance from 0 to 100 that a player money transaction triggers a lucky bonus.");
         _extraRelationshipGainChancePercent = Config.Bind("Relationship", "ExtraRelationshipGainChancePercent", 0, "Chance from 0 to 100 that positive relationship gain becomes double.");
         _teamAutoFavorEnabled = Config.Bind("Relationship", "TeamAutoFavorEnabled", true, "When true, current player teammates automatically gain favor each elapsed in-game day.");
@@ -665,6 +680,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var auctionRefreshGatePatched = PatchMethod(typeof(PlotController), nameof(PlotController.FreshAuctionItem), Type.EmptyTypes, nameof(FreshAuctionItemPrefix), null);
         var identifyShowPatched = PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.ShowIdentifyMatchUI), new[] { typeof(float), typeof(string) }, null, nameof(ShowIdentifyMatchUiPostfix));
         var identifyHidePatched = PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.HideIdentifyMatchUI), Type.EmptyTypes, null, nameof(HideIdentifyMatchUiPostfix));
+        var breakthroughChoiceShowPatched = PatchMethod(typeof(BreakThroughController), nameof(BreakThroughController.StartShowBreakChoice), Type.EmptyTypes, null, nameof(BreakthroughStartShowBreakChoicePostfix));
+        var breakthroughChoiceClickPatched = PatchMethod(typeof(BreakThroughChoiceController), nameof(BreakThroughChoiceController.OnClick), Type.EmptyTypes, nameof(BreakthroughChoiceOnClickPrefix), null);
+        var breakthroughBookChoosePatched = PatchMethod(typeof(BreakThroughController), nameof(BreakThroughController.BreakBookChoose), Type.EmptyTypes, nameof(BreakthroughItemChoosePrefix), null);
+        var breakthroughFoodChoosePatched = PatchMethod(typeof(BreakThroughController), nameof(BreakThroughController.BreakFoodChoose), Type.EmptyTypes, nameof(BreakthroughItemChoosePrefix), null);
+        var breakthroughMedChoosePatched = PatchMethod(typeof(BreakThroughController), nameof(BreakThroughController.BreakMedChoose), Type.EmptyTypes, nameof(BreakthroughItemChoosePrefix), null);
+        var breakthroughStartPatched = PatchMethod(typeof(BreakThroughController), nameof(BreakThroughController.StartBreakThrough), new[] { typeof(KungfuSkillLvData), typeof(bool) }, nameof(BreakthroughSessionOpeningPrefix), null);
+        var breakthroughConfirmPatched = PatchMethod(typeof(BreakThroughController), nameof(BreakThroughController.StartBreakThroughButtonClicked), Type.EmptyTypes, nameof(BreakthroughConfirmationPrefix), null);
+        var breakthroughHidePatched = PatchMethod(typeof(BreakThroughController), nameof(BreakThroughController.UnshowBreakThroughPanel), Type.EmptyTypes, nameof(BreakthroughPanelClosingPrefix), null);
         PatchMethod(typeof(DebateUIController), nameof(DebateUIController.ChangePatient), new[] { typeof(bool), typeof(float) }, nameof(DebateChangePatientPrefix), null);
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.OpenCraftUI), new[] { typeof(CraftType), typeof(AreaBuildingData), typeof(bool) }, null, nameof(OpenCraftUiPostfix));
         PatchMethod(typeof(CraftUIController), nameof(CraftUIController.HideCraftUI), Type.EmptyTypes, null, nameof(HideCraftUiPostfix));
@@ -718,10 +741,31 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(GameTitleController), nameof(GameTitleController.ShowMainMenu), Type.EmptyTypes, null, nameof(ShowMainMenuPostfix));
         PatchMethod(typeof(SaveLoadMenuController), nameof(SaveLoadMenuController.SaveSlotButtonClicked), new[] { typeof(int) }, nameof(SaveSlotButtonClickedPrefix), null);
         PatchMethod(typeof(SaveLoadMenuController), nameof(SaveLoadMenuController.SureSave), new[] { typeof(string) }, null, nameof(SureSavePostfix));
-        PatchMethod(typeof(SaveLoadMenuController), nameof(SaveLoadMenuController.LoadRecentGame), Type.EmptyTypes, nameof(LoadRecentGamePrefix), null);
-        PatchMethod(typeof(SaveLoadMenuController), nameof(SaveLoadMenuController.LoadGame), new[] { typeof(int) }, nameof(LoadGamePrefix), null);
-        PatchMethod(typeof(GameDataController), nameof(GameDataController.LoadAllGameData), Type.EmptyTypes, null, nameof(LoadAllGameDataPostfix));
-        PatchMethod(typeof(GameController), "Update", Type.EmptyTypes, null, nameof(GameControllerUpdatePostfix));
+        var loadRecentGamePatched = PatchMethod(typeof(SaveLoadMenuController), nameof(SaveLoadMenuController.LoadRecentGame), Type.EmptyTypes, nameof(LoadRecentGamePrefix), null);
+        var loadGamePatched = PatchMethod(typeof(SaveLoadMenuController), nameof(SaveLoadMenuController.LoadGame), new[] { typeof(int) }, nameof(LoadGamePrefix), null);
+        var loadAllGameDataPatched = PatchMethod(typeof(GameDataController), nameof(GameDataController.LoadAllGameData), Type.EmptyTypes, null, nameof(LoadAllGameDataPostfix));
+        var gameControllerUpdatePatched = PatchMethod(typeof(GameController), "Update", Type.EmptyTypes, null, nameof(GameControllerUpdatePostfix));
+        _breakthroughRerollHooksReady = breakthroughChoiceShowPatched &&
+            breakthroughChoiceClickPatched &&
+            breakthroughBookChoosePatched &&
+            breakthroughFoodChoosePatched &&
+            breakthroughMedChoosePatched &&
+            breakthroughStartPatched &&
+            breakthroughConfirmPatched &&
+            breakthroughHidePatched &&
+            overlayButtonPointerPatched &&
+            gameControllerUpdatePatched &&
+            loadRecentGamePatched &&
+            loadGamePatched &&
+            loadAllGameDataPatched;
+        if (!_breakthroughRerollHooksReady)
+        {
+            DisableBreakthroughReroll("one or more required v1.1.0f5 breakthrough, click, update, or load hooks were unavailable");
+        }
+        else
+        {
+            LoggerInstance.LogInfo("[Compatibility] Breakthrough reroll: ENABLED (all required lifecycle, click, update, and load hooks patched).");
+        }
         PatchMethod(typeof(GameController), nameof(GameController.ChangeDay), Type.EmptyTypes, nameof(CalendarChangePrefix), nameof(CalendarChangePostfix));
         PatchMethod(typeof(GameController), nameof(GameController.ChangeDay), new[] { typeof(int) }, nameof(CalendarChangePrefix), nameof(CalendarChangePostfix));
         PatchMethod(typeof(GameController), nameof(GameController.ChangeDayDirect), new[] { typeof(int) }, nameof(CalendarChangePrefix), nameof(CalendarChangePostfix));
@@ -1873,6 +1917,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var buttonName = __instance.gameObject.name;
         var isAuctionRefresh = string.Equals(buttonName, AuctionPreviewRefreshButtonName, StringComparison.Ordinal);
         var isIdentifyAssist = string.Equals(buttonName, IdentifyBestTreasureButtonName, StringComparison.Ordinal);
+        var isBreakthroughReroll = string.Equals(buttonName, BreakthroughRerollButtonName, StringComparison.Ordinal) &&
+            __instance == _breakthroughRerollButton;
         var isShopOwnershipBuy = string.Equals(buttonName, ShopOwnershipBuyButtonName, StringComparison.Ordinal);
         var isMaterialAutoBuy = string.Equals(buttonName, MaterialAutoBuyButtonName, StringComparison.Ordinal);
         var isMaterialFilterDropdown = string.Equals(buttonName, MaterialFilterDropdownButtonName, StringComparison.Ordinal);
@@ -1882,6 +1928,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             out var materialFilterLevel);
         if (!isAuctionRefresh &&
             !isIdentifyAssist &&
+            !isBreakthroughReroll &&
             !isShopOwnershipBuy &&
             !isMaterialAutoBuy &&
             !isMaterialFilterDropdown &&
@@ -1895,7 +1942,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return false;
         }
 
-        if ((isAuctionRefresh || isIdentifyAssist) &&
+        if ((isAuctionRefresh || isIdentifyAssist || isBreakthroughReroll) &&
             (eventData == null || eventData.button != PointerEventData.InputButton.Left))
         {
             return false;
@@ -1921,6 +1968,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 if (_treasureIdentifyBestValueAssistEnabled.Value)
                 {
                     TrySelectHighestValueIdentifyTreasure(_identifyMatchController, "button");
+                }
+            }
+            else if (isBreakthroughReroll)
+            {
+                if (_breakthroughRerollEnabled.Value)
+                {
+                    TryRerollBreakthroughChoices();
                 }
             }
             else if (isShopOwnershipBuy)
@@ -2068,6 +2122,416 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         EnsureIdentifyBestTreasureButton(controller);
         SetOverlayObjectActive(_identifyBestTreasureButtonRoot, true);
+    }
+
+    private static void BreakthroughSessionOpeningPrefix()
+    {
+        ResetBreakthroughRerollState("BreakThroughController.StartBreakThrough");
+    }
+
+    private static void BreakthroughConfirmationPrefix()
+    {
+        ResetBreakthroughRerollState("BreakThroughController.StartBreakThroughButtonClicked");
+    }
+
+    private static void BreakthroughPanelClosingPrefix()
+    {
+        ResetBreakthroughRerollState("BreakThroughController.UnshowBreakThroughPanel");
+    }
+
+    private static void BreakthroughChoiceOnClickPrefix()
+    {
+        ResetBreakthroughRerollState("BreakThroughChoiceController.OnClick");
+    }
+
+    private static void BreakthroughItemChoosePrefix()
+    {
+        ResetBreakthroughRerollState("BreakThroughController item selection");
+    }
+
+    private static void BreakthroughStartShowBreakChoicePostfix(BreakThroughController __instance)
+    {
+        try
+        {
+            if (!_breakthroughRerollEnabled.Value || !_breakthroughRerollHooksReady)
+            {
+                ResetBreakthroughRerollState("breakthrough choices generated while feature unavailable");
+                return;
+            }
+
+            if (__instance == null ||
+                __instance.breakThroughPanel == null ||
+                !__instance.breakThroughPanel.activeInHierarchy ||
+                __instance.breakThroughPos == null)
+            {
+                ResetBreakthroughRerollState("breakthrough choice generation completed outside a visible panel");
+                return;
+            }
+
+            var visibleChoiceCount = CountBreakthroughChoices(__instance, requireActive: true);
+            var totalChoiceCount = CountBreakthroughChoices(__instance, requireActive: false);
+            if (visibleChoiceCount <= 0 || totalChoiceCount <= 0)
+            {
+                DisableBreakthroughReroll("StartShowBreakChoice completed without usable candidates");
+                return;
+            }
+
+            if (visibleChoiceCount != totalChoiceCount)
+            {
+                DisableBreakthroughReroll(
+                    $"candidate generation was incomplete: visible={visibleChoiceCount}, total={totalChoiceCount}");
+                return;
+            }
+
+            if (_breakthroughRerollController != null && _breakthroughRerollController != __instance)
+            {
+                ResetBreakthroughRerollState("breakthrough controller changed");
+            }
+
+            if (_breakthroughRerollBusy &&
+                _breakthroughRerollExpectedChoiceCount > 0 &&
+                (visibleChoiceCount != _breakthroughRerollExpectedChoiceCount ||
+                    totalChoiceCount != _breakthroughRerollExpectedChoiceCount))
+            {
+                DisableBreakthroughReroll(
+                    $"candidate count changed during regeneration: expected={_breakthroughRerollExpectedChoiceCount}, actual={totalChoiceCount}");
+                return;
+            }
+
+            _breakthroughRerollController = __instance;
+            _breakthroughRerollExpectedChoiceCount = totalChoiceCount;
+            _breakthroughRerollPendingFrame = -1;
+            _breakthroughRerollPendingSessionToken = -1;
+            _breakthroughRerollReady = true;
+            _breakthroughRerollBusy = false;
+
+            if (_traceMode.Value)
+            {
+                LoggerInstance.LogInfo(
+                    $"[BreakthroughReroll] Candidate set ready: visible={visibleChoiceCount}, total={totalChoiceCount}, session={_breakthroughRerollSessionToken}.");
+            }
+        }
+        catch (Exception ex)
+        {
+            DisableBreakthroughReroll($"choice-ready postfix failed: {ex.Message}");
+        }
+    }
+
+    private static void UpdateBreakthroughRerollAssist()
+    {
+        try
+        {
+            if (!_breakthroughRerollEnabled.Value)
+            {
+                ResetBreakthroughRerollState("feature disabled by configuration");
+                return;
+            }
+
+            if (!_breakthroughRerollHooksReady)
+            {
+                SetOverlayObjectActive(_breakthroughRerollButtonRoot, false);
+                return;
+            }
+
+            var controller = BreakThroughController.Instance;
+            if (controller == null ||
+                controller.breakThroughPanel == null ||
+                !controller.breakThroughPanel.activeInHierarchy ||
+                controller.breakThroughPos == null)
+            {
+                ResetBreakthroughRerollState("breakthrough panel closed or controller unavailable");
+                return;
+            }
+
+            if (_breakthroughRerollPendingFrame >= 0)
+            {
+                if (controller != _breakthroughRerollController ||
+                    _breakthroughRerollPendingSessionToken != _breakthroughRerollSessionToken)
+                {
+                    ResetBreakthroughRerollState("pending regeneration no longer belongs to the active session");
+                    return;
+                }
+
+                if (Time.frameCount < _breakthroughRerollPendingFrame)
+                {
+                    SetOverlayObjectActive(_breakthroughRerollButtonRoot, false);
+                    return;
+                }
+
+                _breakthroughRerollPendingFrame = -1;
+                _breakthroughRerollPendingSessionToken = -1;
+                controller.StartShowBreakChoice();
+                if (_breakthroughRerollBusy || !_breakthroughRerollReady)
+                {
+                    DisableBreakthroughReroll("candidate generator returned without a completed ready postfix");
+                }
+
+                return;
+            }
+
+            var canShow = _breakthroughRerollEnabled.Value &&
+                _breakthroughRerollHooksReady &&
+                _breakthroughRerollReady &&
+                !_breakthroughRerollBusy &&
+                controller.breakThroughPanel.activeInHierarchy &&
+                CountBreakthroughChoices(controller, requireActive: true) > 0;
+            if (!canShow)
+            {
+                SetOverlayObjectActive(_breakthroughRerollButtonRoot, false);
+                return;
+            }
+
+            _breakthroughRerollController = controller;
+            if (!EnsureBreakthroughRerollButton(controller))
+            {
+                DisableBreakthroughReroll("a safe visual-only breakthrough button could not be created");
+                return;
+            }
+
+            if (_breakthroughRerollButtonLabel != null)
+            {
+                _breakthroughRerollButtonLabel.text = "刷新突破词条";
+            }
+
+            if (_breakthroughRerollButton != null)
+            {
+                _breakthroughRerollButton.interactable = true;
+            }
+
+            SetOverlayObjectActive(_breakthroughRerollButtonRoot, true);
+        }
+        catch (Exception ex)
+        {
+            DisableBreakthroughReroll($"update loop failed: {ex.Message}");
+        }
+    }
+
+    private static bool TryRerollBreakthroughChoices()
+    {
+        try
+        {
+            if (!_breakthroughRerollEnabled.Value)
+            {
+                return false;
+            }
+
+            if (!_breakthroughRerollHooksReady)
+            {
+                return false;
+            }
+
+            if (_breakthroughRerollBusy)
+            {
+                return false;
+            }
+
+            if (!_breakthroughRerollReady)
+            {
+                return false;
+            }
+
+            var controller = _breakthroughRerollController;
+            if (controller == null ||
+                controller != BreakThroughController.Instance ||
+                controller.breakThroughPanel == null ||
+                !controller.breakThroughPanel.activeInHierarchy ||
+                controller.breakThroughPos == null)
+            {
+                ResetBreakthroughRerollState("button click did not belong to the active breakthrough panel");
+                return false;
+            }
+
+            var choiceCount = CountBreakthroughChoices(controller, requireActive: false);
+            if (choiceCount <= 0 || CountBreakthroughChoices(controller, requireActive: true) <= 0)
+            {
+                ResetBreakthroughRerollState("button click found no visible breakthrough candidates");
+                return false;
+            }
+
+            _breakthroughRerollBusy = true;
+            if (_breakthroughRerollButton != null)
+            {
+                _breakthroughRerollButton.interactable = false;
+            }
+
+            _breakthroughRerollReady = false;
+            _breakthroughRerollExpectedChoiceCount = choiceCount;
+            var clearedChoiceCount = ClearBreakthroughChoicesImmediately(controller);
+            if (clearedChoiceCount != choiceCount)
+            {
+                DisableBreakthroughReroll(
+                    $"candidate cleanup was incomplete: expected={choiceCount}, cleared={clearedChoiceCount}");
+                return false;
+            }
+
+            SetOverlayObjectActive(_breakthroughRerollButtonRoot, false);
+            _breakthroughRerollPendingSessionToken = _breakthroughRerollSessionToken;
+            _breakthroughRerollPendingFrame = Time.frameCount + 1;
+            LoggerInstance.LogInfo(
+                $"[BreakthroughReroll] Retired {clearedChoiceCount} candidates; regeneration scheduled for frame {_breakthroughRerollPendingFrame}.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            DisableBreakthroughReroll($"button action failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static int ClearBreakthroughChoicesImmediately(BreakThroughController controller)
+    {
+        if (controller.breakThroughPos == null)
+        {
+            return 0;
+        }
+
+        var choices = controller.breakThroughPos.GetComponentsInChildren<BreakThroughChoiceController>(includeInactive: true);
+        if (choices == null || choices.Length == 0)
+        {
+            return 0;
+        }
+
+        var clearedCount = 0;
+        foreach (var choice in choices)
+        {
+            if (choice?.gameObject == null)
+            {
+                continue;
+            }
+
+            choice.gameObject.SetActive(false);
+            choice.transform.SetParent(null, false);
+            UnityEngine.Object.Destroy(choice.gameObject);
+            clearedCount++;
+        }
+
+        return clearedCount;
+    }
+
+    private static int CountBreakthroughChoices(BreakThroughController controller, bool requireActive)
+    {
+        if (controller?.breakThroughPos == null)
+        {
+            return 0;
+        }
+
+        var choices = controller.breakThroughPos.GetComponentsInChildren<BreakThroughChoiceController>(includeInactive: true);
+        if (choices == null)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        foreach (var choice in choices)
+        {
+            if (choice?.gameObject == null || (requireActive && !choice.gameObject.activeInHierarchy))
+            {
+                continue;
+            }
+
+            count++;
+        }
+
+        return count;
+    }
+
+    private static bool EnsureBreakthroughRerollButton(BreakThroughController controller)
+    {
+        if (_breakthroughRerollButtonRoot != null &&
+            _breakthroughRerollButton != null &&
+            _breakthroughRerollButtonLabel != null &&
+            _breakthroughRerollButtonRoot.transform.parent == controller.breakThroughPanel.transform)
+        {
+            return true;
+        }
+
+        DestroyBreakthroughRerollButton();
+        var buttonTemplate = FindUiButtonTemplate(controller.breakThroughPanel);
+        var labelTemplate = FindUiTextTemplate(controller.breakThroughPanel);
+        if (labelTemplate == null)
+        {
+            return false;
+        }
+
+        var created = TryCreateSafeStyledButton(
+            BreakthroughRerollButtonName,
+            controller.breakThroughPanel.transform,
+            buttonTemplate,
+            labelTemplate,
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0f, -330f),
+            new Vector2(220f, 52f),
+            "刷新突破词条",
+            out _breakthroughRerollButtonRoot,
+            out _breakthroughRerollButton,
+            out _breakthroughRerollButtonLabel);
+        if (created)
+        {
+            LoggerInstance.LogInfo(
+                "[BreakthroughReroll] Safe visual-only button created on the breakthrough panel.");
+        }
+
+        return created;
+    }
+
+    private static void ResetBreakthroughRerollState(string source)
+    {
+        var hadActiveSession = _breakthroughRerollController != null ||
+            _breakthroughRerollReady ||
+            _breakthroughRerollBusy ||
+            _breakthroughRerollPendingFrame >= 0 ||
+            _breakthroughRerollButtonRoot != null;
+
+        _breakthroughRerollReady = false;
+        _breakthroughRerollBusy = false;
+        _breakthroughRerollPendingFrame = -1;
+        _breakthroughRerollPendingSessionToken = -1;
+        _breakthroughRerollExpectedChoiceCount = 0;
+        _breakthroughRerollController = null;
+        if (hadActiveSession)
+        {
+            unchecked
+            {
+                _breakthroughRerollSessionToken++;
+            }
+        }
+
+        if (_breakthroughRerollButtonRoot != null)
+        {
+            _breakthroughRerollButtonRoot.SetActive(false);
+            UnityEngine.Object.Destroy(_breakthroughRerollButtonRoot);
+        }
+
+        _breakthroughRerollButtonRoot = null;
+        _breakthroughRerollButton = null;
+        _breakthroughRerollButtonLabel = null;
+
+        if (hadActiveSession && _traceMode != null && _traceMode.Value)
+        {
+            LoggerInstance.LogInfo($"[BreakthroughReroll] Session reset from {source}.");
+        }
+    }
+
+    private static void DestroyBreakthroughRerollButton()
+    {
+        if (_breakthroughRerollButtonRoot != null)
+        {
+            _breakthroughRerollButtonRoot.SetActive(false);
+            UnityEngine.Object.Destroy(_breakthroughRerollButtonRoot);
+        }
+
+        _breakthroughRerollButtonRoot = null;
+        _breakthroughRerollButton = null;
+        _breakthroughRerollButtonLabel = null;
+    }
+
+    private static void DisableBreakthroughReroll(string reason)
+    {
+        _breakthroughRerollHooksReady = false;
+        ResetBreakthroughRerollState("safe degraded mode");
+        LoggerInstance.LogWarning($"[Compatibility] Breakthrough reroll DISABLED safely: {reason}.");
     }
 
     private static bool IsAuctionPreviewVisible()
@@ -2314,6 +2778,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 if (button == null ||
                     string.Equals(buttonName, AuctionPreviewRefreshButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, IdentifyBestTreasureButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, BreakthroughRerollButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, ShopOwnershipBuyButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, MaterialAutoBuyButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, MaterialFilterDropdownButtonName, StringComparison.Ordinal) ||
@@ -2358,6 +2823,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         return IsTransformInsideOverlayRoot(button.transform, _auctionPreviewRefreshButtonRoot) ||
             IsTransformInsideOverlayRoot(button.transform, _identifyBestTreasureButtonRoot) ||
+            IsTransformInsideOverlayRoot(button.transform, _breakthroughRerollButtonRoot) ||
             IsTransformInsideOverlayRoot(button.transform, _shopOwnershipBuyButton?.gameObject) ||
             IsTransformInsideOverlayRoot(button.transform, _materialAutoBuyButtonRoot) ||
             IsTransformInsideOverlayRoot(button.transform, _materialFilterDropdownButtonRoot) ||
@@ -2446,7 +2912,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                     (_auctionPreviewRefreshButtonRoot != null &&
                         candidate.transform.IsChildOf(_auctionPreviewRefreshButtonRoot.transform)) ||
                     (_identifyBestTreasureButtonRoot != null &&
-                        candidate.transform.IsChildOf(_identifyBestTreasureButtonRoot.transform)))
+                        candidate.transform.IsChildOf(_identifyBestTreasureButtonRoot.transform)) ||
+                    (_breakthroughRerollButtonRoot != null &&
+                        candidate.transform.IsChildOf(_breakthroughRerollButtonRoot.transform)))
                 {
                     continue;
                 }
@@ -2457,6 +2925,146 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
 
         return fallback;
+    }
+
+    private static bool TryCreateSafeStyledButton(
+        string name,
+        Transform parent,
+        Button? visualButtonTemplate,
+        Text visualTextTemplate,
+        Vector2 anchorMin,
+        Vector2 anchorMax,
+        Vector2 pivot,
+        Vector2 anchoredPosition,
+        Vector2 size,
+        string text,
+        out GameObject? buttonRoot,
+        out Button? button,
+        out Text? label)
+    {
+        buttonRoot = null;
+        button = null;
+        label = null;
+
+        try
+        {
+            var buttonObject = new GameObject(
+                name,
+                Il2CppType.Of<RectTransform>(),
+                Il2CppType.Of<CanvasRenderer>(),
+                Il2CppType.Of<Image>(),
+                Il2CppType.Of<Button>(),
+                Il2CppType.Of<LayoutElement>());
+            buttonRoot = buttonObject;
+            buttonObject.SetActive(false);
+            buttonObject.transform.SetParent(parent, false);
+
+            var buttonRect = buttonObject.GetComponent<RectTransform>();
+            var background = buttonObject.GetComponent<Image>();
+            button = buttonObject.GetComponent<Button>();
+            var layoutElement = buttonObject.GetComponent<LayoutElement>();
+            if (buttonRect == null || background == null || button == null || layoutElement == null)
+            {
+                UnityEngine.Object.Destroy(buttonObject);
+                buttonRoot = null;
+                button = null;
+                return false;
+            }
+
+            layoutElement.ignoreLayout = true;
+            buttonRect.anchorMin = anchorMin;
+            buttonRect.anchorMax = anchorMax;
+            buttonRect.pivot = pivot;
+            buttonRect.anchoredPosition = anchoredPosition;
+            buttonRect.sizeDelta = size;
+            buttonRect.localScale = Vector3.one;
+            buttonRect.localRotation = Quaternion.identity;
+
+            var visualGraphicTemplate = visualButtonTemplate?.targetGraphic;
+            if (visualGraphicTemplate != null)
+            {
+                background.material = visualGraphicTemplate.material;
+                background.color = visualGraphicTemplate.color;
+            }
+            else
+            {
+                background.color = new Color(0.58f, 0.32f, 0.12f, 0.96f);
+            }
+
+            background.enabled = true;
+            background.raycastTarget = true;
+            button.targetGraphic = background;
+            button.interactable = true;
+            button.transition = Selectable.Transition.ColorTint;
+            if (visualButtonTemplate != null)
+            {
+                button.colors = visualButtonTemplate.colors;
+            }
+
+            var navigation = button.navigation;
+            navigation.mode = Navigation.Mode.None;
+            button.navigation = navigation;
+            button.onClick = new Button.ButtonClickedEvent();
+
+            var labelObject = new GameObject(
+                $"{name}Label",
+                Il2CppType.Of<RectTransform>(),
+                Il2CppType.Of<CanvasRenderer>(),
+                Il2CppType.Of<Text>());
+            labelObject.transform.SetParent(buttonObject.transform, false);
+            var labelRect = labelObject.GetComponent<RectTransform>();
+            label = labelObject.GetComponent<Text>();
+            if (labelRect == null || label == null)
+            {
+                UnityEngine.Object.Destroy(buttonObject);
+                buttonRoot = null;
+                button = null;
+                label = null;
+                return false;
+            }
+
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.pivot = new Vector2(0.5f, 0.5f);
+            labelRect.anchoredPosition = Vector2.zero;
+            labelRect.sizeDelta = new Vector2(-16f, -8f);
+            labelRect.localScale = Vector3.one;
+            labelRect.localRotation = Quaternion.identity;
+
+            label.font = visualTextTemplate.font;
+            label.fontStyle = visualTextTemplate.fontStyle;
+            label.fontSize = Math.Max(16, visualTextTemplate.fontSize);
+            label.lineSpacing = visualTextTemplate.lineSpacing;
+            label.supportRichText = visualTextTemplate.supportRichText;
+            label.alignment = TextAnchor.MiddleCenter;
+            label.alignByGeometry = visualTextTemplate.alignByGeometry;
+            label.horizontalOverflow = HorizontalWrapMode.Wrap;
+            label.verticalOverflow = VerticalWrapMode.Truncate;
+            label.resizeTextForBestFit = true;
+            label.resizeTextMinSize = 14;
+            label.resizeTextMaxSize = Math.Max(20, visualTextTemplate.fontSize + 2);
+            label.material = visualTextTemplate.material;
+            label.color = Color.white;
+            label.raycastTarget = false;
+            label.text = text;
+
+            buttonObject.transform.SetAsLastSibling();
+            buttonObject.SetActive(true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (buttonRoot != null)
+            {
+                UnityEngine.Object.Destroy(buttonRoot);
+            }
+
+            buttonRoot = null;
+            button = null;
+            label = null;
+            LoggerInstance.LogWarning($"Failed to create safe visual-only UI button {name}: {ex.Message}");
+            return false;
+        }
     }
 
     private static bool TryCreateTextTemplateButton(
@@ -6694,12 +7302,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void ShowStartMenuPostfix()
     {
+        ResetBreakthroughRerollState("StartMenu.ShowStartMenu");
         ClearShopOwnershipRuntimeState("StartMenu.ShowStartMenu");
         ResetStudySkillTimeScalingState("StartMenu.ShowStartMenu");
     }
 
     private static void ShowMainMenuPostfix()
     {
+        ResetBreakthroughRerollState("GameTitle.ShowMainMenu");
         ClearShopOwnershipRuntimeState("GameTitle.ShowMainMenu");
         ResetStudySkillTimeScalingState("GameTitle.ShowMainMenu");
     }
@@ -6758,6 +7368,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void LoadRecentGamePrefix(SaveLoadMenuController __instance)
     {
+        ResetBreakthroughRerollState("SaveLoadMenu.LoadRecentGame");
         int? saveSlotId = null;
         try
         {
@@ -6779,6 +7390,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void LoadGamePrefix(int saveID)
     {
+        ResetBreakthroughRerollState("SaveLoadMenu.LoadGame");
         if (saveID < 0)
         {
             LoggerInstance.LogWarning($"Shop ownership load sync skipped because load slot {saveID} is invalid.");
@@ -7162,6 +7774,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         UpdateTreasureTradeUiState();
         UpdateAuctionPreviewRefreshAssist();
         UpdateTreasureIdentifyBestValueAssist();
+        UpdateBreakthroughRerollAssist();
         TrySyncExternalOverlay();
 
         if (Input.GetKeyDown(_dialogFastForwardAssistHotkey.Value))
@@ -7304,6 +7917,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void LoadAllGameDataPostfix()
     {
+        ResetBreakthroughRerollState("GameDataController.LoadAllGameData");
         LoadCustomTalentPackFromDisk();
         TryGetHeroTagDatabase("LoadAllGameData", out _);
 

@@ -140,6 +140,17 @@ test('renderer exposes commerce and assist toggles without legacy shortcut contr
   }
 });
 
+test('growth settings expose breakthrough reroll as a button-only toggle', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+
+  assert.match(
+    renderer,
+    /label="刷新突破词条按钮"[\s\S]{0,240}value=\{settings\.breakthroughRerollEnabled\}[\s\S]{0,240}updateSetting\('breakthroughRerollEnabled', value\)/
+  );
+  assert.match(renderer, /启用后只在突破候选界面显示“刷新突破词条”按钮，不会自动刷新；保存后需重新启动游戏生效。/);
+  assert.doesNotMatch(renderer, /breakthroughReroll(?:Hotkey|RequireAlt)/);
+});
+
 test('launcher keeps primary actions visible and clearly marks unsaved settings', () => {
   const renderer = readSource('src/renderer/App.tsx');
   const styles = readSource('src/renderer/styles.css');

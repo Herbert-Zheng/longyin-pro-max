@@ -462,6 +462,51 @@ test('exploration full-reveal setting reads only the Exploration section and rou
   assert.match(text, /\[WrongSection\]\r?\nRevealAllOnStepTile = true/);
 });
 
+test('breakthrough reroll defaults enabled without shortcut settings', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const settings = await readVisibleSettings(gameRoot);
+
+  assert.equal(settings.breakthroughRerollEnabled, true);
+  assert.equal(Object.hasOwn(settings, 'breakthroughRerollHotkey'), false);
+  assert.equal(Object.hasOwn(settings, 'breakthroughRerollRequireAlt'), false);
+});
+
+test('breakthrough reroll reads only its owning section and round-trips', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[WrongSection]',
+      'RerollEnabled = false',
+      '',
+      '[Breakthrough]',
+      'RerollEnabled = true',
+      'UnrelatedBreakthroughSetting = keep-me',
+      ''
+    ].join('\r\n')
+  );
+
+  const current = await readVisibleSettings(gameRoot);
+  assert.equal(current.breakthroughRerollEnabled, true);
+
+  const saved = await saveVisibleSettings(gameRoot, {
+    ...current,
+    breakthroughRerollEnabled: false
+  });
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.equal(saved.breakthroughRerollEnabled, false);
+  assert.match(text, /\[Breakthrough\][\s\S]*?^RerollEnabled = false$/m);
+  assert.match(text, /^UnrelatedBreakthroughSetting = keep-me$/m);
+  assert.match(text, /\[WrongSection\]\r?\nRerollEnabled = false/);
+  assert.doesNotMatch(text, /\[Breakthrough\][\s\S]*?^(?:RerollHotkey|RerollRequireAlt)\s*=/m);
+});
+
 test('commerce and assist toggles have safe defaults without legacy shortcut fields', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));

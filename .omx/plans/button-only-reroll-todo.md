@@ -15,7 +15,7 @@
 ## 默认值假设
 
 - 既有 `Auction.PreviewRefreshEnabled` 和 `TreasureIdentify.BestValueAssistEnabled` 保持当前默认开启。
-- 新增 `Craft.RerollEnabled` 与 `Breakthrough.RerollEnabled` 默认关闭；完成实机兼容验证后再决定是否改为默认开启。
+- 新增 `Breakthrough.RerollEnabled` 并默认开启；`Craft.RerollEnabled` 默认关闭，完成实机兼容验证后再决定是否改为默认开启。
 - 不改动冻结日期、游戏速度、对话快进等其他功能的快捷键。
 
 ## 完成标准
@@ -142,7 +142,7 @@
 
 - [ ] 新增 `scripts/check-breakthrough-reroll-semantics.ps1`。
 - [ ] 在 `VisibleSettings`、三套默认值、配置模板、normalize、read、save 中加入 `breakthroughRerollEnabled`，且不增加任何快捷键字段。
-- [ ] 在 Electron“成长与天赋”增加“刷新突破词条按钮”checkbox，默认关闭，补齐 backend/renderer round-trip 测试。
+- [ ] 在 Electron“成长与天赋”增加“刷新突破词条按钮”checkbox，默认开启，补齐 backend/renderer round-trip 测试。
 - [ ] Electron 文案明确：启用只显示按钮，不自动刷新，保存后需重新启动游戏生效。
 - [ ] 静态拒绝真实突破、日期推进和用品消费调用。
 - [ ] 实机连续刷新 10 次，选项数恒定、无 UI 叠加。

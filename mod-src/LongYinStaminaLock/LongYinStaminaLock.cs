@@ -2734,6 +2734,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return false;
         }
 
+        if (!TryGetAuctionPreviewChooseItemContainer(out var chooseItemContainer) || chooseItemContainer == null)
+        {
+            PushPlayerLog("拍卖展品刷新失败：当前版本缺少兼容展品容器");
+            LoggerInstance.LogWarning(
+                "Auction preview refresh safely skipped because ChooseController.targetGrid was unavailable.");
+            return false;
+        }
+
         _auctionPreviewRefreshBusy = true;
         var player = TryGetPlayerHero();
         var moneyBefore = TryGetHeroMoney(player);
@@ -2768,7 +2776,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             }
 
             previewReopenAttempted = true;
-            ReopenAuctionPreview(controller);
+            ReopenAuctionPreview(controller, chooseItemContainer);
             _auctionPreviewController = controller;
             _auctionPreviewOpen = true;
 
@@ -2788,7 +2796,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                     eventItemsBefore,
                     tempPlotShopBefore,
                     randomSeedBefore);
-            var previewRestored = !previewReopenAttempted || restored && TryReopenAuctionPreviewAfterRollback(controller);
+            var previewRestored = !previewReopenAttempted ||
+                restored && TryReopenAuctionPreviewAfterRollback(controller, chooseItemContainer);
             PushPlayerLog(
                 restored && previewRestored
                     ? "拍卖展品刷新失败，原展品已恢复"
@@ -2827,11 +2836,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
     }
 
-    private static bool TryReopenAuctionPreviewAfterRollback(PlotController controller)
+    private static bool TryReopenAuctionPreviewAfterRollback(
+        PlotController controller,
+        Transform chooseItemContainer)
     {
         try
         {
-            ReopenAuctionPreview(controller);
+            ReopenAuctionPreview(controller, chooseItemContainer);
             _auctionPreviewController = controller;
             _auctionPreviewOpen = true;
             return true;
@@ -2897,9 +2908,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
     }
 
-    private static void ReopenAuctionPreview(PlotController controller)
+    private static void ReopenAuctionPreview(
+        PlotController controller,
+        Transform chooseItemContainer)
     {
-        var itemGridRowsBefore = GetAuctionPreviewItemGridRowCount(controller);
+        var chooseItemRowsBefore = GetAuctionPreviewChooseItemRowCount(chooseItemContainer);
         var hideMethod = FindCompatibleTargetMethod(controller.GetType(), nameof(PlotController.HidePlotItem), Type.EmptyTypes);
         hideMethod?.Invoke(controller, Array.Empty<object>());
 
@@ -2910,8 +2923,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
 
         clearMethod.Invoke(controller, Array.Empty<object>());
-        ClearAuctionPreviewItemGridImmediately(controller);
-        var itemGridRowsAfterCleanup = GetAuctionPreviewItemGridRowCount(controller);
+        ClearAuctionPreviewChooseItemsImmediately(chooseItemContainer);
+        var chooseItemRowsAfterCleanup = GetAuctionPreviewChooseItemRowCount(chooseItemContainer);
 
         var showMethod = FindCompatibleTargetMethod(controller.GetType(), nameof(PlotController.ShowAuctionItem), Type.EmptyTypes);
         if (showMethod == null)
@@ -2921,22 +2934,38 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         showMethod.Invoke(controller, Array.Empty<object>());
         LoggerInstance.LogInfo(
-            $"Auction preview UI rebuilt: itemGridRows={itemGridRowsBefore}->{itemGridRowsAfterCleanup}->{GetAuctionPreviewItemGridRowCount(controller)}, " +
+            $"Auction preview UI rebuilt: targetGridRows={chooseItemRowsBefore}->{chooseItemRowsAfterCleanup}->{GetAuctionPreviewChooseItemRowCount(chooseItemContainer)}, " +
             $"items={TryGetCollectionCount(controller.tempPlotShop?.allItem)}.");
     }
 
-    private static void ClearAuctionPreviewItemGridImmediately(PlotController controller)
+    private static bool TryGetAuctionPreviewChooseItemContainer(out Transform? chooseItemContainer)
     {
-        var itemGrid = controller.plotItemGrid;
-        if (itemGrid == null)
+        chooseItemContainer = null;
+        try
         {
-            return;
-        }
+            var chooseController = ChooseController.Instance;
+            var targetGrid = chooseController?.targetGrid;
+            if (targetGrid == null)
+            {
+                return false;
+            }
 
-        var gridTransform = itemGrid.transform;
-        for (var index = gridTransform.childCount - 1; index >= 0; index--)
+            chooseItemContainer = targetGrid.transform;
+            return chooseItemContainer != null;
+        }
+        catch (Exception ex)
         {
-            var child = gridTransform.GetChild(index);
+            LoggerInstance.LogWarning(
+                $"Auction preview ChooseController.targetGrid lookup failed: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+    }
+
+    private static void ClearAuctionPreviewChooseItemsImmediately(Transform chooseItemContainer)
+    {
+        for (var index = chooseItemContainer.childCount - 1; index >= 0; index--)
+        {
+            var child = chooseItemContainer.GetChild(index);
             if (child == null)
             {
                 continue;
@@ -2948,11 +2977,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
     }
 
-    private static int GetAuctionPreviewItemGridRowCount(PlotController controller)
+    private static int GetAuctionPreviewChooseItemRowCount(Transform? chooseItemContainer)
     {
         try
         {
-            return controller.plotItemGrid?.transform.childCount ?? 0;
+            return chooseItemContainer?.childCount ?? 0;
         }
         catch
         {

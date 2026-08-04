@@ -69,21 +69,47 @@ function Require-ScopePattern {
 }
 
 $regenerateMethod = Get-CSharpMethodText 'TryRegenerateAuctionPreviewDirect'
+$refreshMethod = Get-CSharpMethodText 'TryRefreshAuctionPreview'
 $reopenMethod = Get-CSharpMethodText 'ReopenAuctionPreview'
-$clearGridMethod = Get-CSharpMethodText 'ClearAuctionPreviewItemGridImmediately'
+$findChooseItemsMethod = Get-CSharpMethodText 'TryGetAuctionPreviewChooseItemContainer'
+$clearChooseItemsMethod = Get-CSharpMethodText 'ClearAuctionPreviewChooseItemsImmediately'
 
 Require-ScopeText $regenerateMethod 'var regeneratedItems = new ItemListData();' 'Auction refresh must generate into a fresh item collection instead of appending to the current event list.'
 Require-ScopeText $regenerateMethod 'eventData.eventItemList = regeneratedItems;' 'Auction refresh must replace the event item list with the freshly generated collection.'
 Require-ScopeText $regenerateMethod 'controller.tempPlotShop = regeneratedItems;' 'Auction refresh must replace the preview backing list with the freshly generated collection.'
 Require-ScopePattern `
+    $refreshMethod `
+    'TryGetAuctionPreviewChooseItemContainer\s*\([^\)]*\)[\s\S]*?TryRegenerateAuctionPreviewDirect\s*\(' `
+    'Auction refresh must resolve the real ChooseController item container before mutating the auction data so an incompatible UI can fail safely.'
+Require-ScopePattern `
+    $refreshMethod `
+    'if\s*\(\s*!TryGetAuctionPreviewChooseItemContainer\s*\(\s*out var chooseItemContainer\s*\)\s*\|\|\s*chooseItemContainer\s*==\s*null\s*\)\s*\{[\s\S]*?return false\s*;' `
+    'Auction refresh must stop before data mutation when the runtime targetGrid container is unavailable.'
+Require-ScopePattern `
     $reopenMethod `
-    'nameof\(PlotController\.HidePlotItem\)[\s\S]*?\.Invoke\(controller,[\s\S]*?nameof\(PlotController\.ClearPlotItem\)[\s\S]*?\.Invoke\(controller,[\s\S]*?ClearAuctionPreviewItemGridImmediately\(controller\)[\s\S]*?nameof\(PlotController\.ShowAuctionItem\)[\s\S]*?\.Invoke\(controller,' `
-    'Every refresh must synchronously detach the visible plotItemGrid rows after the original cleanup and before ShowAuctionItem; delayed Destroy calls otherwise let the new rows append for the current frame.'
-Require-ScopeText $clearGridMethod 'controller.plotItemGrid' 'Auction refresh must clear the runtime-confirmed PlotController.plotItemGrid exhibit container.'
-Require-ScopePattern $clearGridMethod 'for\s*\([^\)]*childCount\s*-\s*1[^\)]*>=\s*0[^\)]*--' 'Auction refresh must walk every existing plotItemGrid row from the end before rebuilding the list.'
-Require-ScopeText $clearGridMethod 'SetActive(false)' 'Old auction exhibit rows must be hidden synchronously before Unity delayed destruction.'
-Require-ScopePattern $clearGridMethod 'SetParent\s*\(\s*null\s*,\s*false\s*\)' 'Old auction exhibit rows must be detached synchronously so ShowAuctionItem sees an empty grid in the same frame.'
-Require-ScopeText $clearGridMethod 'UnityEngine.Object.Destroy(' 'Detached auction exhibit rows must still be destroyed after they are removed from the visible grid.'
+    'nameof\(PlotController\.HidePlotItem\)[\s\S]*?\.Invoke\(controller,[\s\S]*?nameof\(PlotController\.ClearPlotItem\)[\s\S]*?\.Invoke\(controller,[\s\S]*?ClearAuctionPreviewChooseItemsImmediately\([^\)]*\)[\s\S]*?nameof\(PlotController\.ShowAuctionItem\)[\s\S]*?\.Invoke\(controller,' `
+    'Every refresh must synchronously detach the visible ChooseController item rows after the original cleanup and before ShowAuctionItem; otherwise the new rows append to the old exhibit list.'
+Require-ScopeText $findChooseItemsMethod 'ChooseController.Instance' 'Auction refresh must resolve the runtime ChooseController singleton that owns the visible exhibit list.'
+Require-ScopePattern $findChooseItemsMethod 'var\s+targetGrid\s*=\s*chooseController\?\.targetGrid\s*;' 'Auction refresh must resolve ChooseController.targetGrid, the dynamic row parent used by CreateChooseItem and cleared by the original HideChoosePanel.'
+Require-ScopePattern $findChooseItemsMethod 'chooseItemContainer\s*=\s*targetGrid\.transform\s*;' 'Auction refresh must pass the targetGrid Transform to the synchronous row cleanup.'
+Require-ScopePattern $clearChooseItemsMethod 'for\s*\([^\)]*childCount\s*-\s*1[^\)]*>=\s*0[^\)]*--' 'Auction refresh must walk every existing ChooseController item row from the end before rebuilding the list.'
+Require-ScopeText $clearChooseItemsMethod 'SetActive(false)' 'Old auction exhibit rows must be hidden synchronously before Unity delayed destruction.'
+Require-ScopePattern $clearChooseItemsMethod 'SetParent\s*\(\s*null\s*,\s*false\s*\)' 'Old auction exhibit rows must be detached synchronously so ShowAuctionItem sees an empty targetGrid in the same frame.'
+Require-ScopeText $clearChooseItemsMethod 'UnityEngine.Object.Destroy(' 'Detached auction exhibit rows must still be destroyed after they are removed from the visible targetGrid.'
+
+$auctionUiMethods = $refreshMethod + $reopenMethod + $findChooseItemsMethod + $clearChooseItemsMethod
+
+if ($auctionUiMethods.IndexOf('.itemList', [System.StringComparison]::Ordinal) -ge 0) {
+    $failures.Add('Auction refresh must not delete ChooseController.itemList children; itemList contains fixed panel structure required by ShowChoosePanel.')
+}
+
+if ($auctionUiMethods.IndexOf('plotItemGrid', [System.StringComparison]::Ordinal) -ge 0) {
+    $failures.Add('Auction refresh must not treat PlotController.plotItemGrid as the visible exhibit container; runtime evidence shows it remains empty.')
+}
+
+if ($source.IndexOf('[DEBUG-auction-hierarchy]', [System.StringComparison]::Ordinal) -ge 0) {
+    $failures.Add('Auction refresh source must not retain temporary [DEBUG-auction-hierarchy] instrumentation.')
+}
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ }

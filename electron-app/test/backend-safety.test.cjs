@@ -491,7 +491,7 @@ test('new commerce and assist settings have safe defaults when configuration is 
       shopOwnershipEnabled: true,
       auctionEventAlwaysRedEnabled: true,
       auctionPreviewRefreshEnabled: true,
-      auctionPreviewRefreshHotkey: 'R',
+      auctionPreviewRefreshHotkey: 'W',
       auctionPreviewRefreshRequireAlt: true,
       treasureIdentifyBestValueAssistEnabled: true,
       treasureIdentifyBestValueHotkey: 'F',

@@ -67,7 +67,7 @@ export function defaultSettings(): VisibleSettings {
     shopOwnershipEnabled: true,
     auctionEventAlwaysRedEnabled: true,
     auctionPreviewRefreshEnabled: true,
-    auctionPreviewRefreshHotkey: 'R',
+    auctionPreviewRefreshHotkey: 'W',
     auctionPreviewRefreshRequireAlt: true,
     treasureIdentifyBestValueAssistEnabled: true,
     treasureIdentifyBestValueHotkey: 'F',

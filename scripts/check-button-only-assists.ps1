@@ -118,11 +118,11 @@ $getAuctionScreenRectMethod = Get-CSharpMethodText 'TryGetAuctionPreviewScreenRe
 $ensureIdentifyButtonMethod = Get-CSharpMethodText 'EnsureIdentifyBestTreasureButton'
 $auctionActionMethod = Get-CSharpMethodText 'TryRefreshAuctionPreview'
 $identifyActionMethod = Get-CSharpMethodText 'TrySelectHighestValueIdentifyTreasure'
+$gameControllerUpdateMethod = Get-CSharpMethodText 'GameControllerUpdatePostfix'
 
-# These are the four legacy shortcut settings owned by the auction/appraisal assists.
-# Other game features may continue to use their own shortcuts.
+# Appraisal remains button-only. Auction preview refresh deliberately restores one
+# configurable single-key shortcut, while the old Alt requirement stays removed.
 $legacyShortcutSettings = @(
-    @{ Identifier = '_auctionPreviewRefreshHotkey'; Section = 'Auction'; Key = 'PreviewRefreshHotkey' },
     @{ Identifier = '_auctionPreviewRefreshRequireAlt'; Section = 'Auction'; Key = 'PreviewRefreshRequireAlt' },
     @{ Identifier = '_treasureIdentifyBestValueHotkey'; Section = 'TreasureIdentify'; Key = 'BestValueHotkey' },
     @{ Identifier = '_treasureIdentifyBestValueRequireAlt'; Section = 'TreasureIdentify'; Key = 'BestValueRequireAlt' }
@@ -135,17 +135,22 @@ foreach ($setting in $legacyShortcutSettings) {
         "The legacy [$($setting.Section)] $($setting.Key) Config.Bind must be removed; Electron exposes only the enabled toggle."
 }
 
-foreach ($updateMethod in @(
-    @{ Scope = $updateAuctionMethod; Name = 'auction preview refresh' },
-    @{ Scope = $updateIdentifyMethod; Name = 'treasure appraisal selection' }
-)) {
-    Reject-ScopeText $updateMethod.Scope 'IsConfiguredHotkeyPressed' `
-        "The $($updateMethod.Name) update loop must not poll IsConfiguredHotkeyPressed."
-    Reject-ScopePattern $updateMethod.Scope '\bInput\s*\.' `
-        "The $($updateMethod.Name) update loop must not poll Unity Input; only its visible UI button may trigger the action."
-    Reject-ScopePattern $updateMethod.Scope '["'']hotkey["'']' `
-        "The $($updateMethod.Name) update loop must not retain a hotkey dispatch path."
+Require-ScopePattern $source 'ConfigEntry<KeyCode>\s+_auctionPreviewRefreshHotkey\b' 'Auction preview refresh must expose a KeyCode setting.'
+Require-ScopePattern $source 'Config\.Bind\s*\(\s*"Auction"\s*,\s*"PreviewRefreshHotkey"\s*,\s*KeyCode\.R\b' 'Auction preview refresh must default to the R key.'
+Require-ScopePattern $updateAuctionMethod '_auctionPreviewRefreshEnabled\.Value[\s\S]*?_auctionPreviewOpen[\s\S]*?IsAuctionPreviewVisible\(\)[\s\S]*?Input\.GetKeyDown\(\s*_auctionPreviewRefreshHotkey\.Value\s*\)[\s\S]*?TryRefreshAuctionPreview\(\s*"hotkey"\s*\)' 'The auction shortcut must dispatch only while the enabled auction exhibit preview is visibly open.'
+Reject-ScopePattern $updateAuctionMethod 'KeyCode\.LeftAlt|KeyCode\.RightAlt|GetKey\(' 'Auction refresh must not require Alt or another modifier.'
+Reject-ScopeText $source 'PlotControllerUpdatePostfix' 'Auction preview input must not be polled by both PlotController.Update and GameController.Update in the same frame.'
+Require-ScopeText $gameControllerUpdateMethod 'UpdateAuctionPreviewRefreshAssist();' 'GameController.Update must remain the single auction preview assist polling entry point.'
+$auctionUpdateCallCount = [System.Text.RegularExpressions.Regex]::Matches(
+    $source,
+    'UpdateAuctionPreviewRefreshAssist\s*\(\s*\)\s*;'
+).Count
+if ($auctionUpdateCallCount -ne 1) {
+    $failures.Add("Auction preview assist must have exactly one per-frame call site; found $auctionUpdateCallCount.")
 }
+Reject-ScopeText $updateIdentifyMethod 'IsConfiguredHotkeyPressed' 'The appraisal update loop must remain button-only.'
+Reject-ScopePattern $updateIdentifyMethod '\bInput\s*\.' 'The appraisal update loop must remain button-only.'
+Reject-ScopePattern $updateIdentifyMethod '["'']hotkey["'']' 'The appraisal update loop must not retain a hotkey dispatch path.'
 
 Require-ScopeText $ensureAuctionButtonMethod '免费刷新展品' `
     'The auction assist button must retain the plain action label 免费刷新展品.'

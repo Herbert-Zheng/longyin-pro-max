@@ -325,7 +325,7 @@ button {
 }
 
 .workspace__hero + .summary-grid {
-  margin-top: 4px;
+  margin-top: 16px;
 }
 
 .summary-grid {

@@ -68,7 +68,8 @@ test('renderer runtime exceptions and error-level console messages fail the smok
 test('renderer UI contract rejects collapsed-panel and tile-alignment regressions', async () => {
   const { assertRendererUiContracts } = await loadHarness();
   const healthyUi = {
-    heroSummaryGap: 16,
+    heroSummaryGap: 12,
+    summaryStatusGap: 12,
     systems: {
       environmentFullWidth: true,
       healthCollapsed: true,
@@ -94,8 +95,12 @@ test('renderer UI contract rejects collapsed-panel and tile-alignment regression
 
   assert.doesNotThrow(() => assertRendererUiContracts(healthyUi));
   assert.throws(
-    () => assertRendererUiContracts({ ...healthyUi, heroSummaryGap: 12 }),
-    /hero.*summary.*16/i
+    () => assertRendererUiContracts({ ...healthyUi, heroSummaryGap: 16 }),
+    /hero.*summary.*12/i
+  );
+  assert.throws(
+    () => assertRendererUiContracts({ ...healthyUi, summaryStatusGap: 16 }),
+    /summary.*status.*12/i
   );
   assert.throws(
     () => assertRendererUiContracts({ ...healthyUi, systems: { ...healthyUi.systems, healthCollapsed: false } }),

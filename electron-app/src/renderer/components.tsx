@@ -52,6 +52,7 @@ export function defaultSettings(): VisibleSettings {
     shopOwnershipEnabled: true,
     auctionEventAlwaysRedEnabled: true,
     auctionPreviewRefreshEnabled: true,
+    auctionPreviewRefreshHotkey: 'R',
     treasureIdentifyBestValueAssistEnabled: true,
     breakthroughRerollEnabled: true,
     craftRerollEnabled: true,

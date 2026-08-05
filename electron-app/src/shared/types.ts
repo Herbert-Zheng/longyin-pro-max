@@ -277,6 +277,7 @@ export interface VisibleSettings {
   shopOwnershipEnabled: boolean;
   auctionEventAlwaysRedEnabled: boolean;
   auctionPreviewRefreshEnabled: boolean;
+  auctionPreviewRefreshHotkey: string;
   treasureIdentifyBestValueAssistEnabled: boolean;
   breakthroughRerollEnabled: boolean;
   craftRerollEnabled: boolean;

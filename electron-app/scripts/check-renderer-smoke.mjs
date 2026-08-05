@@ -111,8 +111,11 @@ export function assertRendererHealthy(snapshot, events) {
 }
 
 export function assertRendererUiContracts(snapshot) {
-  if (Math.abs((snapshot?.heroSummaryGap ?? 0) - 16) > 1) {
-    throw new Error(`Hero to summary spacing must remain 16px (received ${snapshot?.heroSummaryGap ?? 'missing'}px).`);
+  if (Math.abs((snapshot?.heroSummaryGap ?? 0) - 12) > 1) {
+    throw new Error(`Hero to summary spacing must remain 12px (received ${snapshot?.heroSummaryGap ?? 'missing'}px).`);
+  }
+  if (Math.abs((snapshot?.summaryStatusGap ?? 0) - 12) > 1) {
+    throw new Error(`Summary to status spacing must remain 12px (received ${snapshot?.summaryStatusGap ?? 'missing'}px).`);
   }
   if (!snapshot?.systems?.environmentFullWidth) {
     throw new Error(`Systems environment card must span the full grid width (${snapshot?.systems?.gridWidth ?? 'missing'}px grid, ${snapshot?.systems?.environmentWidth ?? 'missing'}px card).`);
@@ -278,10 +281,16 @@ async function readRendererUiContracts(cdp) {
     expression: `(() => {
       const hero = document.querySelector('.workspace__hero');
       const summary = document.querySelector('.summary-grid');
-      const workspace = document.querySelector('.workspace');
+      const status = document.querySelector('.status-strip');
+      const heroRect = hero?.getBoundingClientRect();
+      const summaryRect = summary?.getBoundingClientRect();
+      const statusRect = status?.getBoundingClientRect();
       return {
-        heroSummaryGap: hero && summary && workspace
-          ? Math.round(parseFloat(getComputedStyle(workspace).rowGap) + parseFloat(getComputedStyle(summary).marginTop))
+        heroSummaryGap: heroRect && summaryRect
+          ? Math.round(summaryRect.top - heroRect.bottom)
+          : -1,
+        summaryStatusGap: summaryRect && statusRect
+          ? Math.round(statusRect.top - summaryRect.bottom)
           : -1
       };
     })()`,

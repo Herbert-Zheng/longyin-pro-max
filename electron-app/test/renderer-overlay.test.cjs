@@ -66,7 +66,7 @@ test('OTA completion is only emitted after the restarted app consumes the update
   assert.doesNotMatch(main, /更新包已准备完成[^\n]+emitUpdateProgress\('complete'/);
 });
 
-test('renderer exposes commerce and assist toggles without legacy shortcut controls', () => {
+test('renderer exposes commerce and assist controls with only the supported auction shortcut', () => {
   const renderer = readSource('src/renderer/App.tsx');
   const controlBindings = [
     'treasureTradeHelperEnabled',
@@ -76,6 +76,7 @@ test('renderer exposes commerce and assist toggles without legacy shortcut contr
     'shopOwnershipEnabled',
     'auctionEventAlwaysRedEnabled',
     'auctionPreviewRefreshEnabled',
+    'auctionPreviewRefreshHotkey',
     'treasureIdentifyBestValueAssistEnabled'
   ];
 
@@ -108,6 +109,7 @@ test('renderer exposes commerce and assist toggles without legacy shortcut contr
     '启用店铺产业与买断',
     '拍卖会固定红色等级',
     '启用拍卖预览免费刷新',
+    '拍卖刷新快捷键',
     '启用鉴宝最高鉴定价辅助'
   ]) {
     assert.match(renderer, new RegExp(`label="${label}"`), `missing independent label: ${label}`);
@@ -122,16 +124,18 @@ test('renderer exposes commerce and assist toggles without legacy shortcut contr
   assert.match(renderer, /事件难度及按等级生成的拍品会相应提高/);
   assert.match(renderer, /关闭后恢复原版随机等级/);
 
-  assert.match(renderer, /hint="在珍宝铺中汇总购物车内珍宝的数量、买入价、鉴定费、预计卖出价与预计利润。"/);
+  assert.match(renderer, /hint="在珍宝铺中汇总购物车内珍宝的数量、实际买入价、括号估价代入原版公式后的预计卖出价与预计利润。"/);
+  assert.match(renderer, /hint="只把鉴定学识要求不高于当前学识、且按原版买卖价重算后有利润的未鉴定珍宝加入购物车；不会替你结账。"/);
+  assert.doesNotMatch(renderer, /鉴定费/);
   assert.match(renderer, /hint="在商店内显示材料扫货按钮和筛选菜单；只批量加入购物车，仍需手动结账。"/);
   assert.match(renderer, /hint="0 表示不限；1–5 表示只加入达到该品级的材料。"/);
   assert.match(renderer, /hint="0 表示不限；1–5 表示只加入达到该等级的材料。"/);
   assert.match(renderer, /hint="在商店界面显示产业信息与买断按钮；关闭后隐藏相关入口。"/);
   assert.match(renderer, /hint="在拍卖展品预览窗口增加不限次数的免费刷新按钮。"/);
+  assert.match(renderer, /hint="只在拍卖展品预览窗口生效；填写 Unity KeyCode 名称，例如 R 或 F8。"/);
   assert.match(renderer, /hint="按鼠标悬浮括号内的玩家鉴定价选择最高项；最终确认仍需手动完成。"/);
 
   for (const removedBinding of [
-    'auctionPreviewRefreshHotkey',
     'auctionPreviewRefreshRequireAlt',
     'treasureIdentifyBestValueHotkey',
     'treasureIdentifyBestValueRequireAlt'
@@ -214,15 +218,20 @@ test('commerce settings use readable groups without legacy shortcut controls', (
     renderer,
     /label="扫货最低品级"[\s\S]{0,400}disabled=\{!settings\.materialAutoBuyEnabled\}/
   );
-  assert.doesNotMatch(renderer, /拍卖刷新主键|拍卖刷新需要按住 Alt/);
+  assert.doesNotMatch(renderer, /拍卖刷新需要按住 Alt/);
   assert.doesNotMatch(renderer, /最高估值选择主键|最高估值选择需要按住 Alt/);
 });
 
 test('renderer settings pages use scoped, aligned tiles without stretching cards', () => {
   const renderer = readSource('src/renderer/App.tsx');
   const styles = readSource('src/renderer/styles.css');
+  const smoke = readSource('scripts/check-renderer-smoke.mjs');
 
-  assert.match(styles, /\.workspace__hero\s*\+\s*\.summary-grid\s*\{\s*margin-top:\s*4px;/);
+  assert.match(styles, /\.workspace\s*\{[\s\S]*?gap:\s*12px;/);
+  assert.match(styles, /\.workspace__hero\s*\+\s*\.summary-grid\s*\{[\s\S]*?margin-top:\s*16px;/);
+  assert.match(smoke, /summaryRect\.top\s*-\s*heroRect\.bottom/);
+  assert.match(smoke, /statusRect\.top\s*-\s*summaryRect\.bottom/);
+  assert.doesNotMatch(smoke, /rowGap\s*\+/);
   assert.match(renderer, /className="page-grid page-grid--systems page-grid--settings"/);
   assert.match(renderer, /className="page-grid page-grid--settings"/);
   assert.match(styles, /\.page-grid--settings\s*\{[\s\S]*?align-items:\s*start;/);

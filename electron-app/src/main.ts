@@ -82,6 +82,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   shopOwnershipEnabled: true,
   auctionEventAlwaysRedEnabled: true,
   auctionPreviewRefreshEnabled: true,
+  auctionPreviewRefreshHotkey: 'R',
   treasureIdentifyBestValueAssistEnabled: true,
   breakthroughRerollEnabled: true,
   craftRerollEnabled: true,

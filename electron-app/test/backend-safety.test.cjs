@@ -556,7 +556,7 @@ test('craft reroll reads only the Craft section and round-trips', async (t) => {
   assert.doesNotMatch(text, /\[Craft\][\s\S]*?^(?:RerollHotkey|RerollRequireAlt)\s*=/m);
 });
 
-test('commerce and assist toggles have safe defaults without legacy shortcut fields', async (t) => {
+test('commerce and assist settings have safe defaults with only the supported auction shortcut', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
@@ -571,6 +571,7 @@ test('commerce and assist toggles have safe defaults without legacy shortcut fie
       shopOwnershipEnabled: settings.shopOwnershipEnabled,
       auctionEventAlwaysRedEnabled: settings.auctionEventAlwaysRedEnabled,
       auctionPreviewRefreshEnabled: settings.auctionPreviewRefreshEnabled,
+      auctionPreviewRefreshHotkey: settings.auctionPreviewRefreshHotkey,
       treasureIdentifyBestValueAssistEnabled: settings.treasureIdentifyBestValueAssistEnabled
     },
     {
@@ -581,11 +582,11 @@ test('commerce and assist toggles have safe defaults without legacy shortcut fie
       shopOwnershipEnabled: true,
       auctionEventAlwaysRedEnabled: true,
       auctionPreviewRefreshEnabled: true,
+      auctionPreviewRefreshHotkey: 'R',
       treasureIdentifyBestValueAssistEnabled: true
     }
   );
   for (const removedKey of [
-    'auctionPreviewRefreshHotkey',
     'auctionPreviewRefreshRequireAlt',
     'treasureIdentifyBestValueHotkey',
     'treasureIdentifyBestValueRequireAlt'
@@ -594,7 +595,7 @@ test('commerce and assist toggles have safe defaults without legacy shortcut fie
   }
 });
 
-test('commerce and assist settings ignore legacy shortcut values in every INI section', async (t) => {
+test('commerce and assist settings read the supported auction shortcut only from its owning section', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await writeFile(
@@ -647,6 +648,7 @@ test('commerce and assist settings ignore legacy shortcut values in every INI se
       shopOwnershipEnabled: settings.shopOwnershipEnabled,
       auctionEventAlwaysRedEnabled: settings.auctionEventAlwaysRedEnabled,
       auctionPreviewRefreshEnabled: settings.auctionPreviewRefreshEnabled,
+      auctionPreviewRefreshHotkey: settings.auctionPreviewRefreshHotkey,
       treasureIdentifyBestValueAssistEnabled: settings.treasureIdentifyBestValueAssistEnabled
     },
     {
@@ -657,11 +659,11 @@ test('commerce and assist settings ignore legacy shortcut values in every INI se
       shopOwnershipEnabled: false,
       auctionEventAlwaysRedEnabled: false,
       auctionPreviewRefreshEnabled: false,
+      auctionPreviewRefreshHotkey: 'T',
       treasureIdentifyBestValueAssistEnabled: false
     }
   );
   for (const removedKey of [
-    'auctionPreviewRefreshHotkey',
     'auctionPreviewRefreshRequireAlt',
     'treasureIdentifyBestValueHotkey',
     'treasureIdentifyBestValueRequireAlt'
@@ -670,7 +672,7 @@ test('commerce and assist settings ignore legacy shortcut values in every INI se
   }
 });
 
-test('saving commerce and assist settings removes owning-section shortcuts without touching decoys', async (t) => {
+test('saving commerce and assist settings round-trips the auction shortcut and removes obsolete shortcut fields without touching decoys', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
@@ -733,6 +735,7 @@ test('saving commerce and assist settings removes owning-section shortcuts witho
     shopOwnershipEnabled: false,
     auctionEventAlwaysRedEnabled: false,
     auctionPreviewRefreshEnabled: false,
+    auctionPreviewRefreshHotkey: 'Y',
     treasureIdentifyBestValueAssistEnabled: false
   });
   const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
@@ -744,9 +747,9 @@ test('saving commerce and assist settings removes owning-section shortcuts witho
   assert.equal(saved.shopOwnershipEnabled, false);
   assert.equal(saved.auctionEventAlwaysRedEnabled, false);
   assert.equal(saved.auctionPreviewRefreshEnabled, false);
+  assert.equal(saved.auctionPreviewRefreshHotkey, 'Y');
   assert.equal(saved.treasureIdentifyBestValueAssistEnabled, false);
   for (const removedKey of [
-    'auctionPreviewRefreshHotkey',
     'auctionPreviewRefreshRequireAlt',
     'treasureIdentifyBestValueHotkey',
     'treasureIdentifyBestValueRequireAlt'
@@ -763,9 +766,9 @@ test('saving commerce and assist settings removes owning-section shortcuts witho
   assert.match(text, /^\[Auction\]$/m);
   assert.match(text, /^EventAlwaysRedEnabled = false$/m);
   assert.match(text, /^PreviewRefreshEnabled = false$/m);
+  assert.match(text, /^PreviewRefreshHotkey = Y$/m);
   assert.match(text, /^\[TreasureIdentify\]$/m);
   assert.match(text, /^BestValueAssistEnabled = false$/m);
-  assert.doesNotMatch(text, /\[Auction\][\s\S]*?^PreviewRefreshHotkey\s*=/m);
   assert.doesNotMatch(text, /\[Auction\][\s\S]*?^PreviewRefreshRequireAlt\s*=/m);
   assert.doesNotMatch(text, /\[TreasureIdentify\][\s\S]*?^BestValueHotkey\s*=/m);
   assert.doesNotMatch(text, /\[TreasureIdentify\][\s\S]*?^BestValueRequireAlt\s*=/m);

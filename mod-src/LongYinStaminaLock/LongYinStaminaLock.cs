@@ -112,6 +112,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<int> _materialPurchaseMinRareLv = null!;
     private static ConfigEntry<int> _materialPurchaseMinItemLv = null!;
     private static ConfigEntry<bool> _auctionPreviewRefreshEnabled = null!;
+    private static ConfigEntry<KeyCode> _auctionPreviewRefreshHotkey = null!;
     private static ConfigEntry<bool> _auctionEventAlwaysRedEnabled = null!;
     private static ConfigEntry<bool> _treasureIdentifyBestValueAssistEnabled = null!;
     private static ConfigEntry<bool> _breakthroughRerollEnabled = null!;
@@ -426,12 +427,10 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         public int BuyPrice { get; init; }
         public int CurrentSellPrice { get; init; }
         public int IdentifiedSellPrice { get; init; }
-        public int IdentifyCost { get; init; }
         public int AppraisedValue { get; init; }
-        public float SkillBuyFactor { get; init; }
-        public float SkillSellFactor { get; init; }
-        public int NetProfit => IdentifiedSellPrice - BuyPrice - IdentifyCost;
-        public int IdentifyGain => IdentifiedSellPrice - CurrentSellPrice - IdentifyCost;
+        public float PlayerKnowledge { get; init; }
+        public float IdentifyKnowledgeNeed { get; init; }
+        public int NetProfit => IdentifiedSellPrice - BuyPrice;
     }
 
     private sealed class TreasureTradeCartSummary
@@ -440,9 +439,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         public int TreasureItemCount { get; set; }
         public int UnidentifiedTreasureCount { get; set; }
         public long BuyTotal { get; set; }
-        public long IdentifyCostTotal { get; set; }
         public long EstimatedSellTotal { get; set; }
-        public long EstimatedProfit => EstimatedSellTotal - BuyTotal - IdentifyCostTotal;
+        public long EstimatedProfit => EstimatedSellTotal - BuyTotal;
     }
 
     private sealed class CraftRewardSelection
@@ -606,13 +604,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _carryWeightCap = Config.Bind("Inventory", "CarryWeightCap", 100000f, "Minimum carry-weight cap applied to the player inventory. Set to 0 to disable.");
         _ignoreCarryWeight = Config.Bind("Inventory", "IgnoreCarryWeight", false, "When true, forces the player inventory's current carried weight to 0.");
         _merchantCarryCash = Config.Bind("Commerce", "MerchantCarryCash", 100000, "Minimum cash carried by NPC shop merchants while a Shop trade window is open. Set to 0 to disable.");
-        _treasureTradeHelperEnabled = Config.Bind("Commerce", "TreasureTradeHelperEnabled", true, "Shows a treasure-cart summary with item count, purchase cost, appraisal cost, expected resale value, and projected profit.");
+        _treasureTradeHelperEnabled = Config.Bind("Commerce", "TreasureTradeHelperEnabled", true, "Shows a treasure-cart summary with item count, purchase cost, expected resale value, and projected profit.");
         _treasureAutoTradeEnabled = Config.Bind("Commerce", "TreasureAutoTradeEnabled", true, "Automatically adds unidentified treasures estimated profitable from the player-appraised parenthesized value when a trade shop opens.");
         _materialAutoBuyEnabled = Config.Bind("Commerce", "MaterialAutoBuyEnabled", true, "Adds the in-shop material sweep button and its rarity and quality filters.");
         _shopOwnershipEnabled = Config.Bind("Commerce", "ShopOwnershipEnabled", true, "Shows the shop ownership overlay and enables buying out the current shop.");
         _materialPurchaseMinRareLv = Config.Bind("Commerce", "MaterialPurchaseMinRareLv", 0, "Minimum material rarity tier for the in-shop material sweep button. Values are clamped to 0-5.");
         _materialPurchaseMinItemLv = Config.Bind("Commerce", "MaterialPurchaseMinItemLv", 0, "Minimum material item-quality tier for the in-shop material sweep button. Values are clamped to 0-5.");
         _auctionPreviewRefreshEnabled = Config.Bind("Auction", "PreviewRefreshEnabled", true, "Adds a free unlimited refresh button to the auction exhibit preview window.");
+        _auctionPreviewRefreshHotkey = Config.Bind("Auction", "PreviewRefreshHotkey", KeyCode.R, "Single-key shortcut for free refresh while the auction exhibit preview window is visible.");
         _auctionEventAlwaysRedEnabled = Config.Bind("Auction", "EventAlwaysRedEnabled", true, "When true, the 拍卖大会 world event is generated at difficulty 10, the red highest event grade, including its grade-dependent auction content.");
         _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the treasure with the highest player-appraised value shown in parentheses. Confirmation remains manual.");
         _breakthroughRerollEnabled = Config.Bind("Breakthrough", "RerollEnabled", true, "Adds a button that rebuilds the current breakthrough choices without confirming a choice or consuming money, items, or time.");
@@ -738,7 +737,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var auctionPreviewShowPatched = PatchMethod(typeof(PlotController), nameof(PlotController.ShowAuctionItem), Type.EmptyTypes, null, nameof(ShowAuctionItemPostfix));
         var auctionPreviewHidePatched = PatchMethod(typeof(PlotController), nameof(PlotController.HidePlotItem), Type.EmptyTypes, null, nameof(HidePlotItemPostfix));
         PatchMethod(typeof(WorldEventController), nameof(WorldEventController.GetWorldEventRandomDifficulty), new[] { typeof(WorldEventDataBase) }, nameof(AuctionWorldEventDifficultyPrefix), null);
-        PatchMethod(typeof(PlotController), "Update", Type.EmptyTypes, null, nameof(PlotControllerUpdatePostfix));
         var auctionRefreshGatePatched = PatchMethod(typeof(PlotController), nameof(PlotController.FreshAuctionItem), Type.EmptyTypes, nameof(FreshAuctionItemPrefix), null);
         var identifyShowPatched = PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.ShowIdentifyMatchUI), new[] { typeof(float), typeof(string) }, null, nameof(ShowIdentifyMatchUiPostfix));
         var identifyHidePatched = PatchMethod(typeof(IdentifyMatchController), nameof(IdentifyMatchController.HideIdentifyMatchUI), Type.EmptyTypes, null, nameof(HideIdentifyMatchUiPostfix));
@@ -961,7 +959,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo(
             $"Material sweep starts at minimum rarity {GetMaterialRareLevelName(GetMaterialPurchaseRareLevel())} " +
             $"and minimum quality {GetMaterialItemLevelName(GetMaterialPurchaseItemLevel())}.");
-        Log.LogInfo($"Auction exhibit preview refresh button starts {(_auctionPreviewRefreshEnabled.Value ? "ON" : "OFF")}.");
+        Log.LogInfo(
+            $"Auction exhibit preview refresh starts {(_auctionPreviewRefreshEnabled.Value ? "ON" : "OFF")} " +
+            $"with shortcut {_auctionPreviewRefreshHotkey.Value} while the preview is visible.");
         Log.LogInfo($"Auction event fixed-red grade starts {(_auctionEventAlwaysRedEnabled.Value ? "ON" : "OFF")} at difficulty {AuctionRedEventDifficulty:0.###}.");
         Log.LogInfo($"Treasure identify best-value button starts {(_treasureIdentifyBestValueAssistEnabled.Value ? "ON" : "OFF")}; confirmation remains manual.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
@@ -2032,14 +2032,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         ScheduleAuctionPreviewRefreshButton();
     }
 
-    private static void PlotControllerUpdatePostfix()
-    {
-        if (_auctionPreviewOpen)
-        {
-            UpdateAuctionPreviewRefreshAssist();
-        }
-    }
-
     private static bool OverlayButtonOnPointerClickPrefix(Button __instance, PointerEventData eventData)
     {
         if (__instance?.gameObject == null)
@@ -2246,6 +2238,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         if (controller == null)
         {
             _auctionPreviewOpen = false;
+            return;
+        }
+
+        if (Input.GetKeyDown(_auctionPreviewRefreshHotkey.Value))
+        {
+            TryRefreshAuctionPreview("hotkey");
             return;
         }
 
@@ -5431,8 +5429,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
-        if (!TryGetActiveShopTradeUi(out var tradeUi) ||
-            !TryGetTreasureTradeShopContext(tradeUi, out _, out var identifyCost))
+        if (!TryGetActiveShopTradeUi(out var tradeUi))
         {
             HideTreasureTradeOverlay();
             return;
@@ -5440,14 +5437,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         if (_treasureTradeHelperEnabled.Value)
         {
-            UpdateTreasureTradeOverlay(tradeUi, identifyCost);
+            UpdateTreasureTradeOverlay(tradeUi);
         }
         else
         {
             HideTreasureTradeOverlay();
         }
 
-        TryRunTreasureAutoTrade(tradeUi, identifyCost);
+        TryRunTreasureAutoTrade(tradeUi);
     }
 
     private static bool TryGetActiveShopTradeUi(out TradeUIController tradeUi)
@@ -5478,28 +5475,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             return false;
         }
-    }
-
-    private static bool TryGetTreasureTradeShopContext(TradeUIController tradeUi, out AreaBuildingData? building, out int identifyCost)
-    {
-        var buildingUi = BuildingUIController.Instance;
-        building = buildingUi?.targetBuildingData;
-        identifyCost = 0;
-        if (tradeUi == null)
-        {
-            return false;
-        }
-
-        try
-        {
-            identifyCost = Math.Max(0, buildingUi?.GetBuildingIdentifyMoney() ?? 0);
-        }
-        catch
-        {
-            identifyCost = 0;
-        }
-
-        return true;
     }
 
     private static void CraftUiOpenPostfix(CraftUIController __instance)
@@ -5594,7 +5569,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         TryRepeatCraftPlotItemReward(__instance, __state);
     }
 
-    private static void UpdateTreasureTradeOverlay(TradeUIController tradeUi, int identifyCost)
+    private static void UpdateTreasureTradeOverlay(TradeUIController tradeUi)
     {
         EnsureTreasureTradeOverlay(tradeUi);
         if (_treasureTradeOverlayLabel == null)
@@ -5602,7 +5577,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
-        var summary = BuildTreasureTradeCartSummary(tradeUi, identifyCost);
+        var summary = BuildTreasureTradeCartSummary(tradeUi);
         var overlayText = BuildTreasureTradeCartSummaryText(summary);
         var moneyMarker = summary.TreasureItemCount > 0 ? $"买入{TradeInfoMoneyGap}" : null;
         SetTradeInfoLabelText(
@@ -5614,7 +5589,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _treasureTradeOverlayLabel.gameObject.SetActive(true);
     }
 
-    private static TreasureTradeCartSummary BuildTreasureTradeCartSummary(TradeUIController tradeUi, int identifyCost)
+    private static TreasureTradeCartSummary BuildTreasureTradeCartSummary(TradeUIController tradeUi)
     {
         var summary = new TreasureTradeCartSummary
         {
@@ -5632,23 +5607,20 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             summary.TreasureItemCount++;
             var buyPrice = Math.Max(0, TryGetTradePriceForItem(icon, item, buy: true, fallback: 0));
             var estimatedSellPrice = Math.Max(0, TryGetTradePriceForItem(icon, item, buy: false, fallback: 0));
-            var itemIdentifyCost = 0;
 
             if (IsUnidentifiedTreasure(item))
             {
                 summary.UnidentifiedTreasureCount++;
-                itemIdentifyCost = Math.Max(0, identifyCost);
                 if (TryGetTreasureAppraisedValue(item, out var appraisedValue))
                 {
                     estimatedSellPrice = EstimateTreasureSellPriceFromAppraisedValue(
+                        icon,
                         item,
-                        estimatedSellPrice,
                         appraisedValue);
                 }
             }
 
             summary.BuyTotal += buyPrice;
-            summary.IdentifyCostTotal += itemIdentifyCost;
             summary.EstimatedSellTotal += estimatedSellPrice;
         }
 
@@ -5659,10 +5631,10 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         return
             $"<b><color=#E8B45B>珍宝购物车</color></b>　共 {summary.CartItemCount} 件／珍宝 {summary.TreasureItemCount} 件／未鉴定 {summary.UnidentifiedTreasureCount} 件\n" +
-            $"买入{TradeInfoMoneyGap}{summary.BuyTotal}　鉴定 {summary.IdentifyCostTotal}　预计鉴后卖出(括号估价×当前交易比例) {summary.EstimatedSellTotal}　预计利润 {FormatSignedLong(summary.EstimatedProfit)}";
+            $"买入{TradeInfoMoneyGap}{summary.BuyTotal}　预计鉴后卖出(括号估价代入原版卖价) {summary.EstimatedSellTotal}　预计利润 {FormatSignedLong(summary.EstimatedProfit)}";
     }
 
-    private static bool TryAnalyzeTreasureTradeIcon(ItemIconController? icon, int identifyCost, out TreasureTradeOpportunity? opportunity)
+    private static bool TryAnalyzeTreasureTradeIcon(ItemIconController? icon, out TreasureTradeOpportunity? opportunity)
     {
         opportunity = null;
         if (icon == null)
@@ -5672,6 +5644,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         var item = icon.itemData;
         if (!IsUnidentifiedTreasure(item))
+        {
+            return false;
+        }
+
+        if (!CanPlayerIdentifyTreasure(item, out var playerKnowledge, out var identifyKnowledgeNeed))
         {
             return false;
         }
@@ -5688,11 +5665,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return false;
         }
 
-        var skillBuyFactor = GetSkillTradeFactor(buy: true);
-        var skillSellFactor = GetSkillTradeFactor(buy: false);
         var identifiedSellPrice = EstimateTreasureSellPriceFromAppraisedValue(
+            icon,
             item,
-            currentSellPrice,
             appraisedValue);
 
         opportunity = new TreasureTradeOpportunity
@@ -5703,31 +5678,41 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             BuyPrice = buyPrice,
             CurrentSellPrice = currentSellPrice,
             IdentifiedSellPrice = identifiedSellPrice,
-            IdentifyCost = Math.Max(0, identifyCost),
             AppraisedValue = Math.Max(0, appraisedValue),
-            SkillBuyFactor = skillBuyFactor,
-            SkillSellFactor = skillSellFactor
+            PlayerKnowledge = playerKnowledge,
+            IdentifyKnowledgeNeed = identifyKnowledgeNeed
         };
 
         return true;
     }
 
-    private static int EstimateTreasureSellPriceFromAppraisedValue(ItemData item, int currentSellPrice, int appraisedValue)
+    private static int EstimateTreasureSellPriceFromAppraisedValue(ItemIconController icon, ItemData item, int appraisedValue)
     {
-        if (appraisedValue <= 0)
+        if (icon == null || item == null || appraisedValue <= 0)
         {
-            return Math.Max(0, currentSellPrice);
+            return 0;
         }
 
-        var baseValue = Math.Max(1, item.value);
-        if (currentSellPrice <= 0)
+        var originalValue = item.value;
+        try
         {
-            return Math.Max(appraisedValue, 0);
+            // GetItemPrice(false) is the authoritative game formula. Substituting the
+            // player's parenthesized appraisal as value makes speech, favor, current
+            // town safety, local treasure pricing, and UI rates apply exactly once.
+            item.value = Math.Max(0, appraisedValue);
+            return TryGetTradePriceForItem(icon, item, buy: false, fallback: 0);
         }
-
-        var sellRatio = Math.Max(0d, (double)currentSellPrice / baseValue);
-        var estimated = (int)Math.Round(appraisedValue * sellRatio, MidpointRounding.AwayFromZero);
-        return Math.Max(currentSellPrice, estimated);
+        finally
+        {
+            item.value = originalValue;
+            try
+            {
+                icon.needRefreshPriceIcon = true;
+            }
+            catch
+            {
+            }
+        }
     }
 
     private static void EnsureTreasureTradeOverlay(TradeUIController tradeUi)
@@ -7076,7 +7061,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return true;
     }
 
-    private static void TryRunTreasureAutoTrade(TradeUIController tradeUi, int identifyCost)
+    private static void TryRunTreasureAutoTrade(TradeUIController tradeUi)
     {
         if (!_treasureAutoTradeEnabled.Value || _treasureTradeBusy || _treasureTradeAutoProcessed)
         {
@@ -7112,7 +7097,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var opportunities = new List<TreasureTradeOpportunity>();
         foreach (var icon in EnumerateTradeIcons(tradeUi.rightList))
         {
-            if (!TryAnalyzeTreasureTradeIcon(icon, identifyCost, out var opportunity) || opportunity == null)
+            if (!TryAnalyzeTreasureTradeIcon(icon, out var opportunity) || opportunity == null)
             {
                 continue;
             }
@@ -7176,7 +7161,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 LoggerInstance.LogInfo(
                     $"Treasure trade cart add verified: item={TryGetItemDisplayName(opportunity.Item)}, buy={opportunity.BuyPrice}, " +
                     $"baseValue={Math.Max(0, opportunity.Item.value)}, currentSell={opportunity.CurrentSellPrice}, " +
-                    $"appraised={opportunity.AppraisedValue}, identifyCost={opportunity.IdentifyCost}, " +
+                    $"appraised={opportunity.AppraisedValue}, identifyKnowledge={opportunity.IdentifyKnowledgeNeed:0.###}/{opportunity.PlayerKnowledge:0.###}, " +
                     $"sellIdentified={opportunity.IdentifiedSellPrice}, net={opportunity.NetProfit}, cart={cartCountBefore}->{cartCountAfter}.");
             }
         }
@@ -7375,6 +7360,43 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return true;
     }
 
+    private static bool CanPlayerIdentifyTreasure(
+        ItemData? item,
+        out float playerKnowledge,
+        out float identifyKnowledgeNeed)
+    {
+        playerKnowledge = 0f;
+        identifyKnowledgeNeed = float.PositiveInfinity;
+        var player = TryGetPlayerHero();
+        var treasureData = item?.treasureData;
+        if (player == null || treasureData == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            playerKnowledge = player.GetIdentifyKnowledge();
+            identifyKnowledgeNeed = treasureData.identifyKnowledgeNeed;
+            if (float.IsNaN(playerKnowledge) ||
+                float.IsInfinity(playerKnowledge) ||
+                float.IsNaN(identifyKnowledgeNeed) ||
+                float.IsInfinity(identifyKnowledgeNeed))
+            {
+                return false;
+            }
+
+            return identifyKnowledgeNeed <= playerKnowledge;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"Treasure identification knowledge check failed for {TryGetItemDisplayName(item)}: " +
+                DescribeCompatibilityException(ex));
+            return false;
+        }
+    }
+
     private static bool TryGetTreasureAppraisedValue(ItemData? item, out int appraisedValue)
     {
         appraisedValue = 0;
@@ -7445,32 +7467,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             {
                 yield break;
             }
-        }
-    }
-
-    private static float GetSkillTradeFactor(bool buy)
-    {
-        var player = TryGetPlayerHero();
-        if (player == null)
-        {
-            return 1f;
-        }
-
-        try
-        {
-            return Math.Max(0.01f, player.GetTradeValueRate(buy, true));
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            return Math.Max(0.01f, player.GetTradeValueRate(buy));
-        }
-        catch
-        {
-            return 1f;
         }
     }
 

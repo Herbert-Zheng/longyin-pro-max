@@ -80,6 +80,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   shopOwnershipEnabled: true,
   auctionEventAlwaysRedEnabled: true,
   auctionPreviewRefreshEnabled: true,
+  auctionPreviewRefreshHotkey: 'R',
   treasureIdentifyBestValueAssistEnabled: true,
   breakthroughRerollEnabled: true,
   craftRerollEnabled: true,
@@ -664,6 +665,7 @@ ShopOwnershipEnabled = ${boolText(settings.shopOwnershipEnabled)}
 [Auction]
 EventAlwaysRedEnabled = ${boolText(settings.auctionEventAlwaysRedEnabled)}
 PreviewRefreshEnabled = ${boolText(settings.auctionPreviewRefreshEnabled)}
+PreviewRefreshHotkey = ${settings.auctionPreviewRefreshHotkey}
 
 [TreasureIdentify]
 BestValueAssistEnabled = ${boolText(settings.treasureIdentifyBestValueAssistEnabled)}
@@ -891,6 +893,10 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     shopOwnershipEnabled: input.shopOwnershipEnabled,
     auctionEventAlwaysRedEnabled: input.auctionEventAlwaysRedEnabled,
     auctionPreviewRefreshEnabled: input.auctionPreviewRefreshEnabled,
+    auctionPreviewRefreshHotkey: normalizeHotkey(
+      input.auctionPreviewRefreshHotkey,
+      DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshHotkey
+    ),
     treasureIdentifyBestValueAssistEnabled: input.treasureIdentifyBestValueAssistEnabled,
     breakthroughRerollEnabled: input.breakthroughRerollEnabled,
     craftRerollEnabled: input.craftRerollEnabled,
@@ -1005,6 +1011,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       auctionSection,
       'PreviewRefreshEnabled',
       DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshEnabled
+    ),
+    auctionPreviewRefreshHotkey: readString(
+      auctionSection,
+      'PreviewRefreshHotkey',
+      DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshHotkey
     ),
     treasureIdentifyBestValueAssistEnabled: readBool(
       treasureIdentifySection,
@@ -1458,7 +1469,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'PreviewRefreshEnabled',
     boolText(normalized.auctionPreviewRefreshEnabled)
   );
-  nextMain = removeIniSectionValue(nextMain, 'Auction', 'PreviewRefreshHotkey');
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Auction',
+    'PreviewRefreshHotkey',
+    normalized.auctionPreviewRefreshHotkey
+  );
   nextMain = removeIniSectionValue(nextMain, 'Auction', 'PreviewRefreshRequireAlt');
   nextMain = removeIniSectionCommentBlock(
     nextMain,

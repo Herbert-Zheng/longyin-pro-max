@@ -1800,13 +1800,13 @@ export function App() {
                       label="显示珍宝购物车汇总"
                       value={settings.treasureTradeHelperEnabled}
                       onChange={(value) => updateSetting('treasureTradeHelperEnabled', value)}
-                      hint="在珍宝铺中汇总购物车内珍宝的数量、买入价、鉴定费、预计卖出价与预计利润。"
+                      hint="在珍宝铺中汇总购物车内珍宝的数量、实际买入价、括号估价代入原版公式后的预计卖出价与预计利润。"
                     />
                     <CheckboxField
                       label="珍宝自动加入购物车"
                       value={settings.treasureAutoTradeEnabled}
                       onChange={(value) => updateSetting('treasureAutoTradeEnabled', value)}
-                      hint="进入珍宝铺时，自动把预估有利润的未鉴定珍宝加入购物车；不会替你结账。"
+                      hint="只把鉴定学识要求不高于当前学识、且按原版买卖价重算后有利润的未鉴定珍宝加入购物车；不会替你结账。"
                     />
                   </div>
                 </Card>
@@ -1896,6 +1896,12 @@ export function App() {
                       value={settings.auctionPreviewRefreshEnabled}
                       onChange={(value) => updateSetting('auctionPreviewRefreshEnabled', value)}
                       hint="在拍卖展品预览窗口增加不限次数的免费刷新按钮。"
+                    />
+                    <TextField
+                      label="拍卖刷新快捷键"
+                      value={settings.auctionPreviewRefreshHotkey}
+                      onChange={(value) => updateSetting('auctionPreviewRefreshHotkey', value)}
+                      hint="只在拍卖展品预览窗口生效；填写 Unity KeyCode 名称，例如 R 或 F8。"
                     />
                     <CheckboxField
                       label="启用鉴宝最高鉴定价辅助"

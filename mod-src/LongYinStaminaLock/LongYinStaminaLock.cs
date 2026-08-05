@@ -14,7 +14,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.33.1")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.34.0")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -58,7 +58,22 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const string MaterialFilterDropdownPanelName = "CodexMaterialFilterDropdownPanel";
     private const string MaterialRareOptionButtonPrefix = "CodexMaterialRareOptionButton:";
     private const string MaterialItemLevelOptionButtonPrefix = "CodexMaterialItemLevelOptionButton:";
+    private const string MaterialAffixFilterButtonName = "CodexMaterialAffixFilterButton";
+    private const string MaterialAffixFilterPanelName = "CodexMaterialAffixFilterPanel";
+    private const string MaterialAffixFilterEnabledButtonName = "CodexMaterialAffixFilterEnabledButton";
+    private const string MaterialAffixFilterAllButtonName = "CodexMaterialAffixFilterAllButton";
+    private const string MaterialAffixFilterAnyButtonName = "CodexMaterialAffixFilterAnyButton";
+    private const string MaterialAffixFilterComposerKindButtonName = "CodexMaterialAffixFilterComposerKindButton";
+    private const string MaterialAffixFilterAddButtonName = "CodexMaterialAffixFilterAddButton";
+    private const string MaterialAffixFilterCloseButtonName = "CodexMaterialAffixFilterCloseButton";
+    private const string MaterialAffixFilterApplyButtonName = "CodexMaterialAffixFilterApplyButton";
+    private const string MaterialAffixFilterCancelButtonName = "CodexMaterialAffixFilterCancelButton";
+    private const string MaterialAffixFilterRuleKindButtonPrefix = "CodexMaterialAffixFilterRuleKindButton:";
+    private const string MaterialAffixFilterRuleDeleteButtonPrefix = "CodexMaterialAffixFilterRuleDeleteButton:";
+    private const int MaterialAffixFilterMaxRuleCount = 4;
+    private const int MaterialAffixFilterMaxTextLength = 40;
     private const string AuctionPreviewRefreshButtonName = "CodexAuctionPreviewRefreshButton";
+    private const string GovernmentStorageRefreshButtonName = "CodexGovernmentStorageRefreshButton";
     private const float AuctionRedEventDifficulty = 10f;
     private const string IdentifyBestTreasureButtonName = "CodexIdentifyBestTreasureButton";
     private const string BreakthroughRerollButtonName = "CodexBreakthroughRerollButton";
@@ -111,9 +126,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<bool> _shopOwnershipEnabled = null!;
     private static ConfigEntry<int> _materialPurchaseMinRareLv = null!;
     private static ConfigEntry<int> _materialPurchaseMinItemLv = null!;
+    private static ConfigEntry<bool> _materialAffixFilterEnabled = null!;
+    private static ConfigEntry<MaterialAffixCombineMode> _materialAffixFilterCombineMode = null!;
+    private static ConfigEntry<string> _materialAffixFilterRulesJson = null!;
     private static ConfigEntry<bool> _auctionPreviewRefreshEnabled = null!;
     private static ConfigEntry<KeyCode> _auctionPreviewRefreshHotkey = null!;
     private static ConfigEntry<bool> _auctionEventAlwaysRedEnabled = null!;
+    private static ConfigEntry<bool> _governmentStorageRefreshEnabled = null!;
+    private static ConfigEntry<KeyCode> _governmentStorageRefreshHotkey = null!;
     private static ConfigEntry<bool> _treasureIdentifyBestValueAssistEnabled = null!;
     private static ConfigEntry<bool> _breakthroughRerollEnabled = null!;
     private static ConfigEntry<bool> _craftRerollEnabled = null!;
@@ -377,6 +397,24 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         public int BuildingId { get; init; }
     }
 
+    private enum MaterialAffixCombineMode
+    {
+        All,
+        Any
+    }
+
+    private enum MaterialAffixMatchKind
+    {
+        Contains,
+        Exact
+    }
+
+    private sealed class MaterialAffixFilterRule
+    {
+        public string Text { get; set; } = string.Empty;
+        public MaterialAffixMatchKind Kind { get; set; }
+    }
+
     private sealed class ExternalOverlayStateFile
     {
         public int version { get; set; }
@@ -513,6 +551,16 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool _auctionPreviewRefreshBusy;
     private static bool _auctionPreviewVisualBoundsDiagnosticLogged;
     private static float _auctionPreviewRefreshButtonReadyAt;
+    private static PlotController? _governmentStoragePlotController;
+    private static GameObject? _governmentStorageRefreshButtonRoot;
+    private static Button? _governmentStorageRefreshButton;
+    private static Text? _governmentStorageRefreshButtonLabel;
+    private static Transform? _governmentStorageRefreshButtonHost;
+    private static bool _governmentStorageRefreshBusy;
+    private static bool _governmentStorageRefreshCreationFailed;
+    private static bool _governmentStorageRefreshHooksReady;
+    private static bool _governmentStorageActiveLookupFailureLogged;
+    private static float _governmentStorageRefreshButtonReadyAt;
     private static IdentifyMatchController? _identifyMatchController;
     private static GameObject? _identifyBestTreasureButtonRoot;
     private static Button? _identifyBestTreasureButton;
@@ -560,8 +608,36 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static GameObject? _materialFilterDropdownPanelRoot;
     private static readonly List<Button> _materialFilterOptionButtons = new();
     private static readonly List<Text> _materialFilterOptionLabels = new();
+    private static GameObject? _materialAffixFilterButtonRoot;
+    private static Button? _materialAffixFilterButton;
+    private static Text? _materialAffixFilterButtonLabel;
+    private static GameObject? _materialAffixFilterPanelRoot;
+    private static Button? _materialAffixFilterEnabledButton;
+    private static Text? _materialAffixFilterEnabledButtonLabel;
+    private static Button? _materialAffixFilterAllButton;
+    private static Text? _materialAffixFilterAllButtonLabel;
+    private static Button? _materialAffixFilterAnyButton;
+    private static Text? _materialAffixFilterAnyButtonLabel;
+    private static Button? _materialAffixFilterComposerKindButton;
+    private static Text? _materialAffixFilterComposerKindButtonLabel;
+    private static Button? _materialAffixFilterAddButton;
+    private static InputField? _materialAffixFilterInput;
+    private static Text? _materialAffixFilterMessageLabel;
+    private static Text? _materialAffixFilterEmptyLabel;
+    private static readonly List<GameObject> _materialAffixFilterRuleRowRoots = new();
+    private static readonly List<Text> _materialAffixFilterRuleLabels = new();
+    private static readonly List<Button> _materialAffixFilterRuleKindButtons = new();
+    private static readonly List<Text> _materialAffixFilterRuleKindLabels = new();
+    private static readonly List<Button> _materialAffixFilterRuleDeleteButtons = new();
+    private static readonly List<MaterialAffixFilterRule> _materialAffixFilterAppliedRules = new();
+    private static readonly List<MaterialAffixFilterRule> _materialAffixFilterDraftRules = new();
     private static bool _materialFilterDropdownOpen;
     private static bool _materialFilterOptionsVisible;
+    private static bool _materialAffixFilterPopupOpen;
+    private static bool _materialAffixFilterDraftEnabled;
+    private static MaterialAffixCombineMode _materialAffixFilterDraftCombineMode;
+    private static MaterialAffixMatchKind _materialAffixFilterComposerKind;
+    private static string _materialAffixFilterDraftMessage = string.Empty;
     private static bool _materialAutoBuyBusy;
     private static bool _materialAutoBuyControlCreationFailed;
     private static bool _tradeActionButtonLookupWarningLogged;
@@ -610,9 +686,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _shopOwnershipEnabled = Config.Bind("Commerce", "ShopOwnershipEnabled", true, "Shows the shop ownership overlay and enables buying out the current shop.");
         _materialPurchaseMinRareLv = Config.Bind("Commerce", "MaterialPurchaseMinRareLv", 0, "Minimum material rarity tier for the in-shop material sweep button. Values are clamped to 0-5.");
         _materialPurchaseMinItemLv = Config.Bind("Commerce", "MaterialPurchaseMinItemLv", 0, "Minimum material item-quality tier for the in-shop material sweep button. Values are clamped to 0-5.");
+        _materialAffixFilterEnabled = Config.Bind("Commerce", "MaterialAffixFilterEnabled", false, "When true, material sweep also applies the configured in-game affix rules.");
+        _materialAffixFilterCombineMode = Config.Bind("Commerce", "MaterialAffixFilterCombineMode", MaterialAffixCombineMode.All, "How material affix rules combine: All requires every rule; Any requires at least one rule.");
+        _materialAffixFilterRulesJson = Config.Bind("Commerce", "MaterialAffixFilterRulesJson", "[]", "JSON rules edited from the in-game material affix filter window.");
         _auctionPreviewRefreshEnabled = Config.Bind("Auction", "PreviewRefreshEnabled", true, "Adds a free unlimited refresh button to the auction exhibit preview window.");
         _auctionPreviewRefreshHotkey = Config.Bind("Auction", "PreviewRefreshHotkey", KeyCode.R, "Single-key shortcut for free refresh while the auction exhibit preview window is visible.");
         _auctionEventAlwaysRedEnabled = Config.Bind("Auction", "EventAlwaysRedEnabled", true, "When true, the 拍卖大会 world event is generated at difficulty 10, the red highest event grade, including its grade-dependent auction content.");
+        _governmentStorageRefreshEnabled = Config.Bind("GovernmentStorage", "RefreshEnabled", true, "Adds a refresh button to the government storage page.");
+        _governmentStorageRefreshHotkey = Config.Bind("GovernmentStorage", "RefreshHotkey", KeyCode.R, "Single-key shortcut that refreshes items only while the government storage page is visible.");
         _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the treasure with the highest player-appraised value shown in parentheses. Confirmation remains manual.");
         _breakthroughRerollEnabled = Config.Bind("Breakthrough", "RerollEnabled", true, "Adds a button that rebuilds the current breakthrough choices without confirming a choice or consuming money, items, or time.");
         _craftRerollEnabled = Config.Bind("Craft", "RerollEnabled", true, "Adds preview-only buttons that rebuild normal crafting or special-enhancement choices without confirming, consuming materials, spending money, or advancing time.");
@@ -658,6 +739,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _freezeDate = Config.Bind("Time", "FreezeDate", false, "Blocks in-game day, month, and year progression.");
         _freezeDateHotkey = Config.Bind("Time", "ToggleFreezeDateHotkey", KeyCode.F10, "Hotkey that toggles date freezing while in game.");
         _outsideBattleSpeedHotkey = Config.Bind("Time", "CycleOutsideBattleSpeedHotkey", KeyCode.F11, "Hotkey that cycles the test speed multiplier outside battle.");
+        LoadMaterialAffixFilterRulesFromConfig();
         _harmony = new Harmony("codex.longyin.staminalock");
         PatchMethod(typeof(ExploreController), "ChangeMoveStep", new[] { typeof(int) }, nameof(ChangeMoveStepPrefix), null);
         PatchMethod(typeof(ExploreController), "ChangeMoveStep", new[] { typeof(int), typeof(bool) }, nameof(ChangeMoveStepWithBoolPrefix), null);
@@ -732,8 +814,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListType), typeof(ItemListData), typeof(ItemListData) }, null, nameof(ShowTradeUiTypedPostfix));
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListData), typeof(ItemListData), typeof(int), typeof(int) }, null, nameof(ShowTradeUiLevelRangePostfix));
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListType), typeof(ItemListData), typeof(ItemListData), typeof(int), typeof(int), typeof(bool), typeof(bool), typeof(float), typeof(float) }, null, nameof(ShowTradeUiFullPostfix));
-        PatchMethod(typeof(TradeUIController), nameof(TradeUIController.HideTradeUI), Type.EmptyTypes, null, nameof(HideTradeUiPostfix));
+        var tradeUiHidePatched = PatchMethod(typeof(TradeUIController), nameof(TradeUIController.HideTradeUI), Type.EmptyTypes, null, nameof(HideTradeUiPostfix));
         PatchMethod(typeof(ItemIconController), nameof(ItemIconController.OnClick), Type.EmptyTypes, null, nameof(ItemIconOnClickPostfix));
+        var governmentStorageShowPatched = PatchMethod(typeof(PlotController), nameof(PlotController.ShowGovernStorage), Type.EmptyTypes, null, nameof(ShowGovernmentStoragePostfix));
         var auctionPreviewShowPatched = PatchMethod(typeof(PlotController), nameof(PlotController.ShowAuctionItem), Type.EmptyTypes, null, nameof(ShowAuctionItemPostfix));
         var auctionPreviewHidePatched = PatchMethod(typeof(PlotController), nameof(PlotController.HidePlotItem), Type.EmptyTypes, null, nameof(HidePlotItemPostfix));
         PatchMethod(typeof(WorldEventController), nameof(WorldEventController.GetWorldEventRandomDifficulty), new[] { typeof(WorldEventDataBase) }, nameof(AuctionWorldEventDifficultyPrefix), null);
@@ -827,6 +910,18 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _relationshipBonusHooksReady = changeFavorPatched && gameControllerUpdatePatched;
         LoggerInstance.LogInfo(
             $"[Compatibility] Relationship bonus: {(_relationshipBonusHooksReady ? "ENABLED (ChangeFavor and deferred update hooks patched)" : "DISABLED (required ChangeFavor or deferred update hook unavailable)")}.");
+        _governmentStorageRefreshHooksReady = governmentStorageShowPatched &&
+            tradeUiHidePatched &&
+            overlayButtonPointerPatched &&
+            gameControllerUpdatePatched;
+        if (!_governmentStorageRefreshHooksReady)
+        {
+            ResetGovernmentStorageRefreshUiState("required hooks unavailable");
+        }
+
+        LoggerInstance.LogInfo(
+            $"[Compatibility] Government storage refresh: {(_governmentStorageRefreshHooksReady ? "ENABLED" : "DISABLED")} " +
+            "(ShowGovernStorage, HideTradeUI, overlay click, and update hooks required).");
         _breakthroughRerollHooksReady = breakthroughChoiceShowPatched &&
             breakthroughChoiceClickPatched &&
             breakthroughBookChoosePatched &&
@@ -960,9 +1055,15 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             $"Material sweep starts at minimum rarity {GetMaterialRareLevelName(GetMaterialPurchaseRareLevel())} " +
             $"and minimum quality {GetMaterialItemLevelName(GetMaterialPurchaseItemLevel())}.");
         Log.LogInfo(
+            $"Material affix filter starts {(_materialAffixFilterEnabled.Value ? "ON" : "OFF")} in {_materialAffixFilterCombineMode.Value} mode " +
+            $"with {_materialAffixFilterAppliedRules.Count} rule(s).");
+        Log.LogInfo(
             $"Auction exhibit preview refresh starts {(_auctionPreviewRefreshEnabled.Value ? "ON" : "OFF")} " +
             $"with shortcut {_auctionPreviewRefreshHotkey.Value} while the preview is visible.");
         Log.LogInfo($"Auction event fixed-red grade starts {(_auctionEventAlwaysRedEnabled.Value ? "ON" : "OFF")} at difficulty {AuctionRedEventDifficulty:0.###}.");
+        Log.LogInfo(
+            $"Government storage refresh starts {(_governmentStorageRefreshEnabled.Value ? "ON" : "OFF")} " +
+            $"with shortcut {_governmentStorageRefreshHotkey.Value} only while that page is visible.");
         Log.LogInfo($"Treasure identify best-value button starts {(_treasureIdentifyBestValueAssistEnabled.Value ? "ON" : "OFF")}; confirmation remains manual.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
         Log.LogInfo($"Extra relationship gain chance starts at {ClampPercent(_extraRelationshipGainChancePercent.Value)}%.");
@@ -2020,6 +2121,19 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return false;
     }
 
+    private static void ShowGovernmentStoragePostfix(PlotController __instance)
+    {
+        if (__instance == null)
+        {
+            return;
+        }
+
+        _governmentStoragePlotController = __instance;
+        _governmentStorageRefreshCreationFailed = false;
+        _governmentStorageActiveLookupFailureLogged = false;
+        _governmentStorageRefreshButtonReadyAt = Time.unscaledTime + 0.2f;
+    }
+
     private static void ShowAuctionItemPostfix(PlotController __instance)
     {
         if (__instance == null)
@@ -2041,6 +2155,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         var buttonName = __instance.gameObject.name;
         var isAuctionRefresh = string.Equals(buttonName, AuctionPreviewRefreshButtonName, StringComparison.Ordinal);
+        var isGovernmentStorageRefresh = string.Equals(buttonName, GovernmentStorageRefreshButtonName, StringComparison.Ordinal) &&
+            __instance == _governmentStorageRefreshButton;
         var isIdentifyAssist = string.Equals(buttonName, IdentifyBestTreasureButtonName, StringComparison.Ordinal);
         var isBreakthroughReroll = string.Equals(buttonName, BreakthroughRerollButtonName, StringComparison.Ordinal) &&
             __instance == _breakthroughRerollButton;
@@ -2055,7 +2171,21 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             buttonName,
             out var materialFilterIsRare,
             out var materialFilterLevel);
+        var isMaterialAffixFilter = string.Equals(buttonName, MaterialAffixFilterButtonName, StringComparison.Ordinal);
+        var isMaterialAffixEnabled = string.Equals(buttonName, MaterialAffixFilterEnabledButtonName, StringComparison.Ordinal);
+        var isMaterialAffixAll = string.Equals(buttonName, MaterialAffixFilterAllButtonName, StringComparison.Ordinal);
+        var isMaterialAffixAny = string.Equals(buttonName, MaterialAffixFilterAnyButtonName, StringComparison.Ordinal);
+        var isMaterialAffixComposerKind = string.Equals(buttonName, MaterialAffixFilterComposerKindButtonName, StringComparison.Ordinal);
+        var isMaterialAffixAdd = string.Equals(buttonName, MaterialAffixFilterAddButtonName, StringComparison.Ordinal);
+        var isMaterialAffixClose = string.Equals(buttonName, MaterialAffixFilterCloseButtonName, StringComparison.Ordinal);
+        var isMaterialAffixApply = string.Equals(buttonName, MaterialAffixFilterApplyButtonName, StringComparison.Ordinal);
+        var isMaterialAffixCancel = string.Equals(buttonName, MaterialAffixFilterCancelButtonName, StringComparison.Ordinal);
+        var isMaterialAffixRuleButton = TryParseMaterialAffixRuleButton(
+            buttonName,
+            out var materialAffixRuleIsDelete,
+            out var materialAffixRuleIndex);
         if (!isAuctionRefresh &&
+            !isGovernmentStorageRefresh &&
             !isIdentifyAssist &&
             !isBreakthroughReroll &&
             !isCraftReroll &&
@@ -2063,7 +2193,17 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             !isShopOwnershipBuy &&
             !isMaterialAutoBuy &&
             !isMaterialFilterDropdown &&
-            !isMaterialFilterOption)
+            !isMaterialFilterOption &&
+            !isMaterialAffixFilter &&
+            !isMaterialAffixEnabled &&
+            !isMaterialAffixAll &&
+            !isMaterialAffixAny &&
+            !isMaterialAffixComposerKind &&
+            !isMaterialAffixAdd &&
+            !isMaterialAffixClose &&
+            !isMaterialAffixApply &&
+            !isMaterialAffixCancel &&
+            !isMaterialAffixRuleButton)
         {
             return true;
         }
@@ -2073,7 +2213,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return false;
         }
 
-        if ((isAuctionRefresh || isIdentifyAssist || isBreakthroughReroll || isCraftReroll || isSpeEnhanceReroll) &&
+        if ((isAuctionRefresh || isGovernmentStorageRefresh || isIdentifyAssist || isBreakthroughReroll || isCraftReroll || isSpeEnhanceReroll) &&
             (eventData == null || eventData.button != PointerEventData.InputButton.Left))
         {
             return false;
@@ -2092,6 +2232,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 if (_auctionPreviewRefreshEnabled.Value)
                 {
                     TryRefreshAuctionPreview("button");
+                }
+            }
+            else if (isGovernmentStorageRefresh)
+            {
+                if (_governmentStorageRefreshEnabled.Value)
+                {
+                    TryRefreshGovernmentStorage("button");
                 }
             }
             else if (isIdentifyAssist)
@@ -2143,11 +2290,54 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                     ToggleMaterialFilterDropdown();
                 }
             }
-            else
+            else if (isMaterialFilterOption)
             {
                 if (_materialAutoBuyEnabled.Value)
                 {
                     SetMaterialFilterLevel(materialFilterIsRare, materialFilterLevel);
+                }
+            }
+            else if (isMaterialAffixFilter)
+            {
+                ToggleMaterialAffixFilterPopup();
+            }
+            else if (isMaterialAffixEnabled)
+            {
+                SetMaterialAffixFilterDraftEnabled(!_materialAffixFilterDraftEnabled);
+            }
+            else if (isMaterialAffixAll)
+            {
+                SetMaterialAffixFilterDraftCombineMode(MaterialAffixCombineMode.All);
+            }
+            else if (isMaterialAffixAny)
+            {
+                SetMaterialAffixFilterDraftCombineMode(MaterialAffixCombineMode.Any);
+            }
+            else if (isMaterialAffixComposerKind)
+            {
+                ToggleMaterialAffixFilterComposerKind();
+            }
+            else if (isMaterialAffixAdd)
+            {
+                TryAddMaterialAffixFilterDraftRule();
+            }
+            else if (isMaterialAffixApply)
+            {
+                ApplyMaterialAffixFilterDraft();
+            }
+            else if (isMaterialAffixClose || isMaterialAffixCancel)
+            {
+                CloseMaterialAffixFilterPopup(discardDraft: true);
+            }
+            else if (isMaterialAffixRuleButton)
+            {
+                if (materialAffixRuleIsDelete)
+                {
+                    DeleteMaterialAffixFilterDraftRule(materialAffixRuleIndex);
+                }
+                else
+                {
+                    ToggleMaterialAffixFilterDraftRuleKind(materialAffixRuleIndex);
                 }
             }
         }
@@ -2212,6 +2402,31 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         _identifyMatchOpen = false;
         SetOverlayObjectActive(_identifyBestTreasureButtonRoot, false);
+    }
+
+    private static void UpdateGovernmentStorageRefreshAssist()
+    {
+        if (!_governmentStorageRefreshHooksReady ||
+            !_governmentStorageRefreshEnabled.Value ||
+            !TryGetActiveGovernmentStorageTradeUi(out var tradeUi))
+        {
+            SetOverlayObjectActive(_governmentStorageRefreshButtonRoot, false);
+            return;
+        }
+
+        if (Input.GetKeyDown(_governmentStorageRefreshHotkey.Value))
+        {
+            TryRefreshGovernmentStorage("hotkey");
+            return;
+        }
+
+        if (Time.unscaledTime < _governmentStorageRefreshButtonReadyAt)
+        {
+            return;
+        }
+
+        EnsureGovernmentStorageRefreshButton(tradeUi);
+        SetOverlayObjectActive(_governmentStorageRefreshButtonRoot, true);
     }
 
     private static void UpdateAuctionPreviewRefreshAssist()
@@ -4350,6 +4565,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 var buttonName = button?.gameObject?.name;
                 if (button == null ||
                     string.Equals(buttonName, AuctionPreviewRefreshButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, GovernmentStorageRefreshButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, IdentifyBestTreasureButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, BreakthroughRerollButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, CraftRerollButtonName, StringComparison.Ordinal) ||
@@ -4358,7 +4574,18 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                     string.Equals(buttonName, MaterialAutoBuyButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, MaterialFilterDropdownButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, MaterialFilterDropdownPanelName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialAffixFilterButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialAffixFilterPanelName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialAffixFilterEnabledButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialAffixFilterAllButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialAffixFilterAnyButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialAffixFilterComposerKindButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialAffixFilterAddButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialAffixFilterCloseButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialAffixFilterApplyButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, MaterialAffixFilterCancelButtonName, StringComparison.Ordinal) ||
                     IsMaterialFilterOptionButtonName(buttonName) ||
+                    TryParseMaterialAffixRuleButton(buttonName, out _, out _) ||
                     IsButtonInsideKnownOverlayRoot(button))
                 {
                     continue;
@@ -4397,6 +4624,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
 
         return IsTransformInsideOverlayRoot(button.transform, _auctionPreviewRefreshButtonRoot) ||
+            IsTransformInsideOverlayRoot(button.transform, _governmentStorageRefreshButtonRoot) ||
             IsTransformInsideOverlayRoot(button.transform, _identifyBestTreasureButtonRoot) ||
             IsTransformInsideOverlayRoot(button.transform, _breakthroughRerollButtonRoot) ||
             IsTransformInsideOverlayRoot(button.transform, _craftRerollButtonRoot) ||
@@ -4404,7 +4632,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             IsTransformInsideOverlayRoot(button.transform, _shopOwnershipBuyButton?.gameObject) ||
             IsTransformInsideOverlayRoot(button.transform, _materialAutoBuyButtonRoot) ||
             IsTransformInsideOverlayRoot(button.transform, _materialFilterDropdownButtonRoot) ||
-            IsTransformInsideOverlayRoot(button.transform, _materialFilterDropdownPanelRoot);
+            IsTransformInsideOverlayRoot(button.transform, _materialFilterDropdownPanelRoot) ||
+            IsTransformInsideOverlayRoot(button.transform, _materialAffixFilterButtonRoot) ||
+            IsTransformInsideOverlayRoot(button.transform, _materialAffixFilterPanelRoot);
     }
 
     private static bool IsTransformInsideOverlayRoot(Transform candidate, GameObject? root)
@@ -4488,6 +4718,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 if (candidate == null ||
                     (_auctionPreviewRefreshButtonRoot != null &&
                         candidate.transform.IsChildOf(_auctionPreviewRefreshButtonRoot.transform)) ||
+                    (_governmentStorageRefreshButtonRoot != null &&
+                        candidate.transform.IsChildOf(_governmentStorageRefreshButtonRoot.transform)) ||
                     (_identifyBestTreasureButtonRoot != null &&
                         candidate.transform.IsChildOf(_identifyBestTreasureButtonRoot.transform)) ||
                     (_breakthroughRerollButtonRoot != null &&
@@ -4495,7 +4727,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                     (_craftRerollButtonRoot != null &&
                         candidate.transform.IsChildOf(_craftRerollButtonRoot.transform)) ||
                     (_speEnhanceRerollButtonRoot != null &&
-                        candidate.transform.IsChildOf(_speEnhanceRerollButtonRoot.transform)))
+                        candidate.transform.IsChildOf(_speEnhanceRerollButtonRoot.transform)) ||
+                    (_materialAffixFilterButtonRoot != null &&
+                        candidate.transform.IsChildOf(_materialAffixFilterButtonRoot.transform)) ||
+                    (_materialAffixFilterPanelRoot != null &&
+                        candidate.transform.IsChildOf(_materialAffixFilterPanelRoot.transform)))
                 {
                     continue;
                 }
@@ -5360,6 +5596,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void HideTradeUiPostfix()
     {
+        ResetGovernmentStorageRefreshUiState("TradeUI.HideTradeUI");
         ResetTreasureTradeUiState("TradeUI.HideTradeUI");
         ResetShopOwnershipUiState("TradeUI.HideTradeUI");
         ResetMaterialAutoBuyUiState("TradeUI.HideTradeUI");
@@ -6034,6 +6271,247 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
     }
 
+    private static bool TryGetActiveGovernmentStorageTradeUi(out TradeUIController tradeUi)
+    {
+        tradeUi = null!;
+        try
+        {
+            var candidate = TradeUIController.Instance;
+            if (candidate == null ||
+                candidate.tradeUI == null ||
+                !candidate.tradeUI.activeInHierarchy ||
+                candidate.tradeUIType != TradeUIType.GovernStorage)
+            {
+                return false;
+            }
+
+            _governmentStorageActiveLookupFailureLogged = false;
+            tradeUi = candidate;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (!_governmentStorageActiveLookupFailureLogged)
+            {
+                _governmentStorageActiveLookupFailureLogged = true;
+                LoggerInstance.LogWarning(
+                    $"[Compatibility] Government storage page detection failed: {DescribeCompatibilityException(ex)}");
+            }
+
+            return false;
+        }
+    }
+
+    private static void ResetGovernmentStorageRefreshUiState(string source)
+    {
+        _governmentStoragePlotController = null;
+        _governmentStorageRefreshCreationFailed = false;
+        _governmentStorageRefreshButtonReadyAt = 0f;
+        SetOverlayObjectActive(_governmentStorageRefreshButtonRoot, false);
+
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo($"[GovernmentStorage] UI reset from {source}.");
+        }
+    }
+
+    private static void EnsureGovernmentStorageRefreshButton(TradeUIController tradeUi)
+    {
+        if (!_governmentStorageRefreshEnabled.Value || _governmentStorageRefreshCreationFailed)
+        {
+            return;
+        }
+
+        var resourceLabel = tradeUi.leftResourceLabel;
+        var resourceRect = resourceLabel?.GetComponent<RectTransform>();
+        var expectedParent = resourceLabel?.transform?.parent;
+        if (resourceLabel == null || resourceRect == null || expectedParent == null)
+        {
+            return;
+        }
+
+        if (_governmentStorageRefreshButtonRoot != null &&
+            _governmentStorageRefreshButton != null &&
+            _governmentStorageRefreshButtonLabel != null &&
+            _governmentStorageRefreshButtonHost == expectedParent &&
+            _governmentStorageRefreshButtonRoot.transform.parent == expectedParent)
+        {
+            _governmentStorageRefreshButton.interactable = !_governmentStorageRefreshBusy;
+            _governmentStorageRefreshButtonLabel.text = _governmentStorageRefreshBusy ? "刷新中…" : "刷新";
+            return;
+        }
+
+        DestroyGovernmentStorageRefreshButton();
+        var buttonTemplate = FindTradeActionButtonTemplate(tradeUi);
+        if (buttonTemplate == null)
+        {
+            return;
+        }
+
+        if (!TryCreateButtonTemplateButton(
+                GovernmentStorageRefreshButtonName,
+                expectedParent,
+                buttonTemplate,
+                resourceRect.anchorMin,
+                resourceRect.anchorMax,
+                resourceRect.pivot,
+                resourceRect.anchoredPosition + new Vector2(18f, 58f),
+                new Vector2(120f, 42f),
+                "刷新",
+                out _governmentStorageRefreshButtonRoot,
+                out _governmentStorageRefreshButton,
+                out _governmentStorageRefreshButtonLabel) ||
+            _governmentStorageRefreshButtonRoot == null ||
+            _governmentStorageRefreshButton == null ||
+            _governmentStorageRefreshButtonLabel == null)
+        {
+            _governmentStorageRefreshCreationFailed = true;
+            DestroyGovernmentStorageRefreshButton();
+            LoggerInstance.LogWarning("[GovernmentStorage] Could not create the refresh button above the contribution value.");
+            return;
+        }
+
+        _governmentStorageRefreshButtonHost = expectedParent;
+        ConfigureMaterialControlButtonLabel(_governmentStorageRefreshButtonLabel, 18);
+        _governmentStorageRefreshButton.interactable = !_governmentStorageRefreshBusy;
+        LoggerInstance.LogInfo("[GovernmentStorage] Refresh button created above the government contribution value.");
+    }
+
+    private static void DestroyGovernmentStorageRefreshButton()
+    {
+        if (_governmentStorageRefreshButtonRoot != null)
+        {
+            try
+            {
+                _governmentStorageRefreshButtonRoot.SetActive(false);
+                UnityEngine.Object.Destroy(_governmentStorageRefreshButtonRoot);
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.LogWarning($"[GovernmentStorage] Could not destroy stale refresh button: {ex.Message}");
+            }
+        }
+
+        _governmentStorageRefreshButtonRoot = null;
+        _governmentStorageRefreshButton = null;
+        _governmentStorageRefreshButtonLabel = null;
+        _governmentStorageRefreshButtonHost = null;
+    }
+
+    private static bool TryRefreshGovernmentStorage(string source)
+    {
+        if (_governmentStorageRefreshBusy ||
+            !_governmentStorageRefreshHooksReady ||
+            !_governmentStorageRefreshEnabled.Value ||
+            !TryGetActiveGovernmentStorageTradeUi(out var tradeUi))
+        {
+            return false;
+        }
+
+        var plotController = _governmentStoragePlotController ?? PlotController.Instance;
+        var gameController = GameController.Instance;
+        var worldData = gameController?.worldData;
+        if (plotController == null || gameController == null || worldData == null)
+        {
+            PushPlayerLog("官府仓库刷新失败：当前版本缺少兼容控制器");
+            LoggerInstance.LogWarning("[GovernmentStorage] Refresh skipped because a required controller was unavailable.");
+            return false;
+        }
+
+        _governmentStorageRefreshBusy = true;
+        if (_governmentStorageRefreshButton != null)
+        {
+            _governmentStorageRefreshButton.interactable = false;
+        }
+
+        ItemListData? storageSnapshot = null;
+        var itemsBefore = "unavailable";
+        try
+        {
+            var storageBefore = worldData.governStorage;
+            storageSnapshot = storageBefore?.Clone() as ItemListData;
+            itemsBefore = DescribeGovernmentStorageItems(storageBefore);
+            gameController.RefreshGovernStorage();
+            var storageAfter = worldData.governStorage;
+            if (storageAfter == null || TryGetCollectionCount(storageAfter.allItem) <= 0)
+            {
+                throw new InvalidOperationException("the original refresh generated an empty government storage list");
+            }
+
+            tradeUi.HideTradeUI();
+            plotController.ShowGovernStorage();
+            _governmentStoragePlotController = plotController;
+            _governmentStorageRefreshButtonReadyAt = Time.unscaledTime + 0.2f;
+
+            if (!TryGetActiveGovernmentStorageTradeUi(out _))
+            {
+                throw new InvalidOperationException("the government storage UI did not reopen after refresh");
+            }
+
+            var itemsAfter = DescribeGovernmentStorageItems(worldData.governStorage);
+            PushPlayerLog("官府仓库已刷新");
+            LoggerInstance.LogInfo(
+                $"[GovernmentStorage] Refreshed from {source}: before=[{itemsBefore}], after=[{itemsAfter}]. " +
+                "The trade cart was reset and no contribution was spent by the mod.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (storageSnapshot != null)
+            {
+                worldData.governStorage = storageSnapshot;
+            }
+
+            try
+            {
+                tradeUi.HideTradeUI();
+                plotController.ShowGovernStorage();
+                _governmentStoragePlotController = plotController;
+            }
+            catch (Exception reopenEx)
+            {
+                LoggerInstance.LogWarning(
+                    $"[GovernmentStorage] Rollback UI reopen also failed: {DescribeCompatibilityException(reopenEx)}");
+            }
+
+            PushPlayerLog(storageSnapshot != null
+                ? "官府仓库刷新失败，原物品已恢复"
+                : "官府仓库刷新失败，请退出后重新进入");
+            LoggerInstance.LogWarning(
+                $"[GovernmentStorage] Refresh failed from {source}: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+        finally
+        {
+            _governmentStorageRefreshBusy = false;
+            if (_governmentStorageRefreshButton != null)
+            {
+                _governmentStorageRefreshButton.interactable = true;
+            }
+        }
+    }
+
+    private static string DescribeGovernmentStorageItems(ItemListData? itemList)
+    {
+        if (itemList?.allItem == null)
+        {
+            return "none";
+        }
+
+        var items = new List<string>();
+        foreach (var item in itemList.allItem)
+        {
+            if (item == null)
+            {
+                continue;
+            }
+
+            items.Add($"{item.name ?? "?"}#{item.itemID}/L{item.itemLv}/R{item.rareLv}");
+        }
+
+        return items.Count > 0 ? string.Join(",", items) : "empty";
+    }
+
     private static int ClampMaterialFilterLevel(int level)
     {
         return Math.Max(0, Math.Min(5, level));
@@ -6092,10 +6570,126 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             level <= 5;
     }
 
+    private static bool TryParseMaterialAffixRuleButton(string? buttonName, out bool isDelete, out int index)
+    {
+        isDelete = false;
+        index = -1;
+        if (string.IsNullOrEmpty(buttonName))
+        {
+            return false;
+        }
+
+        string? indexText = null;
+        if (buttonName.StartsWith(MaterialAffixFilterRuleKindButtonPrefix, StringComparison.Ordinal))
+        {
+            indexText = buttonName.Substring(MaterialAffixFilterRuleKindButtonPrefix.Length);
+        }
+        else if (buttonName.StartsWith(MaterialAffixFilterRuleDeleteButtonPrefix, StringComparison.Ordinal))
+        {
+            isDelete = true;
+            indexText = buttonName.Substring(MaterialAffixFilterRuleDeleteButtonPrefix.Length);
+        }
+
+        return indexText != null &&
+            int.TryParse(indexText, out index) &&
+            index >= 0 &&
+            index < MaterialAffixFilterMaxRuleCount;
+    }
+
+    private static void LoadMaterialAffixFilterRulesFromConfig()
+    {
+        _materialAffixFilterAppliedRules.Clear();
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<List<MaterialAffixFilterRule>>(
+                string.IsNullOrWhiteSpace(_materialAffixFilterRulesJson.Value)
+                    ? "[]"
+                    : _materialAffixFilterRulesJson.Value) ?? new List<MaterialAffixFilterRule>();
+            foreach (var rule in parsed)
+            {
+                if (_materialAffixFilterAppliedRules.Count >= MaterialAffixFilterMaxRuleCount)
+                {
+                    break;
+                }
+
+                var normalized = NormalizeMaterialAffixFilterRuleText(rule?.Text);
+                if (normalized.Length == 0 ||
+                    _materialAffixFilterAppliedRules.Any(existing =>
+                        existing.Kind == rule!.Kind &&
+                        string.Equals(existing.Text, normalized, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                _materialAffixFilterAppliedRules.Add(new MaterialAffixFilterRule
+                {
+                    Text = normalized,
+                    Kind = Enum.IsDefined(typeof(MaterialAffixMatchKind), rule!.Kind)
+                        ? rule.Kind
+                        : MaterialAffixMatchKind.Contains
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _materialAffixFilterEnabled.Value = false;
+            LoggerInstance.LogWarning(
+                $"[MaterialSweep] Invalid MaterialAffixFilterRulesJson; affix filtering was disabled safely: {ex.Message}");
+        }
+    }
+
+    private static string NormalizeMaterialAffixFilterRuleText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var normalized = text
+            .Replace('\r', ' ')
+            .Replace('\n', ' ')
+            .Trim();
+        while (normalized.Contains("  ", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("  ", " ", StringComparison.Ordinal);
+        }
+
+        return normalized.Length <= MaterialAffixFilterMaxTextLength
+            ? normalized
+            : normalized.Substring(0, MaterialAffixFilterMaxTextLength);
+    }
+
+    private static MaterialAffixFilterRule CloneMaterialAffixFilterRule(MaterialAffixFilterRule rule)
+    {
+        return new MaterialAffixFilterRule
+        {
+            Text = rule.Text,
+            Kind = rule.Kind
+        };
+    }
+
+    private static void PersistMaterialAffixFilterRules()
+    {
+        _materialAffixFilterRulesJson.Value = JsonSerializer.Serialize(_materialAffixFilterAppliedRules);
+    }
+
+    private static string GetMaterialAffixFilterSummaryText()
+    {
+        var count = _materialAffixFilterAppliedRules.Count;
+        if (!_materialAffixFilterEnabled.Value)
+        {
+            return count > 0 ? $"词条：关({count})" : "词条：关";
+        }
+
+        return $"词条：{(_materialAffixFilterCombineMode.Value == MaterialAffixCombineMode.All ? "且" : "或")}{count}";
+    }
+
     private static void ResetMaterialAutoBuyUiState(string source)
     {
         _materialAutoBuyBusy = false;
         _materialFilterDropdownOpen = false;
+        _materialAffixFilterPopupOpen = false;
+        _materialAffixFilterDraftRules.Clear();
         _materialAutoBuyControlCreationFailed = false;
         HideMaterialAutoBuyUi();
 
@@ -6109,7 +6703,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         SetOverlayObjectActive(_materialAutoBuyButtonRoot, false);
         SetOverlayObjectActive(_materialFilterDropdownButtonRoot, false);
+        SetOverlayObjectActive(_materialAffixFilterButtonRoot, false);
         SetMaterialFilterOptionsVisible(false);
+        SetOverlayObjectActive(_materialAffixFilterPanelRoot, false);
     }
 
     private static void UpdateMaterialAutoBuyUiState()
@@ -6117,6 +6713,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         if (!_materialAutoBuyEnabled.Value || !TryGetActiveShopTradeUi(out var tradeUi))
         {
             _materialFilterDropdownOpen = false;
+            _materialAffixFilterPopupOpen = false;
+            _materialAffixFilterDraftRules.Clear();
             HideMaterialAutoBuyUi();
             return;
         }
@@ -6127,15 +6725,28 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             _materialAutoBuyButtonLabel == null ||
             _materialFilterDropdownButtonRoot == null ||
             _materialFilterDropdownButtonLabel == null ||
-            _materialFilterDropdownPanelRoot == null)
+            _materialFilterDropdownPanelRoot == null ||
+            _materialAffixFilterButtonRoot == null ||
+            _materialAffixFilterButton == null ||
+            _materialAffixFilterButtonLabel == null ||
+            _materialAffixFilterPanelRoot == null)
         {
             return;
         }
 
         SetOverlayObjectActive(_materialAutoBuyButtonRoot, true);
         SetOverlayObjectActive(_materialFilterDropdownButtonRoot, true);
-        _materialAutoBuyButton.interactable = !_materialAutoBuyBusy;
+        SetOverlayObjectActive(_materialAffixFilterButtonRoot, true);
+        _materialAutoBuyButton.interactable = !_materialAutoBuyBusy && !_materialAffixFilterPopupOpen;
         _materialAutoBuyButtonLabel.text = _materialAutoBuyBusy ? "正在扫货…" : "材料扫货";
+        _materialAffixFilterButton.interactable = !_materialAutoBuyBusy;
+        _materialAffixFilterButtonLabel.text = GetMaterialAffixFilterSummaryText();
+        if (_materialAffixFilterButton.targetGraphic != null)
+        {
+            _materialAffixFilterButton.targetGraphic.color = _materialAffixFilterEnabled.Value
+                ? new Color(0.22f, 0.52f, 0.26f, 0.98f)
+                : new Color(0.48f, 0.28f, 0.12f, 0.96f);
+        }
 
         var dropdownLabel =
             $"品级≥{GetMaterialRareLevelName(GetMaterialPurchaseRareLevel())} / " +
@@ -6146,6 +6757,20 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
 
         SetMaterialFilterOptionsVisible(_materialFilterDropdownOpen);
+        SetOverlayObjectActive(_materialAffixFilterPanelRoot, _materialAffixFilterPopupOpen);
+        if (_materialAffixFilterPopupOpen)
+        {
+            UpdateMaterialAffixFilterPopupVisuals();
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                CloseMaterialAffixFilterPopup(discardDraft: true);
+            }
+            else if (_materialAffixFilterInput?.isFocused == true &&
+                (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)))
+            {
+                TryAddMaterialAffixFilterDraftRule();
+            }
+        }
     }
 
     private static void EnsureMaterialAutoBuyControls(TradeUIController tradeUi)
@@ -6169,11 +6794,18 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             _materialFilterDropdownButtonRoot != null &&
             _materialFilterDropdownButtonLabel != null &&
             _materialFilterDropdownPanelRoot != null &&
+            _materialAffixFilterButtonRoot != null &&
+            _materialAffixFilterButton != null &&
+            _materialAffixFilterButtonLabel != null &&
+            _materialAffixFilterPanelRoot != null &&
             _materialFilterOptionButtons.Count == 12 &&
             _materialFilterOptionLabels.Count == 12 &&
+            _materialAffixFilterRuleRowRoots.Count == MaterialAffixFilterMaxRuleCount &&
             _materialAutoBuyButtonRoot.transform.parent == expectedParent &&
             _materialFilterDropdownButtonRoot.transform.parent == expectedParent &&
-            _materialFilterDropdownPanelRoot.transform.parent == expectedParent)
+            _materialFilterDropdownPanelRoot.transform.parent == expectedParent &&
+            _materialAffixFilterButtonRoot.transform.parent == expectedParent &&
+            _materialAffixFilterPanelRoot.transform.parent == expectedParent)
         {
             return;
         }
@@ -6223,8 +6855,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                     templateRect.anchorMin,
                     templateRect.anchorMax,
                     templateRect.pivot,
-                    templateRect.anchoredPosition + new Vector2(145f, 675f),
-                    new Vector2(440f, 42f),
+                    templateRect.anchoredPosition + new Vector2(65f, 675f),
+                    new Vector2(300f, 42f),
                     string.Empty,
                     out _materialFilterDropdownButtonRoot,
                     out var materialFilterDropdownButton,
@@ -6238,9 +6870,33 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 return;
             }
 
+            creationStage = "material affix filter button";
+            if (!TryCreateButtonTemplateButton(
+                    MaterialAffixFilterButtonName,
+                    template.transform.parent,
+                    buttonTemplate,
+                    templateRect.anchorMin,
+                    templateRect.anchorMax,
+                    templateRect.pivot,
+                    templateRect.anchoredPosition + new Vector2(293f, 675f),
+                    new Vector2(145f, 42f),
+                    GetMaterialAffixFilterSummaryText(),
+                    out _materialAffixFilterButtonRoot,
+                    out _materialAffixFilterButton,
+                    out _materialAffixFilterButtonLabel) ||
+                _materialAffixFilterButtonRoot == null ||
+                _materialAffixFilterButton == null ||
+                _materialAffixFilterButtonLabel == null)
+            {
+                _materialAutoBuyControlCreationFailed = true;
+                DestroyMaterialAutoBuyControls();
+                return;
+            }
+
             creationStage = "material control label formatting";
             ConfigureMaterialControlButtonLabel(_materialAutoBuyButtonLabel, 20);
-            ConfigureMaterialControlButtonLabel(_materialFilterDropdownButtonLabel, 18);
+            ConfigureMaterialControlButtonLabel(_materialFilterDropdownButtonLabel, 16);
+            ConfigureMaterialControlButtonLabel(_materialAffixFilterButtonLabel, 16);
 
             creationStage = "material filter dropdown panel";
             if (!TryCreateButtonTemplateButton(
@@ -6299,15 +6955,29 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 }
             }
 
+            creationStage = "material affix filter popup";
+            if (!TryCreateMaterialAffixFilterPopup(
+                    template,
+                    templateRect,
+                    buttonTemplate))
+            {
+                _materialAutoBuyControlCreationFailed = true;
+                DestroyMaterialAutoBuyControls();
+                return;
+            }
+
             creationStage = "option visual refresh";
             _materialFilterDropdownOpen = false;
+            _materialAffixFilterPopupOpen = false;
             UpdateMaterialFilterOptionVisuals();
             SetOverlayObjectActive(_materialAutoBuyButtonRoot, false);
             SetOverlayObjectActive(_materialFilterDropdownButtonRoot, false);
             SetOverlayObjectActive(_materialFilterDropdownPanelRoot, false);
+            SetOverlayObjectActive(_materialAffixFilterButtonRoot, false);
+            SetOverlayObjectActive(_materialAffixFilterPanelRoot, false);
             _materialFilterOptionsVisible = false;
             LoggerInstance.LogInfo(
-                "[MaterialSweep] Created the in-shop material sweep button and two-column threshold dropdown.");
+                "[MaterialSweep] Created the sweep button, threshold dropdown, and separate affix filter window.");
         }
         catch (Exception ex)
         {
@@ -6359,6 +7029,434 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return true;
     }
 
+    private static bool TryCreateMaterialAffixFilterPopup(
+        Text textTemplate,
+        RectTransform templateRect,
+        Button buttonTemplate)
+    {
+        var parent = textTemplate.transform.parent;
+        if (parent == null ||
+            !TryCreateButtonTemplateButton(
+                MaterialAffixFilterPanelName,
+                parent,
+                buttonTemplate,
+                templateRect.anchorMin,
+                templateRect.anchorMax,
+                templateRect.pivot,
+                templateRect.anchoredPosition + new Vector2(0f, 215f),
+                new Vector2(560f, 340f),
+                string.Empty,
+                out _materialAffixFilterPanelRoot,
+                out var panelButton,
+                out var panelLabel) ||
+            _materialAffixFilterPanelRoot == null ||
+            panelButton == null ||
+            panelLabel == null)
+        {
+            return false;
+        }
+
+        panelButton.interactable = false;
+        if (panelButton.targetGraphic != null)
+        {
+            panelButton.targetGraphic.color = new Color(0.16f, 0.10f, 0.05f, 0.94f);
+            panelButton.targetGraphic.raycastTarget = true;
+        }
+
+        panelLabel.text = string.Empty;
+        panelLabel.enabled = false;
+        var panel = _materialAffixFilterPanelRoot.transform;
+
+        if (!TryCreateMaterialAffixText(
+                "CodexMaterialAffixFilterTitle",
+                panel,
+                textTemplate,
+                new Vector2(-95f, 145f),
+                new Vector2(300f, 30f),
+                "材料词条筛选",
+                20,
+                TextAnchor.MiddleCenter,
+                out _,
+                out _) ||
+            !TryCreateMaterialAffixPopupButton(
+                MaterialAffixFilterCloseButtonName,
+                panel,
+                buttonTemplate,
+                new Vector2(250f, 145f),
+                new Vector2(32f, 30f),
+                "×",
+                18,
+                out _,
+                out _) ||
+            !TryCreateMaterialAffixPopupButton(
+                MaterialAffixFilterEnabledButtonName,
+                panel,
+                buttonTemplate,
+                new Vector2(-210f, 108f),
+                new Vector2(110f, 32f),
+                "启用",
+                15,
+                out _materialAffixFilterEnabledButton,
+                out _materialAffixFilterEnabledButtonLabel) ||
+            !TryCreateMaterialAffixText(
+                "CodexMaterialAffixFilterRelationLabel",
+                panel,
+                textTemplate,
+                new Vector2(-125f, 108f),
+                new Vector2(54f, 28f),
+                "满足",
+                15,
+                TextAnchor.MiddleCenter,
+                out _,
+                out _) ||
+            !TryCreateMaterialAffixPopupButton(
+                MaterialAffixFilterAllButtonName,
+                panel,
+                buttonTemplate,
+                new Vector2(-35f, 108f),
+                new Vector2(118f, 32f),
+                "全部（且）",
+                15,
+                out _materialAffixFilterAllButton,
+                out _materialAffixFilterAllButtonLabel) ||
+            !TryCreateMaterialAffixPopupButton(
+                MaterialAffixFilterAnyButtonName,
+                panel,
+                buttonTemplate,
+                new Vector2(95f, 108f),
+                new Vector2(118f, 32f),
+                "任一（或）",
+                15,
+                out _materialAffixFilterAnyButton,
+                out _materialAffixFilterAnyButtonLabel) ||
+            !TryCreateMaterialAffixPopupButton(
+                MaterialAffixFilterComposerKindButtonName,
+                panel,
+                buttonTemplate,
+                new Vector2(-220f, 66f),
+                new Vector2(86f, 34f),
+                "包含",
+                15,
+                out _materialAffixFilterComposerKindButton,
+                out _materialAffixFilterComposerKindButtonLabel) ||
+            !TryCreateMaterialAffixInputField(
+                panel,
+                textTemplate,
+                new Vector2(5f, 66f),
+                new Vector2(350f, 34f),
+                out _materialAffixFilterInput) ||
+            !TryCreateMaterialAffixPopupButton(
+                MaterialAffixFilterAddButtonName,
+                panel,
+                buttonTemplate,
+                new Vector2(225f, 66f),
+                new Vector2(76f, 34f),
+                "＋添加",
+                15,
+                out _materialAffixFilterAddButton,
+                out _))
+        {
+            return false;
+        }
+
+        for (var index = 0; index < MaterialAffixFilterMaxRuleCount; index++)
+        {
+            var y = 23f - (index * 38f);
+            if (!TryCreateMaterialAffixPopupButton(
+                    MaterialAffixFilterRuleKindButtonPrefix + index,
+                    panel,
+                    buttonTemplate,
+                    new Vector2(-220f, y),
+                    new Vector2(86f, 32f),
+                    "包含",
+                    14,
+                    out var kindButton,
+                    out var kindLabel) ||
+                kindButton == null || kindLabel == null ||
+                !TryCreateMaterialAffixText(
+                    $"CodexMaterialAffixFilterRuleText:{index}",
+                    panel,
+                    textTemplate,
+                    new Vector2(5f, y),
+                    new Vector2(350f, 32f),
+                    string.Empty,
+                    15,
+                    TextAnchor.MiddleLeft,
+                    out var rowRoot,
+                    out var rowLabel) ||
+                rowRoot == null || rowLabel == null ||
+                !TryCreateMaterialAffixPopupButton(
+                    MaterialAffixFilterRuleDeleteButtonPrefix + index,
+                    panel,
+                    buttonTemplate,
+                    new Vector2(225f, y),
+                    new Vector2(76f, 32f),
+                    "删除",
+                    14,
+                    out var deleteButton,
+                    out _) ||
+                deleteButton == null)
+            {
+                return false;
+            }
+
+            _materialAffixFilterRuleRowRoots.Add(rowRoot);
+            _materialAffixFilterRuleLabels.Add(rowLabel);
+            _materialAffixFilterRuleKindButtons.Add(kindButton);
+            _materialAffixFilterRuleKindLabels.Add(kindLabel);
+            _materialAffixFilterRuleDeleteButtons.Add(deleteButton);
+        }
+
+        if (!TryCreateMaterialAffixText(
+                "CodexMaterialAffixFilterEmptyLabel",
+                panel,
+                textTemplate,
+                new Vector2(0f, -15f),
+                new Vector2(390f, 28f),
+                "尚未添加词条条件",
+                15,
+                TextAnchor.MiddleCenter,
+                out _,
+                out _materialAffixFilterEmptyLabel) ||
+            !TryCreateMaterialAffixText(
+                "CodexMaterialAffixFilterMessageLabel",
+                panel,
+                textTemplate,
+                new Vector2(-75f, -117f),
+                new Vector2(370f, 24f),
+                "词条条件会与品级、等级条件同时生效",
+                14,
+                TextAnchor.MiddleLeft,
+                out _,
+                out _materialAffixFilterMessageLabel) ||
+            !TryCreateMaterialAffixPopupButton(
+                MaterialAffixFilterCancelButtonName,
+                panel,
+                buttonTemplate,
+                new Vector2(95f, -146f),
+                new Vector2(110f, 34f),
+                "取消",
+                15,
+                out _,
+                out _) ||
+            !TryCreateMaterialAffixPopupButton(
+                MaterialAffixFilterApplyButtonName,
+                panel,
+                buttonTemplate,
+                new Vector2(215f, -146f),
+                new Vector2(110f, 34f),
+                "应用",
+                15,
+                out _,
+                out _))
+        {
+            return false;
+        }
+
+        SetOverlayObjectActive(_materialAffixFilterPanelRoot, false);
+        return true;
+    }
+
+    private static bool TryCreateMaterialAffixPopupButton(
+        string name,
+        Transform parent,
+        Button template,
+        Vector2 position,
+        Vector2 size,
+        string text,
+        int fontSize,
+        out Button? button,
+        out Text? label)
+    {
+        var created = TryCreateButtonTemplateButton(
+            name,
+            parent,
+            template,
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            position,
+            size,
+            text,
+            out _,
+            out button,
+            out label);
+        if (created && label != null)
+        {
+            ConfigureMaterialControlButtonLabel(label, fontSize);
+        }
+
+        return created && button != null && label != null;
+    }
+
+    private static bool TryCreateMaterialAffixText(
+        string name,
+        Transform parent,
+        Text template,
+        Vector2 position,
+        Vector2 size,
+        string text,
+        int fontSize,
+        TextAnchor alignment,
+        out GameObject? root,
+        out Text? label)
+    {
+        root = null;
+        label = null;
+        try
+        {
+            root = new GameObject(
+                name,
+                Il2CppType.Of<RectTransform>(),
+                Il2CppType.Of<CanvasRenderer>(),
+                Il2CppType.Of<Text>());
+            root.transform.SetParent(parent, false);
+            var rect = root.GetComponent<RectTransform>();
+            label = root.GetComponent<Text>();
+            if (rect == null || label == null)
+            {
+                UnityEngine.Object.Destroy(root);
+                root = null;
+                label = null;
+                return false;
+            }
+
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = position;
+            rect.sizeDelta = size;
+            rect.localScale = Vector3.one;
+            rect.localRotation = Quaternion.identity;
+
+            label.font = template.font;
+            label.material = template.material;
+            label.fontStyle = template.fontStyle;
+            label.fontSize = fontSize;
+            label.resizeTextForBestFit = true;
+            label.resizeTextMinSize = 11;
+            label.resizeTextMaxSize = fontSize;
+            label.alignment = alignment;
+            label.horizontalOverflow = HorizontalWrapMode.Wrap;
+            label.verticalOverflow = VerticalWrapMode.Truncate;
+            label.supportRichText = false;
+            label.color = Color.white;
+            label.raycastTarget = false;
+            label.text = text;
+            root.SetActive(true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (root != null)
+            {
+                UnityEngine.Object.Destroy(root);
+            }
+
+            root = null;
+            label = null;
+            LoggerInstance.LogWarning($"[MaterialSweep] Could not create affix-filter text {name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool TryCreateMaterialAffixInputField(
+        Transform parent,
+        Text textTemplate,
+        Vector2 position,
+        Vector2 size,
+        out InputField? inputField)
+    {
+        inputField = null;
+        GameObject? root = null;
+        try
+        {
+            root = new GameObject(
+                "CodexMaterialAffixFilterInput",
+                Il2CppType.Of<RectTransform>(),
+                Il2CppType.Of<CanvasRenderer>(),
+                Il2CppType.Of<Image>(),
+                Il2CppType.Of<InputField>());
+            root.transform.SetParent(parent, false);
+            var rect = root.GetComponent<RectTransform>();
+            var background = root.GetComponent<Image>();
+            inputField = root.GetComponent<InputField>();
+            if (rect == null || background == null || inputField == null)
+            {
+                UnityEngine.Object.Destroy(root);
+                inputField = null;
+                return false;
+            }
+
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = position;
+            rect.sizeDelta = size;
+            rect.localScale = Vector3.one;
+            background.color = new Color(0.95f, 0.91f, 0.82f, 0.98f);
+            background.raycastTarget = true;
+
+            if (!TryCreateMaterialAffixText(
+                    "CodexMaterialAffixFilterInputText",
+                    root.transform,
+                    textTemplate,
+                    Vector2.zero,
+                    new Vector2(size.x - 20f, size.y - 6f),
+                    string.Empty,
+                    16,
+                    TextAnchor.MiddleLeft,
+                    out _,
+                    out var inputText) ||
+                inputText == null ||
+                !TryCreateMaterialAffixText(
+                    "CodexMaterialAffixFilterInputPlaceholder",
+                    root.transform,
+                    textTemplate,
+                    Vector2.zero,
+                    new Vector2(size.x - 20f, size.y - 6f),
+                    "输入词条文字…",
+                    16,
+                    TextAnchor.MiddleLeft,
+                    out _,
+                    out var placeholder) ||
+                placeholder == null)
+            {
+                UnityEngine.Object.Destroy(root);
+                inputField = null;
+                return false;
+            }
+
+            inputText.color = new Color(0.12f, 0.08f, 0.04f, 1f);
+            inputText.raycastTarget = false;
+            placeholder.color = new Color(0.35f, 0.30f, 0.24f, 0.72f);
+            placeholder.fontStyle = FontStyle.Italic;
+            placeholder.raycastTarget = false;
+
+            inputField.targetGraphic = background;
+            inputField.textComponent = inputText;
+            inputField.placeholder = placeholder;
+            inputField.characterLimit = MaterialAffixFilterMaxTextLength;
+            inputField.contentType = InputField.ContentType.Standard;
+            inputField.lineType = InputField.LineType.SingleLine;
+            inputField.interactable = true;
+            inputField.text = string.Empty;
+            root.SetActive(true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (root != null)
+            {
+                UnityEngine.Object.Destroy(root);
+            }
+
+            inputField = null;
+            LoggerInstance.LogWarning($"[MaterialSweep] Could not create affix-filter input: {ex.Message}");
+            return false;
+        }
+    }
+
     private static void ConfigureMaterialControlButtonLabel(Text label, int fontSize)
     {
         label.fontSize = fontSize;
@@ -6378,7 +7476,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             _materialAutoBuyButtonRoot,
             _materialFilterDropdownButtonRoot,
-            _materialFilterDropdownPanelRoot
+            _materialFilterDropdownPanelRoot,
+            _materialAffixFilterButtonRoot,
+            _materialAffixFilterPanelRoot
         };
 
         var destroyFailed = false;
@@ -6414,10 +7514,33 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _materialFilterDropdownButtonRoot = null;
         _materialFilterDropdownButtonLabel = null;
         _materialFilterDropdownPanelRoot = null;
+        _materialAffixFilterButtonRoot = null;
+        _materialAffixFilterButton = null;
+        _materialAffixFilterButtonLabel = null;
+        _materialAffixFilterPanelRoot = null;
+        _materialAffixFilterEnabledButton = null;
+        _materialAffixFilterEnabledButtonLabel = null;
+        _materialAffixFilterAllButton = null;
+        _materialAffixFilterAllButtonLabel = null;
+        _materialAffixFilterAnyButton = null;
+        _materialAffixFilterAnyButtonLabel = null;
+        _materialAffixFilterComposerKindButton = null;
+        _materialAffixFilterComposerKindButtonLabel = null;
+        _materialAffixFilterAddButton = null;
+        _materialAffixFilterInput = null;
+        _materialAffixFilterMessageLabel = null;
+        _materialAffixFilterEmptyLabel = null;
         _materialFilterOptionButtons.Clear();
         _materialFilterOptionLabels.Clear();
+        _materialAffixFilterRuleRowRoots.Clear();
+        _materialAffixFilterRuleLabels.Clear();
+        _materialAffixFilterRuleKindButtons.Clear();
+        _materialAffixFilterRuleKindLabels.Clear();
+        _materialAffixFilterRuleDeleteButtons.Clear();
+        _materialAffixFilterDraftRules.Clear();
         _materialFilterDropdownOpen = false;
         _materialFilterOptionsVisible = false;
+        _materialAffixFilterPopupOpen = false;
     }
 
     private static void SetMaterialFilterOptionsVisible(bool visible)
@@ -6465,6 +7588,323 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
     }
 
+    private static void ToggleMaterialAffixFilterPopup()
+    {
+        if (!_materialAutoBuyEnabled.Value || !TryGetActiveShopTradeUi(out var tradeUi))
+        {
+            CloseMaterialAffixFilterPopup(discardDraft: true);
+            HideMaterialAutoBuyUi();
+            return;
+        }
+
+        EnsureMaterialAutoBuyControls(tradeUi);
+        if (_materialAffixFilterPopupOpen)
+        {
+            CloseMaterialAffixFilterPopup(discardDraft: true);
+            return;
+        }
+
+        _materialFilterDropdownOpen = false;
+        SetMaterialFilterOptionsVisible(false);
+        _materialAffixFilterDraftRules.Clear();
+        _materialAffixFilterDraftRules.AddRange(
+            _materialAffixFilterAppliedRules.Select(CloneMaterialAffixFilterRule));
+        _materialAffixFilterDraftEnabled = _materialAffixFilterEnabled.Value;
+        _materialAffixFilterDraftCombineMode = _materialAffixFilterCombineMode.Value;
+        _materialAffixFilterComposerKind = MaterialAffixMatchKind.Contains;
+        _materialAffixFilterDraftMessage = "词条条件会与品级、等级条件同时生效";
+        if (_materialAffixFilterInput != null)
+        {
+            _materialAffixFilterInput.text = string.Empty;
+        }
+
+        _materialAffixFilterPopupOpen = true;
+        SetOverlayObjectActive(_materialAffixFilterPanelRoot, true);
+        UpdateMaterialAffixFilterPopupVisuals();
+        try
+        {
+            _materialAffixFilterInput?.ActivateInputField();
+        }
+        catch
+        {
+        }
+    }
+
+    private static void CloseMaterialAffixFilterPopup(bool discardDraft)
+    {
+        _materialAffixFilterPopupOpen = false;
+        SetOverlayObjectActive(_materialAffixFilterPanelRoot, false);
+        try
+        {
+            _materialAffixFilterInput?.DeactivateInputField();
+        }
+        catch
+        {
+        }
+
+        if (discardDraft)
+        {
+            _materialAffixFilterDraftRules.Clear();
+            _materialAffixFilterDraftMessage = string.Empty;
+        }
+
+        if (_materialAutoBuyButton != null)
+        {
+            _materialAutoBuyButton.interactable = !_materialAutoBuyBusy;
+        }
+    }
+
+    private static void SetMaterialAffixFilterDraftEnabled(bool enabled)
+    {
+        if (!_materialAffixFilterPopupOpen)
+        {
+            return;
+        }
+
+        _materialAffixFilterDraftEnabled = enabled;
+        _materialAffixFilterDraftMessage = enabled && _materialAffixFilterDraftRules.Count == 0
+            ? "启用时请至少添加一个词条条件"
+            : "词条条件会与品级、等级条件同时生效";
+        UpdateMaterialAffixFilterPopupVisuals();
+    }
+
+    private static void SetMaterialAffixFilterDraftCombineMode(MaterialAffixCombineMode mode)
+    {
+        if (!_materialAffixFilterPopupOpen)
+        {
+            return;
+        }
+
+        _materialAffixFilterDraftCombineMode = mode;
+        UpdateMaterialAffixFilterPopupVisuals();
+    }
+
+    private static void ToggleMaterialAffixFilterComposerKind()
+    {
+        if (!_materialAffixFilterPopupOpen)
+        {
+            return;
+        }
+
+        _materialAffixFilterComposerKind = _materialAffixFilterComposerKind == MaterialAffixMatchKind.Contains
+            ? MaterialAffixMatchKind.Exact
+            : MaterialAffixMatchKind.Contains;
+        UpdateMaterialAffixFilterPopupVisuals();
+    }
+
+    private static bool TryAddMaterialAffixFilterDraftRule()
+    {
+        if (!_materialAffixFilterPopupOpen || _materialAffixFilterInput == null)
+        {
+            return false;
+        }
+
+        var text = NormalizeMaterialAffixFilterRuleText(_materialAffixFilterInput.text);
+        if (text.Length == 0)
+        {
+            _materialAffixFilterDraftMessage = "请输入词条文字";
+            UpdateMaterialAffixFilterPopupVisuals();
+            return false;
+        }
+
+        if (_materialAffixFilterDraftRules.Count >= MaterialAffixFilterMaxRuleCount)
+        {
+            _materialAffixFilterDraftMessage = $"最多可添加 {MaterialAffixFilterMaxRuleCount} 条";
+            UpdateMaterialAffixFilterPopupVisuals();
+            return false;
+        }
+
+        if (_materialAffixFilterDraftRules.Any(rule =>
+                rule.Kind == _materialAffixFilterComposerKind &&
+                string.Equals(rule.Text, text, StringComparison.OrdinalIgnoreCase)))
+        {
+            _materialAffixFilterDraftMessage = "条件已存在";
+            UpdateMaterialAffixFilterPopupVisuals();
+            return false;
+        }
+
+        _materialAffixFilterDraftRules.Add(new MaterialAffixFilterRule
+        {
+            Text = text,
+            Kind = _materialAffixFilterComposerKind
+        });
+        _materialAffixFilterInput.text = string.Empty;
+        _materialAffixFilterDraftMessage = _materialAffixFilterDraftRules.Count >= MaterialAffixFilterMaxRuleCount
+            ? $"最多可添加 {MaterialAffixFilterMaxRuleCount} 条"
+            : "已添加词条条件";
+        UpdateMaterialAffixFilterPopupVisuals();
+        try
+        {
+            _materialAffixFilterInput.ActivateInputField();
+        }
+        catch
+        {
+        }
+
+        return true;
+    }
+
+    private static void ToggleMaterialAffixFilterDraftRuleKind(int index)
+    {
+        if (!_materialAffixFilterPopupOpen || index < 0 || index >= _materialAffixFilterDraftRules.Count)
+        {
+            return;
+        }
+
+        var rule = _materialAffixFilterDraftRules[index];
+        rule.Kind = rule.Kind == MaterialAffixMatchKind.Contains
+            ? MaterialAffixMatchKind.Exact
+            : MaterialAffixMatchKind.Contains;
+        _materialAffixFilterDraftMessage = "已修改匹配方式";
+        UpdateMaterialAffixFilterPopupVisuals();
+    }
+
+    private static void DeleteMaterialAffixFilterDraftRule(int index)
+    {
+        if (!_materialAffixFilterPopupOpen || index < 0 || index >= _materialAffixFilterDraftRules.Count)
+        {
+            return;
+        }
+
+        _materialAffixFilterDraftRules.RemoveAt(index);
+        _materialAffixFilterDraftMessage = _materialAffixFilterDraftRules.Count == 0
+            ? "尚未添加词条条件"
+            : "已删除词条条件";
+        UpdateMaterialAffixFilterPopupVisuals();
+    }
+
+    private static void ApplyMaterialAffixFilterDraft()
+    {
+        if (!_materialAffixFilterPopupOpen)
+        {
+            return;
+        }
+
+        if (_materialAffixFilterInput != null &&
+            NormalizeMaterialAffixFilterRuleText(_materialAffixFilterInput.text).Length > 0 &&
+            !TryAddMaterialAffixFilterDraftRule())
+        {
+            return;
+        }
+
+        if (_materialAffixFilterDraftEnabled && _materialAffixFilterDraftRules.Count == 0)
+        {
+            _materialAffixFilterDraftMessage = "启用时请至少添加一个词条条件";
+            UpdateMaterialAffixFilterPopupVisuals();
+            return;
+        }
+
+        _materialAffixFilterAppliedRules.Clear();
+        _materialAffixFilterAppliedRules.AddRange(
+            _materialAffixFilterDraftRules.Select(CloneMaterialAffixFilterRule));
+        _materialAffixFilterEnabled.Value = _materialAffixFilterDraftEnabled;
+        _materialAffixFilterCombineMode.Value = _materialAffixFilterDraftCombineMode;
+        PersistMaterialAffixFilterRules();
+
+        var modeText = _materialAffixFilterCombineMode.Value == MaterialAffixCombineMode.All ? "全部" : "任一";
+        var message = _materialAffixFilterEnabled.Value
+            ? $"材料词条筛选已应用：{modeText}，共 {_materialAffixFilterAppliedRules.Count} 条。"
+            : $"材料词条筛选已关闭，已保留 {_materialAffixFilterAppliedRules.Count} 条条件。";
+        CloseMaterialAffixFilterPopup(discardDraft: true);
+        PushPlayerLog(message);
+        SetExternalOverlayStatusMessage(message);
+        LoggerInstance.LogInfo($"[MaterialSweep] {message}");
+        UpdateMaterialAutoBuyUiState();
+    }
+
+    private static void UpdateMaterialAffixFilterPopupVisuals()
+    {
+        if (_materialAffixFilterPanelRoot == null)
+        {
+            return;
+        }
+
+        if (_materialAffixFilterEnabledButtonLabel != null)
+        {
+            _materialAffixFilterEnabledButtonLabel.text = _materialAffixFilterDraftEnabled ? "✓ 启用" : "启用";
+        }
+
+        SetMaterialAffixButtonSelected(_materialAffixFilterEnabledButton, _materialAffixFilterDraftEnabled);
+        SetMaterialAffixButtonSelected(
+            _materialAffixFilterAllButton,
+            _materialAffixFilterDraftCombineMode == MaterialAffixCombineMode.All);
+        SetMaterialAffixButtonSelected(
+            _materialAffixFilterAnyButton,
+            _materialAffixFilterDraftCombineMode == MaterialAffixCombineMode.Any);
+
+        if (_materialAffixFilterComposerKindButtonLabel != null)
+        {
+            _materialAffixFilterComposerKindButtonLabel.text =
+                _materialAffixFilterComposerKind == MaterialAffixMatchKind.Contains ? "包含" : "完全";
+        }
+
+        if (_materialAffixFilterAddButton != null)
+        {
+            _materialAffixFilterAddButton.interactable =
+                _materialAffixFilterDraftRules.Count < MaterialAffixFilterMaxRuleCount;
+        }
+
+        for (var index = 0; index < MaterialAffixFilterMaxRuleCount; index++)
+        {
+            var visible = index < _materialAffixFilterDraftRules.Count;
+            if (index < _materialAffixFilterRuleRowRoots.Count)
+            {
+                SetOverlayObjectActive(_materialAffixFilterRuleRowRoots[index], visible);
+            }
+
+            if (index < _materialAffixFilterRuleKindButtons.Count)
+            {
+                SetOverlayObjectActive(_materialAffixFilterRuleKindButtons[index].gameObject, visible);
+            }
+
+            if (index < _materialAffixFilterRuleDeleteButtons.Count)
+            {
+                SetOverlayObjectActive(_materialAffixFilterRuleDeleteButtons[index].gameObject, visible);
+            }
+
+            if (!visible)
+            {
+                continue;
+            }
+
+            var rule = _materialAffixFilterDraftRules[index];
+            if (index < _materialAffixFilterRuleLabels.Count)
+            {
+                _materialAffixFilterRuleLabels[index].text = rule.Text;
+            }
+
+            if (index < _materialAffixFilterRuleKindLabels.Count)
+            {
+                _materialAffixFilterRuleKindLabels[index].text =
+                    rule.Kind == MaterialAffixMatchKind.Contains ? "包含" : "完全";
+            }
+        }
+
+        if (_materialAffixFilterEmptyLabel != null)
+        {
+            _materialAffixFilterEmptyLabel.gameObject.SetActive(_materialAffixFilterDraftRules.Count == 0);
+        }
+
+        if (_materialAffixFilterMessageLabel != null)
+        {
+            _materialAffixFilterMessageLabel.text = string.IsNullOrWhiteSpace(_materialAffixFilterDraftMessage)
+                ? "词条条件会与品级、等级条件同时生效"
+                : _materialAffixFilterDraftMessage;
+        }
+    }
+
+    private static void SetMaterialAffixButtonSelected(Button? button, bool selected)
+    {
+        if (button?.targetGraphic == null)
+        {
+            return;
+        }
+
+        button.targetGraphic.color = selected
+            ? new Color(0.22f, 0.52f, 0.26f, 0.98f)
+            : new Color(0.48f, 0.28f, 0.12f, 0.96f);
+    }
+
     private static void ToggleMaterialFilterDropdown()
     {
         if (!_materialAutoBuyEnabled.Value || !TryGetActiveShopTradeUi(out var tradeUi))
@@ -6475,6 +7915,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
 
         EnsureMaterialAutoBuyControls(tradeUi);
+        CloseMaterialAffixFilterPopup(discardDraft: true);
         _materialFilterDropdownOpen = !_materialFilterDropdownOpen;
         if (_materialFilterDropdownOpen)
         {
@@ -6532,6 +7973,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         _materialFilterDropdownOpen = false;
         SetMaterialFilterOptionsVisible(false);
+        CloseMaterialAffixFilterPopup(discardDraft: true);
         if (!TryGetActiveShopTradeUi(out var tradeUi))
         {
             PublishMaterialSweepStatus("材料扫货：当前不在商店交易界面。", warning: true);
@@ -6540,6 +7982,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         var minRareLv = GetMaterialPurchaseRareLevel();
         var minItemLv = GetMaterialPurchaseItemLevel();
+        var affixSummary = _materialAffixFilterEnabled.Value
+            ? $"，词条：{(_materialAffixFilterCombineMode.Value == MaterialAffixCombineMode.All ? "全部" : "任一")}{_materialAffixFilterAppliedRules.Count}条"
+            : string.Empty;
         _materialAutoBuyBusy = true;
         UpdateMaterialAutoBuyUiState();
 
@@ -6559,13 +8004,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             else if (selectedCount <= 0)
             {
                 PublishMaterialSweepStatus(
-                    $"材料扫货：没有满足品级≥{GetMaterialRareLevelName(minRareLv)}且等级≥{GetMaterialItemLevelName(minItemLv)}的材料。",
+                    $"材料扫货：没有满足品级≥{GetMaterialRareLevelName(minRareLv)}、等级≥{GetMaterialItemLevelName(minItemLv)}{affixSummary}的材料。",
                     warning: false);
             }
             else
             {
                 PublishMaterialSweepStatus(
-                    $"材料扫货已把 {selectedCount} 件材料加入交易区（品级≥{GetMaterialRareLevelName(minRareLv)}，等级≥{GetMaterialItemLevelName(minItemLv)}）；请检查后手动成交。",
+                    $"材料扫货已把 {selectedCount} 件材料加入交易区（品级≥{GetMaterialRareLevelName(minRareLv)}，等级≥{GetMaterialItemLevelName(minItemLv)}{affixSummary}）；请检查后手动成交。",
                     warning: false);
             }
         }
@@ -6602,7 +8047,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             }
 
             foundMaterialCount++;
-            if (!IsMaterialMatchingThresholds(item, minRareLv, minItemLv))
+            if (!IsMaterialMatchingSweepFilters(item, minRareLv, minItemLv))
             {
                 continue;
             }
@@ -6626,15 +8071,76 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         LoggerInstance.LogInfo(
             $"[MaterialSweep] Completed: minRareLv={minRareLv}, minItemLv={minItemLv}, " +
+            $"affixEnabled={_materialAffixFilterEnabled.Value}, affixMode={_materialAffixFilterCombineMode.Value}, affixRules={_materialAffixFilterAppliedRules.Count}, " +
             $"materials={foundMaterialCount}, added={selectedCount}. No transaction was confirmed automatically.");
     }
 
-    private static bool IsMaterialMatchingThresholds(ItemData? item, int minRareLv, int minItemLv)
+    private static bool IsMaterialMatchingSweepFilters(ItemData? item, int minRareLv, int minItemLv)
     {
         return item != null &&
             item.type == ItemType.Material &&
             item.rareLv >= ClampMaterialFilterLevel(minRareLv) &&
-            item.itemLv >= ClampMaterialFilterLevel(minItemLv);
+            item.itemLv >= ClampMaterialFilterLevel(minItemLv) &&
+            IsMaterialMatchingAffixFilter(item);
+    }
+
+    private static bool IsMaterialMatchingAffixFilter(ItemData item)
+    {
+        if (!_materialAffixFilterEnabled.Value || _materialAffixFilterAppliedRules.Count == 0)
+        {
+            return true;
+        }
+
+        var affixLines = GetMaterialAffixLines(item);
+        if (affixLines.Count == 0)
+        {
+            return false;
+        }
+
+        bool MatchesRule(MaterialAffixFilterRule rule)
+        {
+            return affixLines.Any(line => rule.Kind == MaterialAffixMatchKind.Exact
+                ? string.Equals(line, rule.Text, StringComparison.OrdinalIgnoreCase)
+                : line.IndexOf(rule.Text, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        return _materialAffixFilterCombineMode.Value == MaterialAffixCombineMode.All
+            ? _materialAffixFilterAppliedRules.All(MatchesRule)
+            : _materialAffixFilterAppliedRules.Any(MatchesRule);
+    }
+
+    private static List<string> GetMaterialAffixLines(ItemData item)
+    {
+        var lines = new List<string>();
+        try
+        {
+            var affixText = item.materialData?.extraAddData?.GetDescribe(
+                useColor: false,
+                newLine: true,
+                digits: 2,
+                merge: false);
+            if (string.IsNullOrWhiteSpace(affixText))
+            {
+                return lines;
+            }
+
+            foreach (var line in affixText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var normalized = line.Trim();
+                if (normalized.Length > 0 &&
+                    !lines.Any(existing => string.Equals(existing, normalized, StringComparison.OrdinalIgnoreCase)))
+                {
+                    lines.Add(normalized);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[MaterialSweep] Could not read affixes for {DescribeItemSummary(item)}: {ex.Message}");
+        }
+
+        return lines;
     }
 
     private static void PublishMaterialSweepStatus(string message, bool warning)
@@ -9473,6 +10979,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         KeepPlayerHorseTurboReady("Update");
         ApplyPlayerCarryWeightOverride("Update");
         UpdateTreasureTradeUiState();
+        UpdateGovernmentStorageRefreshAssist();
         UpdateAuctionPreviewRefreshAssist();
         UpdateTreasureIdentifyBestValueAssist();
         UpdateBreakthroughRerollAssist();

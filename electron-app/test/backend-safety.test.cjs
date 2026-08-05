@@ -556,6 +556,59 @@ test('craft reroll reads only the Craft section and round-trips', async (t) => {
   assert.doesNotMatch(text, /\[Craft\][\s\S]*?^(?:RerollHotkey|RerollRequireAlt)\s*=/m);
 });
 
+test('government storage refresh defaults enabled with the R shortcut', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const settings = await readVisibleSettings(gameRoot);
+
+  assert.equal(settings.governmentStorageRefreshEnabled, true);
+  assert.equal(settings.governmentStorageRefreshHotkey, 'R');
+});
+
+test('government storage refresh is section-scoped and round-trips without touching decoys', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[WrongSection]',
+      'RefreshEnabled = decoy-enabled',
+      'RefreshHotkey = DECOY_KEY',
+      'UnrelatedDecoySetting = keep-decoy',
+      '',
+      '[GovernmentStorage]',
+      'RefreshEnabled = false',
+      'RefreshHotkey = T',
+      'UnrelatedGovernmentStorageSetting = keep-owner',
+      ''
+    ].join('\r\n')
+  );
+
+  const current = await readVisibleSettings(gameRoot);
+  assert.equal(current.governmentStorageRefreshEnabled, false);
+  assert.equal(current.governmentStorageRefreshHotkey, 'T');
+
+  const saved = await saveVisibleSettings(gameRoot, {
+    ...current,
+    governmentStorageRefreshEnabled: true,
+    governmentStorageRefreshHotkey: 'Y'
+  });
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.equal(saved.governmentStorageRefreshEnabled, true);
+  assert.equal(saved.governmentStorageRefreshHotkey, 'Y');
+  assert.match(text, /\[GovernmentStorage\][\s\S]*?^RefreshEnabled = true$/m);
+  assert.match(text, /\[GovernmentStorage\][\s\S]*?^RefreshHotkey = Y$/m);
+  assert.match(text, /^UnrelatedGovernmentStorageSetting = keep-owner$/m);
+  assert.match(
+    text,
+    /\[WrongSection\]\r?\nRefreshEnabled = decoy-enabled\r?\nRefreshHotkey = DECOY_KEY\r?\nUnrelatedDecoySetting = keep-decoy/
+  );
+});
+
 test('commerce and assist settings have safe defaults with only the supported auction shortcut', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));

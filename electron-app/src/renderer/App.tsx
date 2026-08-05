@@ -1912,6 +1912,23 @@ export function App() {
                   </div>
                 </Card>
 
+                <Card title="官府仓库刷新" eyebrow="Government Storage">
+                  <div className="field-grid">
+                    <CheckboxField
+                      label="启用官府仓库刷新"
+                      value={settings.governmentStorageRefreshEnabled}
+                      onChange={(value) => updateSetting('governmentStorageRefreshEnabled', value)}
+                      hint="启用后在官府仓库页面显示“刷新”按钮。"
+                    />
+                    <TextField
+                      label="官府仓库刷新快捷键"
+                      value={settings.governmentStorageRefreshHotkey}
+                      onChange={(value) => updateSetting('governmentStorageRefreshHotkey', value)}
+                      hint="快捷键只在官府仓库页面可见时生效；填写 Unity KeyCode 名称，例如 R 或 F8。"
+                    />
+                  </div>
+                </Card>
+
                 <Card title="制造增产" eyebrow="Craft">
                   <div className="field-grid">
                     <CheckboxField

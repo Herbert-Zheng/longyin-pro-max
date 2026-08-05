@@ -166,6 +166,22 @@ test('trade and craft settings expose craft reroll as a button-only toggle', () 
   assert.doesNotMatch(renderer, /craftReroll(?:Hotkey|RequireAlt)/);
 });
 
+test('trade and craft settings expose dedicated government storage refresh controls and scope copy', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+
+  assert.match(renderer, /<Card title="官府仓库刷新" eyebrow="Government Storage">/);
+  assert.match(
+    renderer,
+    /label="启用官府仓库刷新"[\s\S]{0,240}value=\{settings\.governmentStorageRefreshEnabled\}[\s\S]{0,240}updateSetting\('governmentStorageRefreshEnabled', value\)/
+  );
+  assert.match(
+    renderer,
+    /label="官府仓库刷新快捷键"[\s\S]{0,240}value=\{settings\.governmentStorageRefreshHotkey\}[\s\S]{0,240}updateSetting\('governmentStorageRefreshHotkey', value\)/
+  );
+  assert.match(renderer, /在官府仓库页面显示“刷新”按钮/);
+  assert.match(renderer, /快捷键只在官府仓库页面可见时生效/);
+});
+
 test('launcher keeps primary actions visible and clearly marks unsaved settings', () => {
   const renderer = readSource('src/renderer/App.tsx');
   const styles = readSource('src/renderer/styles.css');

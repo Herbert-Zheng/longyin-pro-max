@@ -81,6 +81,8 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   auctionEventAlwaysRedEnabled: true,
   auctionPreviewRefreshEnabled: true,
   auctionPreviewRefreshHotkey: 'R',
+  governmentStorageRefreshEnabled: true,
+  governmentStorageRefreshHotkey: 'R',
   treasureIdentifyBestValueAssistEnabled: true,
   breakthroughRerollEnabled: true,
   craftRerollEnabled: true,
@@ -667,6 +669,10 @@ EventAlwaysRedEnabled = ${boolText(settings.auctionEventAlwaysRedEnabled)}
 PreviewRefreshEnabled = ${boolText(settings.auctionPreviewRefreshEnabled)}
 PreviewRefreshHotkey = ${settings.auctionPreviewRefreshHotkey}
 
+[GovernmentStorage]
+RefreshEnabled = ${boolText(settings.governmentStorageRefreshEnabled)}
+RefreshHotkey = ${settings.governmentStorageRefreshHotkey}
+
 [TreasureIdentify]
 BestValueAssistEnabled = ${boolText(settings.treasureIdentifyBestValueAssistEnabled)}
 
@@ -897,6 +903,11 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
       input.auctionPreviewRefreshHotkey,
       DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshHotkey
     ),
+    governmentStorageRefreshEnabled: input.governmentStorageRefreshEnabled,
+    governmentStorageRefreshHotkey: normalizeHotkey(
+      input.governmentStorageRefreshHotkey,
+      DEFAULT_VISIBLE_SETTINGS.governmentStorageRefreshHotkey
+    ),
     treasureIdentifyBestValueAssistEnabled: input.treasureIdentifyBestValueAssistEnabled,
     breakthroughRerollEnabled: input.breakthroughRerollEnabled,
     craftRerollEnabled: input.craftRerollEnabled,
@@ -945,6 +956,7 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
   const systemsSection = getIniSectionBody(text, 'Systems') ?? getIniSectionBody(text, 'Time');
   const commerceSection = getIniSectionBody(text, 'Commerce');
   const auctionSection = getIniSectionBody(text, 'Auction');
+  const governmentStorageSection = getIniSectionBody(text, 'GovernmentStorage');
   const treasureIdentifySection = getIniSectionBody(text, 'TreasureIdentify');
   const breakthroughSection = getIniSectionBody(text, 'Breakthrough');
   const craftSection = getIniSectionBody(text, 'Craft');
@@ -1016,6 +1028,16 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       auctionSection,
       'PreviewRefreshHotkey',
       DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshHotkey
+    ),
+    governmentStorageRefreshEnabled: readBool(
+      governmentStorageSection,
+      'RefreshEnabled',
+      DEFAULT_VISIBLE_SETTINGS.governmentStorageRefreshEnabled
+    ),
+    governmentStorageRefreshHotkey: readString(
+      governmentStorageSection,
+      'RefreshHotkey',
+      DEFAULT_VISIBLE_SETTINGS.governmentStorageRefreshHotkey
     ),
     treasureIdentifyBestValueAssistEnabled: readBool(
       treasureIdentifySection,
@@ -1474,6 +1496,18 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'Auction',
     'PreviewRefreshHotkey',
     normalized.auctionPreviewRefreshHotkey
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'GovernmentStorage',
+    'RefreshEnabled',
+    boolText(normalized.governmentStorageRefreshEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'GovernmentStorage',
+    'RefreshHotkey',
+    normalized.governmentStorageRefreshHotkey
   );
   nextMain = removeIniSectionValue(nextMain, 'Auction', 'PreviewRefreshRequireAlt');
   nextMain = removeIniSectionCommentBlock(

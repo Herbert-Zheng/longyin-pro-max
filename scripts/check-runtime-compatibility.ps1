@@ -80,6 +80,7 @@ if ($sourceRegistersManagedUnityClickListener) {
 
 $requiredInteropMembers = [ordered]@{
     PlotController = @(
+        'ShowGovernStorage',
         'ShowAuctionItem',
         'HidePlotItem',
         'ClearPlotItem',
@@ -91,6 +92,8 @@ $requiredInteropMembers = [ordered]@{
         'tempPlotShop',
         'nowEvent'
     )
+    GameController = @('RefreshGovernStorage', 'worldData')
+    WorldData = @('governStorage')
     WorldEventController = @('GetWorldEventRandomDifficulty')
     WorldEventDataBase = @('name', 'eventData')
     EventData = @('eventName', 'eventItemList', 'difficulty', 'randomSeed')
@@ -101,10 +104,13 @@ $requiredInteropMembers = [ordered]@{
         'identifyMatchUIPanel',
         'sureButton'
     )
-    TradeUIController = @('rightList', 'tradeUI', 'tradeUIType', 'TradeIconClicked', 'FreshResourceLabel')
+    TradeUIController = @('rightList', 'tradeUI', 'tradeUIType', 'leftResourceLabel', 'HideTradeUI', 'TradeIconClicked', 'FreshResourceLabel')
+    TradeUIType = @('GovernStorage', 'Shop')
+    ItemListData = @('Clone', 'allItem')
     ItemListController = @('itemGrid')
     ItemIconController = @('itemData')
     ItemData = @('GetTreasureRealValue', 'type', 'rareLv', 'itemLv')
+    HeroSpeAddData = @('GetDescribe')
     ItemType = @('Material')
 }
 
@@ -161,6 +167,7 @@ if (-not $SkipRuntimeLog) {
             'LongYin Skip Intro 1.0.1 loaded',
             '[Compatibility] Summary:',
             '[Compatibility] Auction preview refresh: ENABLED',
+            '[Compatibility] Government storage refresh: ENABLED',
             '[Compatibility] Treasure identify assist: ENABLED',
             '[Compatibility] Hero tag database: ENABLED'
         )

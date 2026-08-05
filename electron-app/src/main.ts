@@ -83,6 +83,8 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   auctionEventAlwaysRedEnabled: true,
   auctionPreviewRefreshEnabled: true,
   auctionPreviewRefreshHotkey: 'R',
+  governmentStorageRefreshEnabled: true,
+  governmentStorageRefreshHotkey: 'R',
   treasureIdentifyBestValueAssistEnabled: true,
   breakthroughRerollEnabled: true,
   craftRerollEnabled: true,

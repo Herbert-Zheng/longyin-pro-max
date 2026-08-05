@@ -278,6 +278,8 @@ export interface VisibleSettings {
   auctionEventAlwaysRedEnabled: boolean;
   auctionPreviewRefreshEnabled: boolean;
   auctionPreviewRefreshHotkey: string;
+  governmentStorageRefreshEnabled: boolean;
+  governmentStorageRefreshHotkey: string;
   treasureIdentifyBestValueAssistEnabled: boolean;
   breakthroughRerollEnabled: boolean;
   craftRerollEnabled: boolean;

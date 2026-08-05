@@ -64,3 +64,49 @@ test('renderer runtime exceptions and error-level console messages fail the smok
     /renderer.*error/i
   );
 });
+
+test('renderer UI contract rejects collapsed-panel and tile-alignment regressions', async () => {
+  const { assertRendererUiContracts } = await loadHarness();
+  const healthyUi = {
+    heroSummaryGap: 16,
+    systems: {
+      environmentFullWidth: true,
+      healthCollapsed: true,
+      healthSummaryText: '健康检查详情 全部通过',
+      overlayExplained: true,
+      controlCount: 3,
+      controlHeightSpread: 0
+    },
+    settingsPages: [
+      { label: '成长与天赋', gridPresent: true, cardCount: 2, tileCount: 2, cardsSelfAligned: true, tileHeightSpread: 0 },
+      { label: '交易与制造', gridPresent: true, cardCount: 2, tileCount: 2, cardsSelfAligned: true, tileHeightSpread: 0 },
+      { label: '社交与组队', gridPresent: true, cardCount: 2, tileCount: 2, cardsSelfAligned: true, tileHeightSpread: 0 }
+    ],
+    customTalents: {
+      conditionOptionCount: 2,
+      intelligenceUsesRawValue: true,
+      intelligenceLabel: '智力',
+      effectOptionCount: 215,
+      uniqueEffectLabelCount: 215,
+      allEffectLabelsChinese: true
+    }
+  };
+
+  assert.doesNotThrow(() => assertRendererUiContracts(healthyUi));
+  assert.throws(
+    () => assertRendererUiContracts({ ...healthyUi, heroSummaryGap: 12 }),
+    /hero.*summary.*16/i
+  );
+  assert.throws(
+    () => assertRendererUiContracts({ ...healthyUi, systems: { ...healthyUi.systems, healthCollapsed: false } }),
+    /health.*collapsed/i
+  );
+  assert.throws(
+    () => assertRendererUiContracts({ ...healthyUi, customTalents: { ...healthyUi.customTalents, intelligenceLabel: 'Intelligence' } }),
+    /attributes.*智力/i
+  );
+  assert.throws(
+    () => assertRendererUiContracts({ ...healthyUi, settingsPages: [{ ...healthyUi.settingsPages[0], gridPresent: false, cardCount: 0, tileCount: 0 }] }),
+    /cannot be measured/i
+  );
+});

@@ -217,3 +217,45 @@ test('commerce settings use readable groups without legacy shortcut controls', (
   assert.doesNotMatch(renderer, /拍卖刷新主键|拍卖刷新需要按住 Alt/);
   assert.doesNotMatch(renderer, /最高估值选择主键|最高估值选择需要按住 Alt/);
 });
+
+test('renderer settings pages use scoped, aligned tiles without stretching cards', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+  const styles = readSource('src/renderer/styles.css');
+
+  assert.match(styles, /\.workspace__hero\s*\+\s*\.summary-grid\s*\{\s*margin-top:\s*4px;/);
+  assert.match(renderer, /className="page-grid page-grid--systems page-grid--settings"/);
+  assert.match(renderer, /className="page-grid page-grid--settings"/);
+  assert.match(styles, /\.page-grid--settings\s*\{[\s\S]*?align-items:\s*start;/);
+  assert.match(styles, /\.page-grid--settings\s*>\s*\.card\s*\{[\s\S]*?align-self:\s*start;/);
+  assert.match(styles, /\.page-grid--settings\s+\.field,[\s\S]*?\.page-grid--settings\s+\.toggle\s*\{[\s\S]*?min-height:\s*112px;/);
+});
+
+test('systems page makes environment full width and health details collapsible', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+  const styles = readSource('src/renderer/styles.css');
+
+  assert.match(renderer, /<div className="system-environment-card">[\s\S]*?<Card title="环境自检与目录"/);
+  assert.match(styles, /\.system-environment-card\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1;/);
+  assert.match(renderer, /<details className="health-details">/);
+  assert.match(renderer, /<summary>[\s\S]*?健康检查详情[\s\S]*?health\.summary/);
+  assert.match(renderer, /游戏内悬浮信息窗/);
+  assert.match(renderer, /无需切回启动器/);
+});
+
+test('custom talent selects show Chinese labels while preserving raw keys', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+  const components = readSource('src/renderer/components.tsx');
+  const customTalents = readSource('src/renderer/customTalents.ts');
+
+  assert.match(components, /getOptionLabel\?:\s*\(option:\s*T\)\s*=>\s*string/);
+  assert.match(components, /<option key=\{option\} value=\{option\}>[\s\S]*?props\.getOptionLabel\?\.\(option\)\s*\?\?\s*option/);
+  assert.match(renderer, /getOptionLabel=\{formatCustomTalentConditionType\}/);
+  assert.match(renderer, /getOptionLabel=\{formatBaseAttriType\}/);
+  assert.match(renderer, /getOptionLabel=\{formatHeroSpeAddDataType\}/);
+  assert.match(customTalents, /export const HERO_SPE_ADD_DATA_TYPE_LABELS:[\s\S]*?Record<HeroSpeAddDataTypeName, string>/);
+  assert.match(customTalents, /HERO_SPE_ADD_DATA_TYPE_NAMES\.map/);
+  assert.match(renderer, /条件 \{conditionIndex \+ 1\}/);
+  assert.match(renderer, /效果 \{effectIndex \+ 1\}/);
+  assert.match(renderer, /首个条件：\$\{formatCustomTalentConditionType/);
+  assert.match(renderer, /首个效果：\$\{formatHeroSpeAddDataType/);
+});

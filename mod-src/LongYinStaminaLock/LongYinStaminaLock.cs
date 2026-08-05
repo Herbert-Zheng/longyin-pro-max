@@ -14,7 +14,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.33.0")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.33.1")]
 public sealed class LongYinStaminaLockPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -24,6 +24,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const int DailySkillInsightMaxLevel = 10;
     private const int LuckyMoneyMinPercent = 1;
     private const int LuckyMoneyMaxPercent = 30;
+    private const int MaxDeferredRelationshipBonusLogs = 32;
     private const int TeachSkillSplashMinPercentFloor = 0;
     private const int TeachSkillSplashMaxPercentCeiling = 500;
     private const KeyCode ViewedHeroFavorTestHotkey = KeyCode.K;
@@ -163,6 +164,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static readonly string[] DrinkEnemyFillAmountMemberNames = { "enemyFillAmount" };
     private static readonly System.Random Random = new();
     private static bool _applyingLuckyMoneyRefund;
+    private static bool _relationshipBonusHooksReady;
     private static bool _applyingDailySkillInsightExp;
     private static bool _applyingTeamAutoFavor;
     private static bool _applyingTeamFameShare;
@@ -196,6 +198,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool _preferredBattleTimeScaleCaptured;
     private static float _preferredBattleTimeScale = 1f;
     private static readonly Dictionary<string, int> _dialogMonthlyUseCounts = new(StringComparer.Ordinal);
+    private static readonly Queue<DeferredPlayerLogEntry> DeferredRelationshipBonusLogs = new();
     private static HeroData? _activeDialogHero;
     private static int _activeDialogHeroId = -1;
     private static HeroData? _activeHeroDetailHero;
@@ -230,6 +233,22 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         public bool IsEligible { get; init; }
         public float RequestedDelta { get; init; }
         public float? FameBefore { get; init; }
+    }
+
+    private sealed class RelationshipBonusState
+    {
+        public bool IsApplied { get; init; }
+        public float OriginalGain { get; init; }
+        public float AppliedGain { get; init; }
+        public int ChancePercent { get; init; }
+        public int Roll { get; init; }
+        public string Message { get; init; } = string.Empty;
+    }
+
+    private sealed class DeferredPlayerLogEntry
+    {
+        public int EarliestFrame { get; init; }
+        public string Message { get; init; } = string.Empty;
     }
 
     private sealed class CalendarChangeState
@@ -489,10 +508,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static GameObject? _auctionPreviewRefreshButtonRoot;
     private static Button? _auctionPreviewRefreshButton;
     private static Text? _auctionPreviewRefreshButtonLabel;
+    private static RectTransform? _auctionPreviewRefreshButtonHost;
     private static Text? _auctionPreviewVisibilityMarker;
     private static bool _auctionPreviewOpen;
     private static bool _auctionPreviewVisibilityConfirmed;
     private static bool _auctionPreviewRefreshBusy;
+    private static bool _auctionPreviewVisualBoundsDiagnosticLogged;
     private static float _auctionPreviewRefreshButtonReadyAt;
     private static IdentifyMatchController? _identifyMatchController;
     private static GameObject? _identifyBestTreasureButtonRoot;
@@ -693,7 +714,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(HeroData), nameof(HeroData.AddSkillBookExp), new[] { typeof(float), typeof(KungfuSkillLvData), typeof(bool) }, nameof(AddSkillBookExpPrefix), null);
         PatchMethod(typeof(HeroData), nameof(HeroData.BattleChangeSkillFightExp), new[] { typeof(float), typeof(KungfuSkillLvData), typeof(bool) }, nameof(BattleChangeSkillFightExpPrefix), null);
         PatchMethod(typeof(HeroData), nameof(HeroData.ChangeMoney), new[] { typeof(int), typeof(bool) }, nameof(ChangeMoneyPrefix), nameof(ChangeMoneyPostfix));
-        PatchMethod(typeof(HeroData), nameof(HeroData.ChangeFavor), new[] { typeof(float), typeof(bool), typeof(float), typeof(float), typeof(bool) }, nameof(ChangeFavorPrefix), null);
+        var changeFavorPatched = PatchMethod(typeof(HeroData), nameof(HeroData.ChangeFavor), new[] { typeof(float), typeof(bool), typeof(float), typeof(float), typeof(bool) }, nameof(ChangeFavorPrefix), nameof(ChangeFavorPostfix));
         PatchHeroChangeFameMethod();
         PatchMethod(typeof(PlotController), nameof(PlotController.ManageTeachSkill), new[] { typeof(HeroData), typeof(HeroData), typeof(int), typeof(float), typeof(bool) }, nameof(ManageTeachSkillPrefix), nameof(ManageTeachSkillPostfix));
         var battleSpeedPatched = PatchMethod(typeof(BattleController), nameof(BattleController.BattleTimeScaleButtonClicked), new[] { typeof(GameObject) }, null, nameof(BattleTimeScaleButtonClickedPostfix));
@@ -805,6 +826,9 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var loadGamePatched = PatchMethod(typeof(SaveLoadMenuController), nameof(SaveLoadMenuController.LoadGame), new[] { typeof(int) }, nameof(LoadGamePrefix), null);
         var loadAllGameDataPatched = PatchMethod(typeof(GameDataController), nameof(GameDataController.LoadAllGameData), Type.EmptyTypes, null, nameof(LoadAllGameDataPostfix));
         var gameControllerUpdatePatched = PatchMethod(typeof(GameController), "Update", Type.EmptyTypes, null, nameof(GameControllerUpdatePostfix));
+        _relationshipBonusHooksReady = changeFavorPatched && gameControllerUpdatePatched;
+        LoggerInstance.LogInfo(
+            $"[Compatibility] Relationship bonus: {(_relationshipBonusHooksReady ? "ENABLED (ChangeFavor and deferred update hooks patched)" : "DISABLED (required ChangeFavor or deferred update hook unavailable)")}.");
         _breakthroughRerollHooksReady = breakthroughChoiceShowPatched &&
             breakthroughChoiceClickPatched &&
             breakthroughBookChoosePatched &&
@@ -3900,8 +3924,10 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _auctionPreviewRefreshButtonRoot = null;
         _auctionPreviewRefreshButton = null;
         _auctionPreviewRefreshButtonLabel = null;
+        _auctionPreviewRefreshButtonHost = null;
         _auctionPreviewVisibilityMarker = null;
         _auctionPreviewVisibilityConfirmed = false;
+        _auctionPreviewVisualBoundsDiagnosticLogged = false;
         _auctionPreviewRefreshButtonReadyAt = Time.unscaledTime + 0.35f;
     }
 
@@ -3915,6 +3941,54 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         if (_auctionPreviewRefreshButtonRoot != null &&
             _auctionPreviewRefreshButton != null &&
+            _auctionPreviewRefreshButtonLabel != null &&
+            _auctionPreviewVisibilityMarker?.gameObject != null &&
+            _auctionPreviewVisibilityMarker.gameObject.activeInHierarchy &&
+            _auctionPreviewRefreshButtonHost?.gameObject != null &&
+            _auctionPreviewRefreshButtonHost.gameObject.activeInHierarchy &&
+            _auctionPreviewRefreshButtonRoot.transform.parent == _auctionPreviewRefreshButtonHost.transform)
+        {
+            _auctionPreviewRefreshButtonLabel.text = "免费刷新展品";
+            SetOverlayObjectActive(_auctionPreviewRefreshButtonRoot, true);
+            return;
+        }
+
+        if (!TryResolveAuctionPreviewExhibitHost(controller, out var exhibitHost) || exhibitHost == null)
+        {
+            SetOverlayObjectActive(_auctionPreviewRefreshButtonRoot, false);
+            return;
+        }
+
+        if (!TryResolveAuctionPreviewVisualBounds(
+                exhibitHost,
+                out var visualFrame,
+                out var visualBounds,
+                out var buttonAnchoredPosition))
+        {
+            SetOverlayObjectActive(_auctionPreviewRefreshButtonRoot, false);
+            if (!_auctionPreviewVisualBoundsDiagnosticLogged)
+            {
+                LoggerInstance.LogWarning(
+                    $"Auction preview refresh button hidden because no reliable visible exhibit bounds were found inside " +
+                    $"{GetAuctionPreviewTransformPath(exhibitHost.transform)}.");
+                _auctionPreviewVisualBoundsDiagnosticLogged = true;
+            }
+            return;
+        }
+
+        if (_auctionPreviewRefreshButtonRoot != null &&
+            _auctionPreviewRefreshButtonRoot.transform.parent != exhibitHost.transform)
+        {
+            _auctionPreviewRefreshButtonRoot.SetActive(false);
+            UnityEngine.Object.Destroy(_auctionPreviewRefreshButtonRoot);
+            _auctionPreviewRefreshButtonRoot = null;
+            _auctionPreviewRefreshButton = null;
+            _auctionPreviewRefreshButtonLabel = null;
+            _auctionPreviewRefreshButtonHost = null;
+        }
+
+        if (_auctionPreviewRefreshButtonRoot != null &&
+            _auctionPreviewRefreshButton != null &&
             _auctionPreviewRefreshButtonLabel != null)
         {
             _auctionPreviewRefreshButtonLabel.text = "免费刷新展品";
@@ -3922,27 +3996,19 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
-        var grid = controller.plotItemGrid;
-        if (grid == null)
-        {
-            return;
-        }
-
         var plotPanel = controller.plotPanel;
-        var canvas = plotPanel?.GetComponentInParent<Canvas>();
-        var buttonParent = canvas?.rootCanvas?.transform ?? canvas?.transform ?? plotPanel?.transform ??
-            grid.transform.parent ?? grid.transform;
-        var buttonTemplate = FindUiButtonTemplate(plotPanel ?? grid);
+        var buttonParent = exhibitHost.transform;
+        var buttonTemplate = FindUiButtonTemplate(plotPanel ?? exhibitHost.gameObject);
         const string buttonText = "免费刷新展品";
         var created = buttonTemplate != null &&
             TryCreateButtonTemplateButton(
                 AuctionPreviewRefreshButtonName,
                 buttonParent,
                 buttonTemplate,
-                new Vector2(0.5f, 0.31f),
-                new Vector2(0.5f, 0.31f),
-                new Vector2(0.5f, 0.5f),
-                Vector2.zero,
+                new Vector2(0.5f, 0f),
+                new Vector2(0.5f, 0f),
+                new Vector2(0.5f, 0f),
+                buttonAnchoredPosition,
                 new Vector2(190f, 54f),
                 buttonText,
                 out _auctionPreviewRefreshButtonRoot,
@@ -3951,16 +4017,16 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         if (!created)
         {
-            var labelTemplate = FindUiTextTemplate(grid);
+            var labelTemplate = FindUiTextTemplate(exhibitHost.gameObject);
             created = labelTemplate != null &&
                 TryCreateTextTemplateButton(
                     AuctionPreviewRefreshButtonName,
                     buttonParent,
                     labelTemplate,
-                    new Vector2(0.5f, 0.31f),
-                    new Vector2(0.5f, 0.31f),
-                    new Vector2(0.5f, 0.5f),
-                    Vector2.zero,
+                    new Vector2(0.5f, 0f),
+                    new Vector2(0.5f, 0f),
+                    new Vector2(0.5f, 0f),
+                    buttonAnchoredPosition,
                     new Vector2(190f, 54f),
                     buttonText,
                     out _auctionPreviewRefreshButtonRoot,
@@ -3974,7 +4040,238 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
-        LoggerInstance.LogInfo("Auction preview refresh button created on the auction preview canvas.");
+        _auctionPreviewRefreshButtonHost = exhibitHost;
+        var hostRect = exhibitHost.rect;
+        LoggerInstance.LogInfo(
+            $"Auction preview refresh button created inside exhibit host {GetAuctionPreviewTransformPath(exhibitHost.transform)} " +
+            $"rect=({hostRect.x:0.#},{hostRect.y:0.#},{hostRect.width:0.#},{hostRect.height:0.#}), " +
+            $"visualFrame={GetAuctionPreviewTransformPath(visualFrame!.transform)}, " +
+            $"visualBounds=({visualBounds.x:0.#},{visualBounds.y:0.#},{visualBounds.width:0.#},{visualBounds.height:0.#}), " +
+            $"anchoredPosition=({buttonAnchoredPosition.x:0.#},{buttonAnchoredPosition.y:0.#}).");
+    }
+
+    private static bool TryResolveAuctionPreviewExhibitHost(
+        PlotController controller,
+        out RectTransform? exhibitHost)
+    {
+        exhibitHost = null;
+        try
+        {
+            var plotPanel = controller.plotPanel;
+            var marker = _auctionPreviewVisibilityMarker;
+            if (plotPanel == null || marker?.gameObject == null || !marker.gameObject.activeInHierarchy)
+            {
+                return false;
+            }
+
+            var rootCanvas = plotPanel.GetComponentInParent<Canvas>()?.rootCanvas;
+            for (var candidate = marker.transform; candidate != null; candidate = candidate.parent)
+            {
+                var candidateRect = candidate.GetComponent<RectTransform>();
+                if (candidateRect == null || !candidate.gameObject.activeInHierarchy ||
+                    candidate == plotPanel.transform || candidate == rootCanvas?.transform)
+                {
+                    continue;
+                }
+
+                var openAllCount = 0;
+                var closeAllCount = 0;
+                foreach (var label in candidate.GetComponentsInChildren<Text>(includeInactive: true))
+                {
+                    if (label?.gameObject == null || !label.gameObject.activeInHierarchy)
+                    {
+                        continue;
+                    }
+
+                    var markerText = label.text?.Trim();
+                    if (string.Equals(markerText, "全开", StringComparison.Ordinal))
+                    {
+                        openAllCount++;
+                    }
+                    else if (string.Equals(markerText, "全关", StringComparison.Ordinal))
+                    {
+                        closeAllCount++;
+                    }
+                }
+
+                if (openAllCount < 2 || closeAllCount < 2)
+                {
+                    continue;
+                }
+
+                var hasActiveItemIcon = candidate
+                    .GetComponentsInChildren<ItemIconController>(includeInactive: true)
+                    .Any(icon => icon?.gameObject != null && icon.gameObject.activeInHierarchy);
+                if (!hasActiveItemIcon)
+                {
+                    continue;
+                }
+
+                exhibitHost = candidateRect;
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"Auction preview exhibit host lookup failed: {DescribeCompatibilityException(ex)}");
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveAuctionPreviewVisualBounds(
+        RectTransform exhibitHost,
+        out RectTransform? visualFrame,
+        out Rect visualBounds,
+        out Vector2 buttonAnchoredPosition)
+    {
+        visualFrame = null;
+        visualBounds = default;
+        buttonAnchoredPosition = default;
+
+        try
+        {
+            var canvas = exhibitHost.GetComponentInParent<Canvas>();
+            var camera = canvas == null || canvas.renderMode == RenderMode.ScreenSpaceOverlay
+                ? null
+                : canvas.worldCamera;
+            var iconCenters = new List<Vector2>();
+            foreach (var icon in exhibitHost.GetComponentsInChildren<ItemIconController>(includeInactive: true))
+            {
+                if (icon?.gameObject == null || !icon.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+
+                var iconRect = icon.GetComponent<RectTransform>();
+                if (iconRect != null)
+                {
+                    iconCenters.Add(RectTransformUtility.WorldToScreenPoint(
+                        camera,
+                        iconRect.TransformPoint(iconRect.rect.center)));
+                }
+            }
+
+            if (iconCenters.Count == 0)
+            {
+                return false;
+            }
+
+            // The live hierarchy keeps the item icons under ChoosePanelRoot, but the
+            // visible white frame is owned by its ChoosePanel parent (or one of that
+            // parent's sibling background objects). Search that visual panel while
+            // retaining the structural host as the button parent for tooltip ordering.
+            var visualSearchRoot = exhibitHost.parent?.GetComponent<RectTransform>() ?? exhibitHost;
+            var bestArea = float.MaxValue;
+            foreach (var candidate in visualSearchRoot.GetComponentsInChildren<RectTransform>(includeInactive: true))
+            {
+                if (candidate == null || candidate == exhibitHost || !candidate.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+
+                // ChoosePanel is the structurally verified direct parent of the live
+                // exhibit root, but the game's panel itself does not carry a Graphic.
+                // Admit only this exact parent as a non-Graphic candidate; all other
+                // transparent layout rectangles remain excluded.
+                var isTrustedChoosePanel = candidate == visualSearchRoot &&
+                    string.Equals(candidate.name, "ChoosePanel", StringComparison.Ordinal);
+                var graphic = candidate.GetComponent<Graphic>();
+                var hasScreenBounds = TryGetAuctionPreviewScreenRect(candidate, camera, out var candidateBounds);
+                var containsAllIcons = hasScreenBounds && iconCenters.All(center =>
+                    center.x >= candidateBounds.xMin - 1f && center.x <= candidateBounds.xMax + 1f &&
+                    center.y >= candidateBounds.yMin - 1f && center.y <= candidateBounds.yMax + 1f);
+                if ((!isTrustedChoosePanel && graphic == null) || candidate.GetComponent<Text>() != null ||
+                    candidate.GetComponent<Button>() != null || !hasScreenBounds ||
+                    candidateBounds.width < 210f || candidateBounds.height < 100f)
+                {
+                    continue;
+                }
+
+                var area = candidateBounds.width * candidateBounds.height;
+                if (!containsAllIcons || area >= bestArea)
+                {
+                    continue;
+                }
+
+                visualFrame = candidate;
+                visualBounds = candidateBounds;
+                bestArea = area;
+            }
+
+            if (visualFrame == null)
+            {
+                return false;
+            }
+
+            var targetScreenPoint = new Vector2(visualBounds.center.x, visualBounds.yMin + 42f);
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    exhibitHost,
+                    targetScreenPoint,
+                    camera,
+                    out var targetLocalPoint))
+            {
+                return false;
+            }
+
+            var bottomCenterAnchorLocalPoint = new Vector2(
+                (0.5f - exhibitHost.pivot.x) * exhibitHost.rect.width,
+                -exhibitHost.pivot.y * exhibitHost.rect.height);
+            buttonAnchoredPosition = targetLocalPoint - bottomCenterAnchorLocalPoint;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"Auction preview visual bounds lookup failed: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+    }
+
+    private static bool TryGetAuctionPreviewScreenRect(
+        RectTransform rectTransform,
+        Camera? camera,
+        out Rect screenRect)
+    {
+        screenRect = default;
+        var localRect = rectTransform.rect;
+        var bottomLeft = RectTransformUtility.WorldToScreenPoint(
+            camera,
+            rectTransform.TransformPoint(new Vector3(localRect.xMin, localRect.yMin, 0f)));
+        var topLeft = RectTransformUtility.WorldToScreenPoint(
+            camera,
+            rectTransform.TransformPoint(new Vector3(localRect.xMin, localRect.yMax, 0f)));
+        var topRight = RectTransformUtility.WorldToScreenPoint(
+            camera,
+            rectTransform.TransformPoint(new Vector3(localRect.xMax, localRect.yMax, 0f)));
+        var bottomRight = RectTransformUtility.WorldToScreenPoint(
+            camera,
+            rectTransform.TransformPoint(new Vector3(localRect.xMax, localRect.yMin, 0f)));
+        var xMin = Math.Min(Math.Min(bottomLeft.x, topLeft.x), Math.Min(topRight.x, bottomRight.x));
+        var xMax = Math.Max(Math.Max(bottomLeft.x, topLeft.x), Math.Max(topRight.x, bottomRight.x));
+        var yMin = Math.Min(Math.Min(bottomLeft.y, topLeft.y), Math.Min(topRight.y, bottomRight.y));
+        var yMax = Math.Max(Math.Max(bottomLeft.y, topLeft.y), Math.Max(topRight.y, bottomRight.y));
+        var width = xMax - xMin;
+        var height = yMax - yMin;
+        if (width <= 0f || height <= 0f)
+        {
+            return false;
+        }
+
+        screenRect = new Rect(xMin, yMin, width, height);
+        return true;
+    }
+
+    private static string GetAuctionPreviewTransformPath(Transform transform)
+    {
+        var path = new Stack<string>();
+        for (var current = transform; current != null; current = current.parent)
+        {
+            path.Push(current.name);
+        }
+
+        return string.Join("/", path);
     }
 
     private static void EnsureIdentifyBestTreasureButton(IdentifyMatchController controller)
@@ -5344,6 +5641,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 if (TryGetTreasureAppraisedValue(item, out var appraisedValue))
                 {
                     estimatedSellPrice = EstimateTreasureSellPriceFromAppraisedValue(
+                        item,
                         estimatedSellPrice,
                         appraisedValue);
                 }
@@ -5361,7 +5659,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         return
             $"<b><color=#E8B45B>珍宝购物车</color></b>　共 {summary.CartItemCount} 件／珍宝 {summary.TreasureItemCount} 件／未鉴定 {summary.UnidentifiedTreasureCount} 件\n" +
-            $"买入{TradeInfoMoneyGap}{summary.BuyTotal}　鉴定 {summary.IdentifyCostTotal}　预计卖出(括号估价) {summary.EstimatedSellTotal}　预计利润 {FormatSignedLong(summary.EstimatedProfit)}";
+            $"买入{TradeInfoMoneyGap}{summary.BuyTotal}　鉴定 {summary.IdentifyCostTotal}　预计鉴后卖出(括号估价×当前交易比例) {summary.EstimatedSellTotal}　预计利润 {FormatSignedLong(summary.EstimatedProfit)}";
     }
 
     private static bool TryAnalyzeTreasureTradeIcon(ItemIconController? icon, int identifyCost, out TreasureTradeOpportunity? opportunity)
@@ -5393,6 +5691,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var skillBuyFactor = GetSkillTradeFactor(buy: true);
         var skillSellFactor = GetSkillTradeFactor(buy: false);
         var identifiedSellPrice = EstimateTreasureSellPriceFromAppraisedValue(
+            item,
             currentSellPrice,
             appraisedValue);
 
@@ -5413,9 +5712,22 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         return true;
     }
 
-    private static int EstimateTreasureSellPriceFromAppraisedValue(int currentSellPrice, int appraisedValue)
+    private static int EstimateTreasureSellPriceFromAppraisedValue(ItemData item, int currentSellPrice, int appraisedValue)
     {
-        return Math.Max(Math.Max(0, currentSellPrice), Math.Max(0, appraisedValue));
+        if (appraisedValue <= 0)
+        {
+            return Math.Max(0, currentSellPrice);
+        }
+
+        var baseValue = Math.Max(1, item.value);
+        if (currentSellPrice <= 0)
+        {
+            return Math.Max(appraisedValue, 0);
+        }
+
+        var sellRatio = Math.Max(0d, (double)currentSellPrice / baseValue);
+        var estimated = (int)Math.Round(appraisedValue * sellRatio, MidpointRounding.AwayFromZero);
+        return Math.Max(currentSellPrice, estimated);
     }
 
     private static void EnsureTreasureTradeOverlay(TradeUIController tradeUi)
@@ -6863,6 +7175,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 verifiedCount++;
                 LoggerInstance.LogInfo(
                     $"Treasure trade cart add verified: item={TryGetItemDisplayName(opportunity.Item)}, buy={opportunity.BuyPrice}, " +
+                    $"baseValue={Math.Max(0, opportunity.Item.value)}, currentSell={opportunity.CurrentSellPrice}, " +
+                    $"appraised={opportunity.AppraisedValue}, identifyCost={opportunity.IdentifyCost}, " +
                     $"sellIdentified={opportunity.IdentifiedSellPrice}, net={opportunity.NetProfit}, cart={cartCountBefore}->{cartCountAfter}.");
             }
         }
@@ -8234,9 +8548,10 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         TryApplyTeamFameShare(__instance, actualGain);
     }
 
-    private static void ChangeFavorPrefix(HeroData __instance, ref float num)
+    private static void ChangeFavorPrefix(HeroData __instance, ref float num, out RelationshipBonusState __state)
     {
-        if (_applyingTeamAutoFavor || num <= 0f || IsPlayerHero(__instance))
+        __state = new RelationshipBonusState();
+        if (!_relationshipBonusHooksReady || _applyingTeamAutoFavor || num <= 0f || IsPlayerHero(__instance))
         {
             return;
         }
@@ -8263,9 +8578,83 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         var messageTemplate = RelationshipBonusMessages[Random.Next(RelationshipBonusMessages.Length)];
         var message = string.Format(messageTemplate, SafeFormatValue(originalGain));
-        PushPlayerLog(message);
+        __state = new RelationshipBonusState
+        {
+            IsApplied = true,
+            OriginalGain = originalGain,
+            AppliedGain = num,
+            ChancePercent = hitChancePercent,
+            Roll = roll,
+            Message = message
+        };
+    }
+
+    private static void ChangeFavorPostfix(HeroData __instance, RelationshipBonusState? __state)
+    {
+        if (__state == null || !__state.IsApplied)
+        {
+            return;
+        }
+
+        QueueDeferredRelationshipBonusLog(__state.Message);
         LoggerInstance.LogInfo(
-            $"Relationship bonus applied: hero={TryGetHeroName(__instance)}, gain {SafeFormatValue(originalGain)} -> {SafeFormatValue(num)}, chance={hitChancePercent}, roll={roll}.");
+            $"Relationship bonus applied: hero={TryGetHeroName(__instance)}, gain {SafeFormatValue(__state.OriginalGain)} -> {SafeFormatValue(__state.AppliedGain)}, chance={__state.ChancePercent}, roll={__state.Roll}.");
+    }
+
+    private static void QueueDeferredRelationshipBonusLog(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        if (DeferredRelationshipBonusLogs.Count >= MaxDeferredRelationshipBonusLogs)
+        {
+            DeferredRelationshipBonusLogs.Dequeue();
+            LoggerInstance.LogWarning("Deferred relationship bonus message queue was full; discarded the oldest notification.");
+        }
+
+        DeferredRelationshipBonusLogs.Enqueue(new DeferredPlayerLogEntry
+        {
+            EarliestFrame = Time.frameCount + 1,
+            Message = message
+        });
+    }
+
+    private static void FlushDeferredRelationshipBonusLogs()
+    {
+        if (DeferredRelationshipBonusLogs.Count <= 0)
+        {
+            return;
+        }
+
+        var entry = DeferredRelationshipBonusLogs.Peek();
+        if (entry.EarliestFrame > Time.frameCount)
+        {
+            return;
+        }
+
+        DeferredRelationshipBonusLogs.Dequeue();
+        try
+        {
+            PushPlayerLog(entry.Message);
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Failed to publish deferred relationship bonus message: {ex.Message}");
+        }
+    }
+
+    private static void ResetDeferredRelationshipBonusLogs(string source)
+    {
+        if (DeferredRelationshipBonusLogs.Count <= 0)
+        {
+            return;
+        }
+
+        var discardedCount = DeferredRelationshipBonusLogs.Count;
+        DeferredRelationshipBonusLogs.Clear();
+        LoggerInstance.LogInfo($"Discarded {discardedCount} deferred relationship bonus message(s) from {source}.");
     }
 
     private static void DebateChangePatientPrefix(bool isPlayer, ref float num)
@@ -8604,6 +8993,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void ShowStartMenuPostfix()
     {
+        ResetDeferredRelationshipBonusLogs("StartMenu.ShowStartMenu");
         ResetBreakthroughRerollState("StartMenu.ShowStartMenu");
         ResetCraftRerollState("StartMenu.ShowStartMenu");
         ResetSpeEnhanceRerollState("StartMenu.ShowStartMenu");
@@ -8613,6 +9003,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void ShowMainMenuPostfix()
     {
+        ResetDeferredRelationshipBonusLogs("GameTitle.ShowMainMenu");
         ResetBreakthroughRerollState("GameTitle.ShowMainMenu");
         ResetCraftRerollState("GameTitle.ShowMainMenu");
         ResetSpeEnhanceRerollState("GameTitle.ShowMainMenu");
@@ -8674,6 +9065,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void LoadRecentGamePrefix(SaveLoadMenuController __instance)
     {
+        ResetDeferredRelationshipBonusLogs("SaveLoadMenu.LoadRecentGame");
         ResetBreakthroughRerollState("SaveLoadMenu.LoadRecentGame");
         ResetCraftRerollState("SaveLoadMenu.LoadRecentGame");
         ResetSpeEnhanceRerollState("SaveLoadMenu.LoadRecentGame");
@@ -8698,6 +9090,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void LoadGamePrefix(int saveID)
     {
+        ResetDeferredRelationshipBonusLogs("SaveLoadMenu.LoadGame");
         ResetBreakthroughRerollState("SaveLoadMenu.LoadGame");
         ResetCraftRerollState("SaveLoadMenu.LoadGame");
         ResetSpeEnhanceRerollState("SaveLoadMenu.LoadGame");
@@ -9071,6 +9464,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void GameControllerUpdatePostfix()
     {
+        try
+        {
         ApplyConfiguredMaxLoverCount("GameController.Update");
         EnsureDailySkillInsightBaseline();
         TryRunRealtimeSkillInsight();
@@ -9108,7 +9503,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             GrantTeamIntelligenceMoneyTest();
             ApplyViewedHeroFavorTest();
         }
-
+        }
+        finally
+        {
+            FlushDeferredRelationshipBonusLogs();
+        }
     }
 
     private static void TryUpdateBookWriterScaling(string source)
@@ -9228,6 +9627,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void LoadAllGameDataPostfix()
     {
+        ResetDeferredRelationshipBonusLogs("GameDataController.LoadAllGameData");
         ResetBreakthroughRerollState("GameDataController.LoadAllGameData");
         ResetCraftRerollState("GameDataController.LoadAllGameData");
         ResetSpeEnhanceRerollState("GameDataController.LoadAllGameData");

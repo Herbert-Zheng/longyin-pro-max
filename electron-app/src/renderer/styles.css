@@ -324,6 +324,10 @@ button {
   justify-content: flex-end;
 }
 
+.workspace__hero + .summary-grid {
+  margin-top: 4px;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -511,6 +515,26 @@ button {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.page-grid--settings {
+  align-items: start;
+}
+
+.page-grid--settings > .card {
+  align-self: start;
+}
+
+.page-grid--settings > .system-environment-card {
+  align-self: start;
+}
+
+.system-environment-card {
+  grid-column: 1 / -1;
+}
+
+.system-environment-card > .card {
+  width: 100%;
 }
 
 .card__head {
@@ -788,6 +812,33 @@ button {
   grid-template-columns: 1fr;
 }
 
+.page-grid--settings .field,
+.page-grid--settings .toggle {
+  min-height: 112px;
+  padding: 13px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(39, 44, 33, 0.1);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.page-grid--settings .field {
+  justify-content: flex-start;
+}
+
+.page-grid--settings .field__hint,
+.page-grid--settings .toggle__hint {
+  margin-top: auto;
+}
+
+.page-grid--systems > .card:first-child .field-grid {
+  grid-auto-rows: 1fr;
+}
+
+.page-grid--systems > .card:first-child .field,
+.page-grid--systems > .card:first-child .toggle {
+  height: 100%;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -905,6 +956,31 @@ button {
   outline-offset: 2px;
 }
 
+.health-details {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.58);
+  overflow: hidden;
+}
+
+.health-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.health-details summary strong {
+  color: var(--jade);
+}
+
+.health-details .check-list {
+  padding: 0 14px 14px;
+}
+
 .release-badge--muted {
   background: rgba(95, 101, 95, 0.12);
   color: var(--muted);
@@ -999,6 +1075,13 @@ button {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.array-row__title {
+  color: var(--jade);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
 }
 
 .array-row__grid {

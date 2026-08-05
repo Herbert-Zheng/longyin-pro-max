@@ -170,11 +170,12 @@ export function CheckboxField(props: {
   );
 }
 
-export function SelectField(props: {
+export function SelectField<T extends string>(props: {
   label: string;
-  value: string;
-  onChange: (next: string) => void;
-  options: string[];
+  value: T;
+  onChange: (next: T) => void;
+  options: readonly T[];
+  getOptionLabel?: (option: T) => string;
   hint?: string;
   disabled?: boolean;
 }) {
@@ -184,11 +185,11 @@ export function SelectField(props: {
         className="input"
         value={props.value}
         disabled={props.disabled}
-        onChange={(event) => props.onChange(event.target.value)}
+        onChange={(event) => props.onChange(event.target.value as T)}
       >
         {props.options.map((option) => (
           <option key={option} value={option}>
-            {option}
+            {props.getOptionLabel?.(option) ?? option}
           </option>
         ))}
       </select>

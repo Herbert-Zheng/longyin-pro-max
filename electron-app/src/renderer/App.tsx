@@ -160,7 +160,15 @@ function LogPreview(props: { title: string; body: string }) {
 }
 
 function summarizeCustomTalent(talent: CustomTalentDefinition): string {
-  return `${talent.conditions.length} 条条件 · ${talent.effects.length} 条效果 · ${talent.durationDays} 天`;
+  const firstCondition = talent.conditions[0];
+  const firstEffect = talent.effects[0];
+  const conditionSummary = firstCondition
+    ? `首个条件：${formatCustomTalentConditionType(firstCondition.type)} · ${formatBaseAttriType(firstCondition.stat)} ≥ ${firstCondition.min}`
+    : '暂无条件';
+  const effectSummary = firstEffect
+    ? `首个效果：${formatHeroSpeAddDataType(firstEffect.effectType)} ${firstEffect.value >= 0 ? '+' : ''}${firstEffect.value}`
+    : '暂无效果';
+  return `${talent.conditions.length} 条条件 · ${talent.effects.length} 条效果 · ${talent.durationDays} 天 · ${conditionSummary} · ${effectSummary}`;
 }
 
 export function App() {
@@ -1164,7 +1172,7 @@ export function App() {
             ) : null}
 
             {activePage === 'systems' ? (
-              <div className="page-grid">
+              <div className="page-grid page-grid--systems page-grid--settings">
                 <Card title="时间与运行控制" eyebrow="Systems">
                   <div className="field-grid">
                     <CheckboxField
@@ -1188,7 +1196,7 @@ export function App() {
                   </div>
                 </Card>
 
-                <Card title="游戏 Overlay" eyebrow="Overlay">
+                <Card title="游戏内悬浮信息窗" eyebrow="Overlay">
                   <div className="stack">
                     <CheckboxField
                       label="随游戏启动 Overlay"
@@ -1196,7 +1204,7 @@ export function App() {
                       onChange={(value) => void setLaunchOverlayWithGame(value)}
                     />
                     <p className="body-copy body-copy--muted">
-                      Overlay 自带单实例保护。由启动器随游戏启动的实例会在游戏退出后自动关闭。
+                      这是显示在游戏旁的实时信息小窗，方便你无需切回启动器就能查看辅助信息。它不会重复启动；如果由启动器随游戏开启，退出游戏时也会自动关闭。
                     </p>
                     <div className="inline-actions">
                       <button className="btn" onClick={startOverlay} disabled={working !== null || snapshot.overlayRunning}>
@@ -1209,6 +1217,7 @@ export function App() {
                   </div>
                 </Card>
 
+                <div className="system-environment-card">
                 <Card title="环境自检与目录" eyebrow="Environment">
                   <div className="stack">
                     <p className="body-copy">
@@ -1227,17 +1236,24 @@ export function App() {
                         打开载荷目录
                       </button>
                     </div>
-                    <CheckList
-                      items={health.checks.map((check) => `${check.ok ? '已通过' : '需处理'} · ${check.label} · ${check.detail}`)}
-                      empty={gameRoot ? '没有可展示的环境检查。' : '选择游戏目录后，这里会出现完整自检信息。'}
-                    />
+                    <details className="health-details">
+                      <summary>
+                        <span>健康检查详情</span>
+                        <strong>{health.summary}</strong>
+                      </summary>
+                      <CheckList
+                        items={health.checks.map((check) => `${check.ok ? '已通过' : '需处理'} · ${check.label} · ${check.detail}`)}
+                        empty={gameRoot ? '没有可展示的环境检查。' : '选择游戏目录后，这里会出现完整自检信息。'}
+                      />
+                    </details>
                   </div>
                 </Card>
+                </div>
               </div>
             ) : null}
 
             {activePage === 'expTalent' ? (
-              <div className="page-grid">
+              <div className="page-grid page-grid--settings">
                 <Card title="经验成长" eyebrow="EXP">
                   <div className="field-grid">
                     <NumberField
@@ -1484,6 +1500,7 @@ export function App() {
                         <div className="stack">
                           {selectedCustomTalent.conditions.map((condition, conditionIndex) => (
                             <div key={`${selectedCustomTalent.id}-condition-${conditionIndex}`} className="array-row">
+                              <div className="array-row__title">条件 {conditionIndex + 1}</div>
                               <div className="array-row__grid array-row__grid--conditions">
                                 <SelectField
                                   label="类型"
@@ -1502,6 +1519,7 @@ export function App() {
                                     }))
                                   }
                                   options={[...CUSTOM_TALENT_CONDITION_TYPES]}
+                                  getOptionLabel={formatCustomTalentConditionType}
                                   hint={formatCustomTalentConditionType(condition.type)}
                                 />
                                 <SelectField
@@ -1521,6 +1539,7 @@ export function App() {
                                     }))
                                   }
                                   options={[...BASE_ATTRI_TYPE_NAMES]}
+                                  getOptionLabel={formatBaseAttriType}
                                   hint={formatBaseAttriType(condition.stat)}
                                 />
                                 <NumberField
@@ -1587,6 +1606,7 @@ export function App() {
                         <div className="stack">
                           {selectedCustomTalent.effects.map((effect, effectIndex) => (
                             <div key={`${selectedCustomTalent.id}-effect-${effectIndex}`} className="array-row">
+                              <div className="array-row__title">效果 {effectIndex + 1}</div>
                               <div className="array-row__grid array-row__grid--effects">
                                 <SelectField
                                   label="效果类型"
@@ -1605,6 +1625,7 @@ export function App() {
                                     }))
                                   }
                                   options={[...HERO_SPE_ADD_DATA_TYPE_NAMES]}
+                                  getOptionLabel={formatHeroSpeAddDataType}
                                   hint={formatHeroSpeAddDataType(effect.effectType)}
                                 />
                                 <NumberField
@@ -1772,7 +1793,7 @@ export function App() {
             ) : null}
 
             {activePage === 'tradeCraft' ? (
-              <div className="page-grid">
+              <div className="page-grid page-grid--settings">
                 <Card title="珍宝交易" eyebrow="Treasure">
                   <div className="field-grid">
                     <CheckboxField
@@ -1945,7 +1966,7 @@ export function App() {
             ) : null}
 
             {activePage === 'socialTeam' ? (
-              <div className="page-grid">
+              <div className="page-grid page-grid--settings">
                 <Card title="聊天与互动" eyebrow="Dialog">
                   <div className="field-grid">
                     <NumberField
@@ -1964,13 +1985,14 @@ export function App() {
                       hint="在剧情出现快进按钮时自动开启快进，游戏内热键仍然是 P。"
                     />
                     <NumberField
-                      label="额外好感增长"
+                      label="好感翻倍触发几率"
                       value={settings.extraRelationshipGainChancePercent}
                       onChange={(value) => updateSetting('extraRelationshipGainChancePercent', value)}
                       min={0}
                       max={100}
                       step={1}
                       suffix="%"
+                      hint="命中后，本次正向好感增加量变为 2 倍；0% 表示关闭。"
                     />
                   </div>
                 </Card>

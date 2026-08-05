@@ -171,10 +171,13 @@ Reject-SourceText 'EstimateTreasureSellPriceFromRealValue' 'The old real-value w
 Require-ScopeText $selectorMethod 'TryGetTreasureAppraisedValue(icon.itemData, out var appraisedValue)' 'The appraisal selector must read every candidate through the shared parenthesized appraisal helper.'
 Require-ScopePattern $selectorMethod 'appraisedValue\s*>\s*bestValue' 'The appraisal selector must rank active candidates by the shared parenthesized appraisal value.'
 Require-ScopeText $tradeAnalyzerMethod 'TryGetTreasureAppraisedValue(item, out var appraisedValue)' 'The shop helper must read the same parenthesized appraisal value.'
-Require-ScopeText $tradeAnalyzerMethod 'EstimateTreasureSellPriceFromAppraisedValue(' 'The shop helper must derive its estimated post-appraisal sell price from the parenthesized appraisal value.'
-Require-ScopePattern $sellEstimatorMethod 'return\s+Math\.Max\(\s*Math\.Max\(0,\s*currentSellPrice\),\s*Math\.Max\(0,\s*appraisedValue\)\s*\)\s*;' 'The parenthesized appraisal value is already the player-knowledge trade estimate and must be used directly without a second sell-ratio discount.'
-Reject-ScopeText $sellEstimatorMethod 'item.value' 'The sell estimator must not derive another discount ratio from the raw treasure value.'
-Reject-ScopeText $sellEstimatorMethod 'sellRatio' 'The sell estimator must not discount the verified parenthesized appraisal value a second time.'
+Require-ScopePattern $tradeAnalyzerMethod 'EstimateTreasureSellPriceFromAppraisedValue\(\s*item,\s*currentSellPrice,\s*appraisedValue\s*\)' 'The shop helper must provide the item base value and the native current sell price when estimating the post-appraisal sell price.'
+Require-ScopePattern $cartSummaryMethod 'EstimateTreasureSellPriceFromAppraisedValue\(\s*item,\s*estimatedSellPrice,\s*appraisedValue\s*\)' 'The cart summary must use the same item-aware post-appraisal estimate as automatic shopping.'
+Require-ScopePattern $sellEstimatorMethod 'var\s+baseValue\s*=\s*Math\.Max\(1,\s*item\.value\)\s*;' 'The post-appraisal estimate must derive the native shop sell ratio from the item base value.'
+Require-ScopePattern $sellEstimatorMethod 'var\s+sellRatio\s*=\s*Math\.Max\(0d,\s*\(double\)currentSellPrice\s*/\s*baseValue\)\s*;' 'The post-appraisal estimate must preserve the native current-sell/base-value ratio, including speech, favor, building, and shop modifiers.'
+Require-ScopePattern $sellEstimatorMethod 'Math\.Round\(\s*appraisedValue\s*\*\s*sellRatio,\s*MidpointRounding\.AwayFromZero\s*\)' 'The post-appraisal estimate must use the reference implementation rounding rule.'
+Require-ScopePattern $sellEstimatorMethod 'return\s+Math\.Max\(\s*currentSellPrice,\s*estimated\s*\)\s*;' 'The estimate must never claim that appraisal lowers the current native sell price.'
+Reject-ScopePattern $sellEstimatorMethod 'return\s+Math\.Max\(\s*Math\.Max\(0,\s*currentSellPrice\),\s*Math\.Max\(0,\s*appraisedValue\)\s*\)\s*;' 'The parenthesized appraisal value is not the actual shop sell price and must not be returned directly.'
 Require-ScopePattern $appraisedValueMethod 'appraisedValue\s*=\s*Math\.Max\(0,\s*item\.GetTreasureRealValue\(\)\);\s*return true;' 'The shared appraisal helper must succeed only after reading the verified game API.'
 Require-ScopePattern $appraisedValueMethod 'catch\s*\(Exception ex\).*?return false;' 'The shared appraisal helper must skip the item when the verified game API fails.'
 Reject-ScopeText $appraisedValueMethod 'item.value' 'The shared appraisal helper must not silently substitute the raw item value when the parenthesized appraisal API fails.'
@@ -201,9 +204,10 @@ Require-ScopePattern $updateOverlayMethod 'BuildTreasureTradeCartSummary\s*\([\s
 Require-ScopeText $updateOverlayMethod 'verticalOffset: -13f' 'The treasure money icon must align with the second summary line that contains the buy amount.'
 Reject-ScopeText $updateOverlayMethod 'TryResolveTreasureTradeOpportunity' 'The visible treasure assistant must no longer fall back to a selected or first shop item.'
 Require-ScopePattern $setTradeInfoLabelTextMethod 'if\s*\(\s*!string\.Equals\(label\.text,\s*text,[^)]*\)\s*\)[\s\S]*?label\.text\s*=\s*text;[\s\S]*?AlignTradeInfoIcon\(' 'Money icon alignment must still run when the visible summary text has not changed.'
-foreach ($label in @('购物车', '珍宝', '未鉴定', '买入', '鉴定', '预计卖出', '预计利润')) {
+foreach ($label in @('购物车', '珍宝', '未鉴定', '买入', '鉴定', '预计鉴后卖出', '括号估价', '当前交易比例', '预计利润')) {
     Require-ScopeText $cartSummaryTextMethod $label "The live cart summary text is missing its '$label' aggregate label."
 }
+Reject-ScopeText $cartSummaryTextMethod '预计卖出(括号估价)' 'The cart summary must not present the parenthesized appraisal value as the actual post-appraisal sell price.'
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }

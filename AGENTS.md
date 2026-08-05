@@ -20,9 +20,9 @@ Use the staged DLL promotion flow for plugin updates:
 
 ## OTA Release Workflow
 
-Use `G:\Steam\steamapps\common\longyin_plus_repo` as the only Git source of truth for commits, tags, GitHub Releases, and OTA assets.
+Use the active Git worktree containing this `AGENTS.md` as the only source of truth for commits, tags, GitHub Releases, and OTA assets. Do not require a specific drive letter or absolute repository path.
 
-Treat `G:\Steam\steamapps\common\LongYinLiZhiZhuan` as a local game test folder only. It is for verifying the mod and Electron launcher, not for deciding what to publish.
+Treat the detected game installation directory as a local test folder only. It is for verifying the mod and Electron launcher, not for deciding what to publish.
 
 Before any OTA publish, first determine what the new code is by checking the repository state:
 

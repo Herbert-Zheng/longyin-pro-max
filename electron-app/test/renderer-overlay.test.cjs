@@ -255,6 +255,20 @@ test('renderer settings pages use scoped, aligned tiles without stretching cards
   assert.match(styles, /\.page-grid--settings\s+\.field,[\s\S]*?\.page-grid--settings\s+\.toggle\s*\{[\s\S]*?min-height:\s*112px;/);
 });
 
+test('relationship controls expose the safe master switch and independent lover limit', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+
+  assert.match(renderer, /label="人物关系增强总开关"[\s\S]{0,220}settings\.relationshipFeaturesEnabled/);
+  assert.match(renderer, /label="队友声望共享"[\s\S]{0,220}settings\.teamFameShareEnabled/);
+  assert.match(renderer, /label="队友声望共享比例"[\s\S]{0,220}settings\.teamFameSharePercent/);
+  assert.match(renderer, /label="阻断超额伴侣回家战斗"[\s\S]{0,220}settings\.blockOverflowLoverHomeBattle/);
+  assert.match(renderer, /label="同门传授范围共享"[\s\S]{0,220}settings\.sameSectAreaShareEnabled/);
+  assert.match(renderer, /label="人物数据测试（K）"[\s\S]{0,220}settings\.characterDataTestHotkeyEnabled/);
+  assert.match(renderer, /伴侣上限是独立设置，不受总开关影响/);
+  assert.match(renderer, /此项独立生效，不受人物关系增强总开关影响/);
+  assert.doesNotMatch(renderer, /已确认无效的“队友离队天数倍率”/);
+});
+
 test('systems page makes environment full width and health details collapsible', () => {
   const renderer = readSource('src/renderer/App.tsx');
   const styles = readSource('src/renderer/styles.css');

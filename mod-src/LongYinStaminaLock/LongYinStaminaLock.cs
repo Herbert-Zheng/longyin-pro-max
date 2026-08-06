@@ -27,8 +27,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private const int MaxDeferredRelationshipBonusLogs = 32;
     private const int TeachSkillSplashMinPercentFloor = 0;
     private const int TeachSkillSplashMaxPercentCeiling = 500;
-    private const KeyCode ViewedHeroFavorTestHotkey = KeyCode.K;
-    private const float TeamFameShareRatio = 0.3f;
+    private const KeyCode CharacterDataTestHotkey = KeyCode.K;
     private const float TeachSkillSideTabDurationSeconds = 4.5f;
     private const string TeachSkillSideTabAtlasName = "IconAtlas";
     private const string TeachSkillSideTabIconName = "1";
@@ -138,9 +137,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<bool> _breakthroughRerollEnabled = null!;
     private static ConfigEntry<bool> _craftRerollEnabled = null!;
     private static ConfigEntry<int> _luckyMoneyHitChancePercent = null!;
+    private static ConfigEntry<bool> _relationshipFeaturesEnabled = null!;
     private static ConfigEntry<int> _extraRelationshipGainChancePercent = null!;
     private static ConfigEntry<bool> _teamAutoFavorEnabled = null!;
     private static ConfigEntry<float> _teamAutoFavorPerDay = null!;
+    private static ConfigEntry<bool> _teamFameShareEnabled = null!;
+    private static ConfigEntry<float> _teamFameSharePercent = null!;
     private static ConfigEntry<int> _maxLoverCount = null!;
     private static ConfigEntry<bool> _blockOverflowLoverHomeBattle = null!;
     private static ConfigEntry<float> _debatePlayerDamageTakenMultiplier = null!;
@@ -176,6 +178,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<bool> _traceDialogFastForward = null!;
     private static ConfigEntry<bool> _traceTreasureChestEvents = null!;
     private static ConfigEntry<bool> _traceLoverBattlePrep = null!;
+    private static ConfigEntry<bool> _characterDataTestHotkeyEnabled = null!;
     private static ConfigEntry<bool> _freezeDate = null!;
     private static ConfigEntry<KeyCode> _freezeDateHotkey = null!;
     private static ConfigEntry<KeyCode> _outsideBattleSpeedHotkey = null!;
@@ -222,8 +225,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static readonly Queue<DeferredPlayerLogEntry> DeferredRelationshipBonusLogs = new();
     private static HeroData? _activeDialogHero;
     private static int _activeDialogHeroId = -1;
-    private static HeroData? _activeHeroDetailHero;
-    private static int _activeHeroDetailHeroId = -1;
     private static bool _dialogFastForwardAssistOwnsSkip;
     private static readonly List<KungfuSkillLvData> _dailySkillInsightCandidateBuffer = new();
     private static readonly List<RegisteredCustomTalent> _customTalents = new();
@@ -698,9 +699,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _breakthroughRerollEnabled = Config.Bind("Breakthrough", "RerollEnabled", true, "Adds a button that rebuilds the current breakthrough choices without confirming a choice or consuming money, items, or time.");
         _craftRerollEnabled = Config.Bind("Craft", "RerollEnabled", true, "Adds preview-only buttons that rebuild normal crafting or special-enhancement choices without confirming, consuming materials, spending money, or advancing time.");
         _luckyMoneyHitChancePercent = Config.Bind("MoneyLuck", "LuckyHitChancePercent", 0, "Chance from 0 to 100 that a player money transaction triggers a lucky bonus.");
+        _relationshipFeaturesEnabled = Config.Bind("Relationship", "FeaturesEnabled", false, "Master switch for relationship and character-data features other than MaxLoverCount. When false, those features do not write character data.");
         _extraRelationshipGainChancePercent = Config.Bind("Relationship", "ExtraRelationshipGainChancePercent", 0, "Chance from 0 to 100 that positive relationship gain becomes double.");
         _teamAutoFavorEnabled = Config.Bind("Relationship", "TeamAutoFavorEnabled", true, "When true, current player teammates automatically gain favor each elapsed in-game day.");
         _teamAutoFavorPerDay = Config.Bind("Relationship", "TeamAutoFavorPerDay", 5f, "Favor granted to each current player teammate per elapsed in-game day.");
+        _teamFameShareEnabled = Config.Bind("Relationship", "TeamFameShareEnabled", true, "When true, current player teammates share a percentage of positive player fame gains.");
+        _teamFameSharePercent = Config.Bind("Relationship", "TeamFameSharePercent", 30f, "Percentage from 0 to 100 of each positive player fame gain granted to every current teammate.");
         _maxLoverCount = Config.Bind("Relationship", "MaxLoverCount", 8, "Overrides the maximum number of lovers/couples the player can have at the same time. Vanilla appears to be 4.");
         _blockOverflowLoverHomeBattle = Config.Bind("Relationship", "BlockOverflowLoverHomeBattle", true, "When true, suppresses the home-entry lover ambush battle entirely, because the current modded romance setup can crash during its battle prep.");
         _debatePlayerDamageTakenMultiplier = Config.Bind("Debate", "PlayerDamageTakenMultiplier", 1f, "Multiplies debate damage dealt to the player side when a round is lost.");
@@ -736,6 +740,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _traceDialogFastForward = Config.Bind("Debug", "TraceDialogFastForward", false, "When TracerEnabled is true, logs dialog fast-forward assist decisions and key PlotController fast-forward events.");
         _traceTreasureChestEvents = Config.Bind("Debug", "TraceTreasureChestEvents", false, "When TracerEnabled is true, logs treasure chest interception, choice UI, and reward resolution.");
         _traceLoverBattlePrep = Config.Bind("Debug", "TraceLoverBattlePrep", false, "When TracerEnabled is true, logs the lover-result battle setup payloads before the home-entry lover battle prepares teams.");
+        _characterDataTestHotkeyEnabled = Config.Bind("Debug", "CharacterDataTestHotkeyEnabled", false, "Enables the K hotkey that runs the character-data test (team intelligence money and viewed-character fame).");
         _freezeDate = Config.Bind("Time", "FreezeDate", false, "Blocks in-game day, month, and year progression.");
         _freezeDateHotkey = Config.Bind("Time", "ToggleFreezeDateHotkey", KeyCode.F10, "Hotkey that toggles date freezing while in game.");
         _outsideBattleSpeedHotkey = Config.Bind("Time", "CycleOutsideBattleSpeedHotkey", KeyCode.F11, "Hotkey that cycles the test speed multiplier outside battle.");
@@ -763,10 +768,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(PlotController), nameof(PlotController.SetSkipPlot), new[] { typeof(bool) }, null, nameof(DialogFastForwardSetSkipPlotPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.ShowHeroInteractUI), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.ManageMeetNpcPlot), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
-        PatchMethod(typeof(HeroDetailController), nameof(HeroDetailController.ShowHeroDetail), new[] { typeof(HeroData), typeof(bool) }, null, nameof(HeroDetailViewedHeroPostfix));
-        PatchMethod(typeof(HeroDetailController), nameof(HeroDetailController.SetHeroDetail), new[] { typeof(HeroData) }, null, nameof(HeroDetailViewedHeroPostfix));
-        PatchMethod(typeof(HeroDetailController), nameof(HeroDetailController.FreshNowHeroDetail), new[] { typeof(HeroData), typeof(bool) }, null, nameof(HeroDetailViewedHeroPostfix));
-        PatchMethod(typeof(HeroDetailController), nameof(HeroDetailController.UnshowHeroDetail), Type.EmptyTypes, null, nameof(HeroDetailHiddenPostfix));
+        LoggerInstance.LogInfo("[Compatibility] Character-data test uses on-demand HeroDetailController reads; methods left unpatched.");
         PatchMethod(typeof(PlotController), nameof(PlotController.LoverInteractWithNPC), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.AskHeroToLover), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.StartAskHeroToLoverPlot), new[] { typeof(string) }, nameof(MaxLoverCountSyncPrefix), null);
@@ -795,9 +797,28 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(HeroData), nameof(HeroData.AddSkillBookExp), new[] { typeof(float), typeof(KungfuSkillLvData), typeof(bool) }, nameof(AddSkillBookExpPrefix), null);
         PatchMethod(typeof(HeroData), nameof(HeroData.BattleChangeSkillFightExp), new[] { typeof(float), typeof(KungfuSkillLvData), typeof(bool) }, nameof(BattleChangeSkillFightExpPrefix), null);
         PatchMethod(typeof(HeroData), nameof(HeroData.ChangeMoney), new[] { typeof(int), typeof(bool) }, nameof(ChangeMoneyPrefix), nameof(ChangeMoneyPostfix));
-        var changeFavorPatched = PatchMethod(typeof(HeroData), nameof(HeroData.ChangeFavor), new[] { typeof(float), typeof(bool), typeof(float), typeof(float), typeof(bool) }, nameof(ChangeFavorPrefix), nameof(ChangeFavorPostfix));
-        PatchHeroChangeFameMethod();
-        PatchMethod(typeof(PlotController), nameof(PlotController.ManageTeachSkill), new[] { typeof(HeroData), typeof(HeroData), typeof(int), typeof(float), typeof(bool) }, nameof(ManageTeachSkillPrefix), nameof(ManageTeachSkillPostfix));
+        var changeFavorPatched = false;
+        if (_relationshipFeaturesEnabled.Value)
+        {
+            if (ClampPercent(_extraRelationshipGainChancePercent.Value) > 0)
+            {
+                changeFavorPatched = PatchMethod(typeof(HeroData), nameof(HeroData.ChangeFavor), new[] { typeof(float), typeof(bool), typeof(float), typeof(float), typeof(bool) }, nameof(ChangeFavorPrefix), nameof(ChangeFavorPostfix));
+            }
+
+            if (_teamFameShareEnabled.Value && Mathf.Clamp(_teamFameSharePercent.Value, 0f, 100f) > 0f)
+            {
+                PatchHeroChangeFameMethod();
+            }
+
+            if (_teachSkillSameSectAreaShareEnabled.Value)
+            {
+                PatchMethod(typeof(PlotController), nameof(PlotController.ManageTeachSkill), new[] { typeof(HeroData), typeof(HeroData), typeof(int), typeof(float), typeof(bool) }, nameof(ManageTeachSkillPrefix), nameof(ManageTeachSkillPostfix));
+            }
+        }
+        else
+        {
+            LoggerInstance.LogInfo("[Compatibility] Relationship character-data hooks: DISABLED (master switch is off).");
+        }
         var battleSpeedPatched = PatchMethod(typeof(BattleController), nameof(BattleController.BattleTimeScaleButtonClicked), new[] { typeof(GameObject) }, null, nameof(BattleTimeScaleButtonClickedPostfix));
         PatchMethod(typeof(HorseData), nameof(HorseData.StartSprint), Type.EmptyTypes, null, nameof(HorseStartSprintPostfix));
         PatchMethod(typeof(HeroData), "GetHorseTravelSpeed", Type.EmptyTypes, null, nameof(GetHorseTravelSpeedPostfix));
@@ -1066,11 +1087,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             $"with shortcut {_governmentStorageRefreshHotkey.Value} only while that page is visible.");
         Log.LogInfo($"Treasure identify best-value button starts {(_treasureIdentifyBestValueAssistEnabled.Value ? "ON" : "OFF")}; confirmation remains manual.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
+        Log.LogInfo($"Relationship and character-data features start {(_relationshipFeaturesEnabled.Value ? "ON" : "OFF")}; MaxLoverCount remains independent.");
         Log.LogInfo($"Extra relationship gain chance starts at {ClampPercent(_extraRelationshipGainChancePercent.Value)}%.");
-        Log.LogInfo($"Team auto favor starts {(_teamAutoFavorEnabled.Value ? "ON" : "OFF")} at +{FormatConfigFloat(Math.Max(0f, _teamAutoFavorPerDay.Value))}/day.");
-        Log.LogInfo($"Team fame share starts at {FormatConfigFloat(TeamFameShareRatio * 100f)}% of player fame gains.");
+        Log.LogInfo($"Team auto favor starts {(_relationshipFeaturesEnabled.Value && _teamAutoFavorEnabled.Value ? "ON" : "OFF")} at +{FormatConfigFloat(Math.Max(0f, _teamAutoFavorPerDay.Value))}/day.");
+        Log.LogInfo($"Team fame share starts {(_relationshipFeaturesEnabled.Value && _teamFameShareEnabled.Value ? "ON" : "OFF")} at {FormatConfigFloat(Mathf.Clamp(_teamFameSharePercent.Value, 0f, 100f))}% of player fame gains.");
         Log.LogInfo($"Max lover count override starts at {Math.Max(1, _maxLoverCount.Value)}.");
-        Log.LogInfo($"Lover home battle blocker starts {(_blockOverflowLoverHomeBattle.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Lover home battle blocker starts {(_relationshipFeaturesEnabled.Value && _blockOverflowLoverHomeBattle.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Debate player damage taken multiplier starts at x{FormatConfigFloat(_debatePlayerDamageTakenMultiplier.Value)}.");
         Log.LogInfo($"Debate enemy damage taken multiplier starts at x{FormatConfigFloat(_debateEnemyDamageTakenMultiplier.Value)}.");
         Log.LogInfo(
@@ -1083,7 +1105,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             $"with rarity scaling {(_dailySkillInsightUseRarityScaling.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Daily skill insight real-time test interval starts at {Math.Max(0f, _dailySkillInsightRealtimeIntervalSeconds.Value):0.###} seconds.");
         Log.LogInfo(
-            $"Same-sect teaching splash starts {(_teachSkillSameSectAreaShareEnabled.Value ? "ON" : "OFF")} " +
+            $"Same-sect teaching splash starts {(_relationshipFeaturesEnabled.Value && _teachSkillSameSectAreaShareEnabled.Value ? "ON" : "OFF")} " +
             $"at {ClampTeachSkillSplashPercent(_teachSkillSameSectAreaShareMinPercent.Value)}%-{ClampTeachSkillSplashPercent(_teachSkillSameSectAreaShareMaxPercent.Value)}%.");
         Log.LogInfo($"Dialog monthly limit multiplier starts at x{FormatConfigFloat(_dialogMonthlyLimitMultiplier.Value)}.");
         Log.LogInfo($"Dialog fast-forward assist starts {(_dialogFastForwardAssistEnabled.Value ? "ON" : "OFF")} with hotkey {_dialogFastForwardAssistHotkey.Value}.");
@@ -1092,6 +1114,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo($"Dialog fast-forward tracer starts {(_traceDialogFastForward.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Treasure chest tracer starts {(_traceTreasureChestEvents.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Lover battle prep tracer starts {(_traceLoverBattlePrep.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Character-data test hotkey starts {(_relationshipFeaturesEnabled.Value && _characterDataTestHotkeyEnabled.Value ? "ON" : "OFF")} on {CharacterDataTestHotkey}.");
         Log.LogInfo($"Date freeze starts {(_freezeDate.Value ? "ON" : "OFF")} with hotkey {_freezeDateHotkey.Value}.");
         Log.LogInfo($"Outside-battle speed cycle hotkey is {_outsideBattleSpeedHotkey.Value}.");
     }
@@ -9827,7 +9850,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         __state = new TeachSkillSplashState();
 
-        if (!_teachSkillSameSectAreaShareEnabled.Value)
+        if (!_relationshipFeaturesEnabled.Value || !_teachSkillSameSectAreaShareEnabled.Value)
         {
             return;
         }
@@ -9907,7 +9930,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void ManageTeachSkillPostfix(HeroData sourceHero, HeroData targetHero, int skillID, float rate, bool showInfo, TeachSkillSplashState __state)
     {
-        if (!__state.IsEligible || __state.SourceHero == null || __state.TargetHero == null)
+        if (!_relationshipFeaturesEnabled.Value || !_teachSkillSameSectAreaShareEnabled.Value ||
+            !__state.IsEligible || __state.SourceHero == null || __state.TargetHero == null)
         {
             return;
         }
@@ -10025,6 +10049,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void ChangeFamePrefix(HeroData __instance, object? __0, out FameChangeState __state)
     {
+        __state = new FameChangeState();
+        if (!_relationshipFeaturesEnabled.Value || !_teamFameShareEnabled.Value ||
+            Mathf.Clamp(_teamFameSharePercent.Value, 0f, 100f) <= 0f)
+        {
+            return;
+        }
+
         var requestedDelta = TryConvertToFloat(__0) ?? 0f;
         __state = new FameChangeState
         {
@@ -10036,7 +10067,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void ChangeFamePostfix(HeroData __instance, object? __0, FameChangeState __state)
     {
-        if (!__state.IsEligible)
+        if (!_relationshipFeaturesEnabled.Value || !_teamFameShareEnabled.Value || !__state.IsEligible)
         {
             return;
         }
@@ -10053,7 +10084,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static void ChangeFavorPrefix(HeroData __instance, ref float num, out RelationshipBonusState __state)
     {
         __state = new RelationshipBonusState();
-        if (!_relationshipBonusHooksReady || _applyingTeamAutoFavor || num <= 0f || IsPlayerHero(__instance))
+        if (!_relationshipFeaturesEnabled.Value || !_relationshipBonusHooksReady ||
+            _applyingTeamAutoFavor || num <= 0f || IsPlayerHero(__instance))
         {
             return;
         }
@@ -10093,7 +10125,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void ChangeFavorPostfix(HeroData __instance, RelationshipBonusState? __state)
     {
-        if (__state == null || !__state.IsApplied)
+        if (!_relationshipFeaturesEnabled.Value || __state == null || !__state.IsApplied)
         {
             return;
         }
@@ -11001,10 +11033,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             CycleOutsideBattleSpeed();
         }
 
-        if (Input.GetKeyDown(ViewedHeroFavorTestHotkey))
+        if (_relationshipFeaturesEnabled.Value && _characterDataTestHotkeyEnabled.Value &&
+            Input.GetKeyDown(CharacterDataTestHotkey))
         {
             GrantTeamIntelligenceMoneyTest();
-            ApplyViewedHeroFavorTest();
+            ApplyViewedHeroCharacterDataTest();
         }
         }
         finally
@@ -12430,16 +12463,6 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         CacheActiveDialogHero(__0);
     }
 
-    private static void HeroDetailViewedHeroPostfix(HeroData __0)
-    {
-        CacheActiveHeroDetailHero(__0);
-    }
-
-    private static void HeroDetailHiddenPostfix()
-    {
-        CacheActiveHeroDetailHero(null);
-    }
-
     private static void MeetLoverResultRequirePostfix(ref bool __result)
     {
         ApplyConfiguredMaxLoverCount("GameController.MeetLoverResultRequire");
@@ -12472,7 +12495,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     {
         var player = TryGetPlayerHero();
         var loverCount = player == null ? -1 : GetPlayerLoverCount(player);
-        if (player != null && _blockOverflowLoverHomeBattle.Value)
+        if (player != null && _relationshipFeaturesEnabled.Value && _blockOverflowLoverHomeBattle.Value)
         {
             LoggerInstance.LogWarning(
                 $"Lover home battle detected at PlotStartLoverResultFight: loverCount={loverCount}. Battle prep will be bypassed when PrepareBattleMap runs.");
@@ -12665,62 +12688,33 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _activeDialogHeroId = TryGetHeroId(hero) ?? -1;
     }
 
-    private static void CacheActiveHeroDetailHero(HeroData? hero)
-    {
-        _activeHeroDetailHero = hero;
-        _activeHeroDetailHeroId = TryGetHeroId(hero) ?? -1;
-    }
-
     private static HeroData? TryGetViewedHeroDetailHero()
     {
         try
         {
             var heroDetailController = HeroDetailController.Instance;
-            if (heroDetailController != null)
+            if (heroDetailController == null || heroDetailController.gameObject == null ||
+                !heroDetailController.gameObject.activeInHierarchy)
             {
-                foreach (var memberName in new[] { "nowShowHero", "targetHero", "mainShowHero", "nowChooseHero" })
-                {
-                    var hero = SafeProperty(heroDetailController, memberName) as HeroData
-                               ?? SafeField(heroDetailController, memberName) as HeroData;
-                    if (hero != null)
-                    {
-                        CacheActiveHeroDetailHero(hero);
-                        return hero;
-                    }
-                }
+                return null;
+            }
 
-                if (heroDetailController.gameObject != null && heroDetailController.gameObject.activeInHierarchy)
+            foreach (var memberName in new[] { "nowShowHero", "targetHero", "mainShowHero", "nowChooseHero" })
+            {
+                var hero = SafeProperty(heroDetailController, memberName) as HeroData
+                           ?? SafeField(heroDetailController, memberName) as HeroData;
+                if (hero != null)
                 {
-                    var playerHero = TryGetPlayerHero();
-                    if (playerHero != null)
-                    {
-                        CacheActiveHeroDetailHero(playerHero);
-                        return playerHero;
-                    }
+                    return hero;
                 }
             }
+
+            return null;
         }
         catch
         {
+            return null;
         }
-
-        if (_activeHeroDetailHero != null)
-        {
-            return _activeHeroDetailHero;
-        }
-
-        if (_activeHeroDetailHeroId > 0)
-        {
-            try
-            {
-                return GameController.Instance?.worldData?.GetHero(_activeHeroDetailHeroId);
-            }
-            catch
-            {
-            }
-        }
-
-        return null;
     }
 
     private static float? TryReadFame(HeroData? hero)
@@ -13143,6 +13137,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void GrantTeamIntelligenceMoneyTest()
     {
+        if (!_relationshipFeaturesEnabled.Value || !_characterDataTestHotkeyEnabled.Value)
+        {
+            return;
+        }
+
         var player = TryGetPlayerHero();
         if (player == null)
         {
@@ -13197,11 +13196,18 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PushPlayerLog($"Mod测试: 队伍智慧总和 {totalIntelligence}，获得 {totalIntelligence} 文钱");
     }
 
-    private static void ApplyViewedHeroFavorTest()
+    private static void ApplyViewedHeroCharacterDataTest()
     {
+        if (!_relationshipFeaturesEnabled.Value || !_characterDataTestHotkeyEnabled.Value)
+        {
+            return;
+        }
+
         var viewedHero = TryGetViewedHeroDetailHero();
         if (viewedHero == null)
         {
+            LoggerInstance.LogWarning("Character-data test skipped because the current character-detail target could not be resolved.");
+            PushPlayerLog("Mod测试: 无法识别当前人物详情目标，未修改任何人物数据");
             return;
         }
 
@@ -13219,7 +13225,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         if (!beforeValue.HasValue)
         {
-            LoggerInstance.LogWarning($"Viewed hero reputation test hotkey could not read fame for {TryGetHeroName(viewedHero)}.");
+            LoggerInstance.LogWarning($"Character-data test could not read fame for {TryGetHeroName(viewedHero)}.");
             PushPlayerLog($"Mod测试: 无法读取当前角色 {TryGetHeroName(viewedHero)} 的声望");
             return;
         }
@@ -13233,7 +13239,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
         catch (Exception ex)
         {
-            LoggerInstance.LogWarning($"Viewed hero fame test hotkey failed for {TryGetHeroName(viewedHero)}: {ex.Message}");
+            LoggerInstance.LogWarning($"Character-data test failed to change fame for {TryGetHeroName(viewedHero)}: {ex.Message}");
             PushPlayerLog($"Mod测试: 修改 {TryGetHeroName(viewedHero)} 的声望失败");
             return;
         }
@@ -13276,7 +13282,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var tierSummary = $"tier {SafeFormatValue(beforeForceLv)} {SafeFormatValue(beforeForceLvText)} -> {SafeFormatValue(afterForceLv)} {SafeFormatValue(afterForceLvText)}";
 
         LoggerInstance.LogInfo(
-            $"Viewed hero reputation test applied to {TryGetHeroName(viewedHero)} (id={SafeFormatValue(heroId)}): " +
+            $"Character-data test applied to {TryGetHeroName(viewedHero)} (id={SafeFormatValue(heroId)}): " +
             $"kind=fame, before={SafeFormatValue(beforeValue.Value)}, requestedDelta={reputationDelta}, after={SafeFormatValue(afterValue.Value)}, appliedDelta={SafeFormatValue(appliedDelta)}, {tierSummary}, tierChanged={tierChanged}, sectlessPromotionApplied={sectlessTierPromotionApplied}.");
         PushPlayerLog(
             $"Mod测试: 当前查看角色 {TryGetHeroName(viewedHero)}(ID {SafeFormatValue(heroId)}) 声望 {SafeFormatValue(beforeValue.Value)} -> {SafeFormatValue(afterValue.Value)} ({appliedDeltaText})，{tierSummary}");
@@ -14050,7 +14056,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static bool TryBypassOverflowLoverHomeBattle(BattleController? controller, string? fightEndCall, string source)
     {
-        if (!_blockOverflowLoverHomeBattle.Value ||
+        if (!_relationshipFeaturesEnabled.Value || !_blockOverflowLoverHomeBattle.Value ||
             !string.Equals(fightEndCall, nameof(PlotController.PlotStartLoverResultFightResult), StringComparison.Ordinal))
         {
             return false;
@@ -14517,7 +14523,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static int ApplyTeachSkillSameSectAreaShare(HeroData sourceHero, HeroData directTarget, int skillId, float baseExp, bool useFightExp, out List<TeachSkillRecipientResult> recipientResults)
     {
         recipientResults = new List<TeachSkillRecipientResult>();
-        if (baseExp <= 0f)
+        if (!_relationshipFeaturesEnabled.Value || !_teachSkillSameSectAreaShareEnabled.Value || baseExp <= 0f)
         {
             return 0;
         }
@@ -15814,7 +15820,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void HandleTeamAutoFavorDateProgress(TimeData? beforeDate, TimeData? afterDate, string source)
     {
-        if (!_teamAutoFavorEnabled.Value || beforeDate == null || afterDate == null)
+        if (!_relationshipFeaturesEnabled.Value || !_teamAutoFavorEnabled.Value || beforeDate == null || afterDate == null)
         {
             return;
         }
@@ -15830,6 +15836,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void TryApplyTeamAutoFavor(int elapsedDays, string source)
     {
+        if (!_relationshipFeaturesEnabled.Value || !_teamAutoFavorEnabled.Value)
+        {
+            return;
+        }
+
         var perDayFavor = Math.Max(0f, _teamAutoFavorPerDay.Value);
         if (elapsedDays <= 0 || perDayFavor <= 0f)
         {
@@ -15898,7 +15909,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static float TryApplyAutoFavorGain(HeroData teammate, float favorToGrant)
     {
-        if (teammate == null || favorToGrant <= 0f)
+        if (!_relationshipFeaturesEnabled.Value || !_teamAutoFavorEnabled.Value ||
+            teammate == null || favorToGrant <= 0f)
         {
             return 0f;
         }
@@ -16039,7 +16051,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static void TryApplyTeamFameShare(HeroData player, float playerFameGain)
     {
-        if (player == null || playerFameGain <= 0.001f)
+        if (!_relationshipFeaturesEnabled.Value || !_teamFameShareEnabled.Value ||
+            player == null || playerFameGain <= 0.001f)
         {
             return;
         }
@@ -16055,7 +16068,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
-        var sharePerTeammate = playerFameGain * TeamFameShareRatio;
+        var shareRatio = Mathf.Clamp(_teamFameSharePercent.Value, 0f, 100f) / 100f;
+        var sharePerTeammate = playerFameGain * shareRatio;
         if (sharePerTeammate <= 0.001f)
         {
             return;
@@ -16105,7 +16119,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
     private static float TryApplySharedFameGain(HeroData teammate, float fameToGrant)
     {
-        if (teammate == null || fameToGrant <= 0.001f)
+        if (!_relationshipFeaturesEnabled.Value || !_teamFameShareEnabled.Value ||
+            teammate == null || fameToGrant <= 0.001f)
         {
             return 0f;
         }

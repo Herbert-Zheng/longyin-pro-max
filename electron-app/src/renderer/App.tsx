@@ -2015,15 +2015,21 @@ export function App() {
                       max={100}
                       step={1}
                       suffix="%"
-                      hint="命中后，本次正向好感增加量变为 2 倍；0% 表示关闭。"
+                      hint="需同时开启“人物关系增强总开关”；命中后，本次正向好感增加量变为 2 倍，0% 表示关闭。"
                     />
                   </div>
                 </Card>
 
                 <Card title="关系与组队" eyebrow="Relationship">
                   <div className="stack">
-                    <p className="body-copy">已确认无效的“队友离队天数倍率”已移除，避免继续在界面里误导使用。</p>
+                    <p className="body-copy">总开关关闭时，下列人物关系增强不会修改游戏人物数据；伴侣上限是独立设置，不受总开关影响。</p>
                     <div className="field-grid">
+                      <CheckboxField
+                        label="人物关系增强总开关"
+                        value={settings.relationshipFeaturesEnabled}
+                        onChange={(value) => updateSetting('relationshipFeaturesEnabled', value)}
+                        hint="默认关闭。关闭后，好感加成、队友好感与声望共享、回家战斗阻断、同门传授和人物数据测试均不生效。"
+                      />
                       <CheckboxField
                         label="队友每日自动加好感"
                         value={settings.teamAutoFavorEnabled}
@@ -2038,6 +2044,39 @@ export function App() {
                         max={999}
                         step={1}
                       />
+                      <CheckboxField
+                        label="队友声望共享"
+                        value={settings.teamFameShareEnabled}
+                        onChange={(value) => updateSetting('teamFameShareEnabled', value)}
+                        hint="玩家获得正声望时，按下方比例同步给当前队友；需开启人物关系增强总开关。"
+                      />
+                      <NumberField
+                        label="队友声望共享比例"
+                        value={settings.teamFameSharePercent}
+                        onChange={(value) => updateSetting('teamFameSharePercent', value)}
+                        min={0}
+                        max={100}
+                        step={1}
+                        suffix="%"
+                      />
+                      <CheckboxField
+                        label="阻断超额伴侣回家战斗"
+                        value={settings.blockOverflowLoverHomeBattle}
+                        onChange={(value) => updateSetting('blockOverflowLoverHomeBattle', value)}
+                        hint="单独控制回家时的超额伴侣战斗阻断；需开启人物关系增强总开关。"
+                      />
+                      <CheckboxField
+                        label="同门传授范围共享"
+                        value={settings.sameSectAreaShareEnabled}
+                        onChange={(value) => updateSetting('sameSectAreaShareEnabled', value)}
+                        hint="同门传授成功时，向同区域同门共享收益；需开启人物关系增强总开关。"
+                      />
+                      <CheckboxField
+                        label="人物数据测试（K）"
+                        value={settings.characterDataTestHotkeyEnabled}
+                        onChange={(value) => updateSetting('characterDataTestHotkeyEnabled', value)}
+                        hint="调试功能，默认关闭；开启总开关和本项后，游戏内按 K 执行人物数据测试。"
+                      />
                       <NumberField
                         label="伴侣上限"
                         value={settings.maxLoverCount}
@@ -2045,7 +2084,7 @@ export function App() {
                         min={1}
                         max={999}
                         step={1}
-                        hint="提高玩家可同时拥有的伴侣/夫妻数量。默认改为 8。"
+                        hint="提高玩家可同时拥有的伴侣/夫妻数量。此项独立生效，不受人物关系增强总开关影响；默认 8。"
                       />
                     </div>
                   </div>

@@ -284,9 +284,15 @@ export interface VisibleSettings {
   breakthroughRerollEnabled: boolean;
   craftRerollEnabled: boolean;
   luckyHitChancePercent: number;
+  relationshipFeaturesEnabled: boolean;
   extraRelationshipGainChancePercent: number;
   teamAutoFavorEnabled: boolean;
   teamAutoFavorPerDay: number;
+  teamFameShareEnabled: boolean;
+  teamFameSharePercent: number;
+  blockOverflowLoverHomeBattle: boolean;
+  sameSectAreaShareEnabled: boolean;
+  characterDataTestHotkeyEnabled: boolean;
   maxLoverCount: number;
   debatePlayerDamageTakenMultiplier: number;
   debateEnemyDamageTakenMultiplier: number;

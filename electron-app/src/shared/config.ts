@@ -87,9 +87,15 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   breakthroughRerollEnabled: true,
   craftRerollEnabled: true,
   luckyHitChancePercent: 0,
+  relationshipFeaturesEnabled: false,
   extraRelationshipGainChancePercent: 0,
   teamAutoFavorEnabled: true,
   teamAutoFavorPerDay: 5,
+  teamFameShareEnabled: true,
+  teamFameSharePercent: 30,
+  blockOverflowLoverHomeBattle: true,
+  sameSectAreaShareEnabled: true,
+  characterDataTestHotkeyEnabled: false,
   maxLoverCount: 8,
   debatePlayerDamageTakenMultiplier: 1,
   debateEnemyDamageTakenMultiplier: 1,
@@ -555,9 +561,30 @@ function ensureIniSection(text: string, section: string): string {
   return `${text}${suffix}[${section}]\r\n`;
 }
 
+function getIniLineEnding(text: string): string {
+  if (text.includes('\r\n')) {
+    return '\r\n';
+  }
+
+  if (text.includes('\n')) {
+    return '\n';
+  }
+
+  if (text.includes('\r')) {
+    return '\r';
+  }
+
+  return '\r\n';
+}
+
+function normalizeIniLineEndings(text: string): string {
+  const newline = getIniLineEnding(text);
+  return text.replace(/\r\n|\r|\n/g, newline);
+}
+
 function createIniSectionPattern(section: string): RegExp {
   return new RegExp(
-    `(^\\s*\\[${escapeRegex(section)}\\]\\s*$\\r?\\n?)([\\s\\S]*?)(?=^\\s*\\[[^\\]]+\\]\\s*$|(?![\\s\\S]))`,
+    `(^[^\\S\\r\\n]*\\[${escapeRegex(section)}\\][^\\S\\r\\n]*(?:\\r\\n|\\r|\\n)?)([\\s\\S]*?)(?=^[^\\S\\r\\n]*\\[[^\\]\\r\\n]+\\][^\\S\\r\\n]*$|(?![\\s\\S]))`,
     'mi'
   );
 }
@@ -565,6 +592,7 @@ function createIniSectionPattern(section: string): RegExp {
 function upsertIniSectionValue(text: string, section: string, key: string, value: string): string {
   const ensured = ensureIniSection(text, section);
   const sectionPattern = createIniSectionPattern(section);
+  const newline = getIniLineEnding(ensured);
 
   return ensured.replace(sectionPattern, (_match, header: string, body: string) => {
     const keyPattern = new RegExp(`^(\\s*${escapeRegex(key)}\\s*=\\s*).*$`, 'mi');
@@ -572,8 +600,14 @@ function upsertIniSectionValue(text: string, section: string, key: string, value
       return `${header}${body.replace(keyPattern, `$1${value}`)}`;
     }
 
-    const suffix = body.endsWith('\n') || body.endsWith('\r') || body.length === 0 ? '' : '\r\n';
-    return `${header}${body}${suffix}${key} = ${value}\r\n`;
+    const trailingWhitespace = body.match(/(?:[ \t]*(?:\r\n|\r|\n))+$/)?.[0] ?? '';
+    const content = trailingWhitespace.length > 0
+      ? body.slice(0, body.length - trailingWhitespace.length)
+      : body;
+    const trailingLineCount = trailingWhitespace.match(/\r\n|\r|\n/g)?.length ?? 0;
+    const separator = content.length === 0 || /(?:\r\n|\r|\n)$/.test(content) ? '' : newline;
+    const preservedTrailingLines = newline.repeat(Math.max(0, trailingLineCount - 1));
+    return `${header}${content}${separator}${key} = ${value}${newline}${preservedTrailingLines}`;
   });
 }
 
@@ -683,10 +717,20 @@ RerollEnabled = ${boolText(settings.breakthroughRerollEnabled)}
 LuckyHitChancePercent = ${settings.luckyHitChancePercent}
 
 [Relationship]
+FeaturesEnabled = ${boolText(settings.relationshipFeaturesEnabled)}
 ExtraRelationshipGainChancePercent = ${settings.extraRelationshipGainChancePercent}
 TeamAutoFavorEnabled = ${boolText(settings.teamAutoFavorEnabled)}
 TeamAutoFavorPerDay = ${formatFloat(settings.teamAutoFavorPerDay)}
+TeamFameShareEnabled = ${boolText(settings.teamFameShareEnabled)}
+TeamFameSharePercent = ${formatFloat(settings.teamFameSharePercent)}
+BlockOverflowLoverHomeBattle = ${boolText(settings.blockOverflowLoverHomeBattle)}
 MaxLoverCount = ${settings.maxLoverCount}
+
+[Teaching]
+SameSectAreaShareEnabled = ${boolText(settings.sameSectAreaShareEnabled)}
+
+[Debug]
+CharacterDataTestHotkeyEnabled = ${boolText(settings.characterDataTestHotkeyEnabled)}
 
 [Debate]
 PlayerDamageTakenMultiplier = ${formatFloat(settings.debatePlayerDamageTakenMultiplier)}
@@ -912,9 +956,15 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     breakthroughRerollEnabled: input.breakthroughRerollEnabled,
     craftRerollEnabled: input.craftRerollEnabled,
     luckyHitChancePercent: Math.round(clamp(input.luckyHitChancePercent, 0, 100)),
+    relationshipFeaturesEnabled: input.relationshipFeaturesEnabled,
     extraRelationshipGainChancePercent: Math.round(clamp(input.extraRelationshipGainChancePercent, 0, 100)),
     teamAutoFavorEnabled: input.teamAutoFavorEnabled,
     teamAutoFavorPerDay: clamp(input.teamAutoFavorPerDay, 0, 999),
+    teamFameShareEnabled: input.teamFameShareEnabled,
+    teamFameSharePercent: clamp(input.teamFameSharePercent, 0, 100),
+    blockOverflowLoverHomeBattle: input.blockOverflowLoverHomeBattle,
+    sameSectAreaShareEnabled: input.sameSectAreaShareEnabled,
+    characterDataTestHotkeyEnabled: input.characterDataTestHotkeyEnabled,
     maxLoverCount: Math.round(clamp(input.maxLoverCount, 1, 999)),
     debatePlayerDamageTakenMultiplier: clamp(input.debatePlayerDamageTakenMultiplier, 0, 999),
     debateEnemyDamageTakenMultiplier: clamp(input.debateEnemyDamageTakenMultiplier, 0, 999),
@@ -953,6 +1003,8 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
   const dialogFlowSection = getIniSectionBody(text, 'DialogFlow');
   const dailySkillInsightSection = getIniSectionBody(text, 'DailySkillInsight');
   const relationshipSection = getIniSectionBody(text, 'Relationship');
+  const teachingSection = getIniSectionBody(text, 'Teaching');
+  const debugSection = getIniSectionBody(text, 'Debug');
   const systemsSection = getIniSectionBody(text, 'Systems') ?? getIniSectionBody(text, 'Time');
   const commerceSection = getIniSectionBody(text, 'Commerce');
   const auctionSection = getIniSectionBody(text, 'Auction');
@@ -1055,6 +1107,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       DEFAULT_VISIBLE_SETTINGS.craftRerollEnabled
     ),
     luckyHitChancePercent: readInt(text, 'LuckyHitChancePercent', DEFAULT_VISIBLE_SETTINGS.luckyHitChancePercent),
+    relationshipFeaturesEnabled: readBool(
+      relationshipSection,
+      'FeaturesEnabled',
+      DEFAULT_VISIBLE_SETTINGS.relationshipFeaturesEnabled
+    ),
     extraRelationshipGainChancePercent: readInt(
       relationshipSection ?? text,
       'ExtraRelationshipGainChancePercent',
@@ -1069,6 +1126,31 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       relationshipSection ?? text,
       'TeamAutoFavorPerDay',
       DEFAULT_VISIBLE_SETTINGS.teamAutoFavorPerDay
+    ),
+    teamFameShareEnabled: readBool(
+      relationshipSection,
+      'TeamFameShareEnabled',
+      DEFAULT_VISIBLE_SETTINGS.teamFameShareEnabled
+    ),
+    teamFameSharePercent: readFloat(
+      relationshipSection,
+      'TeamFameSharePercent',
+      DEFAULT_VISIBLE_SETTINGS.teamFameSharePercent
+    ),
+    blockOverflowLoverHomeBattle: readBool(
+      relationshipSection,
+      'BlockOverflowLoverHomeBattle',
+      DEFAULT_VISIBLE_SETTINGS.blockOverflowLoverHomeBattle
+    ),
+    sameSectAreaShareEnabled: readBool(
+      teachingSection,
+      'SameSectAreaShareEnabled',
+      DEFAULT_VISIBLE_SETTINGS.sameSectAreaShareEnabled
+    ),
+    characterDataTestHotkeyEnabled: readBool(
+      debugSection,
+      'CharacterDataTestHotkeyEnabled',
+      DEFAULT_VISIBLE_SETTINGS.characterDataTestHotkeyEnabled
     ),
     maxLoverCount: readInt(
       relationshipSection ?? text,
@@ -1421,7 +1503,7 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   const skillText = await ensureConfigFile(paths.skillConfigPath, buildSkillTemplate());
   const battleText = await ensureConfigFile(paths.battleConfigPath, buildBattleTemplate());
 
-  let nextMain = mainText;
+  let nextMain = normalizeIniLineEndings(mainText);
   nextMain = upsertIniValue(nextMain, 'LockStamina', boolText(normalized.lockStamina));
   nextMain = upsertIniSectionValue(
     nextMain,
@@ -1555,6 +1637,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   nextMain = upsertIniSectionValue(
     nextMain,
     'Relationship',
+    'FeaturesEnabled',
+    boolText(normalized.relationshipFeaturesEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Relationship',
     'ExtraRelationshipGainChancePercent',
     String(normalized.extraRelationshipGainChancePercent)
   );
@@ -1570,6 +1658,24 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'TeamAutoFavorPerDay',
     formatFloat(normalized.teamAutoFavorPerDay)
   );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Relationship',
+    'TeamFameShareEnabled',
+    boolText(normalized.teamFameShareEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Relationship',
+    'TeamFameSharePercent',
+    formatFloat(normalized.teamFameSharePercent)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Relationship',
+    'BlockOverflowLoverHomeBattle',
+    boolText(normalized.blockOverflowLoverHomeBattle)
+  );
   nextMain = removeIniSectionValue(nextMain, 'Relationship', 'TeamStayDurationMultiplier');
   nextMain = removeIniValue(nextMain, 'TeamStayDurationMultiplier');
   nextMain = upsertIniSectionValue(
@@ -1577,6 +1683,18 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'Relationship',
     'MaxLoverCount',
     String(normalized.maxLoverCount)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Teaching',
+    'SameSectAreaShareEnabled',
+    boolText(normalized.sameSectAreaShareEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Debug',
+    'CharacterDataTestHotkeyEnabled',
+    boolText(normalized.characterDataTestHotkeyEnabled)
   );
   nextMain = removeIniSectionValue(nextMain, 'Commerce', 'ExtraRelationshipGainChancePercent');
   nextMain = upsertIniValue(

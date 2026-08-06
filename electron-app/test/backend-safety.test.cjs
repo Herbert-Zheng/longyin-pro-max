@@ -428,6 +428,133 @@ test('reading visible settings does not create or modify game files', async (t) 
   assert.deepEqual(after, before);
 });
 
+test('relationship memory features default safely off while independent settings keep their defaults', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const settings = await readVisibleSettings(gameRoot);
+
+  assert.equal(settings.relationshipFeaturesEnabled, false);
+  assert.equal(settings.teamFameShareEnabled, true);
+  assert.equal(settings.teamFameSharePercent, 30);
+  assert.equal(settings.blockOverflowLoverHomeBattle, true);
+  assert.equal(settings.sameSectAreaShareEnabled, true);
+  assert.equal(settings.characterDataTestHotkeyEnabled, false);
+  assert.equal(settings.maxLoverCount, 8);
+});
+
+test('relationship, teaching, and character test settings are section-scoped and round-trip', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[WrongSection]',
+      'FeaturesEnabled = false',
+      'TeamFameShareEnabled = false',
+      'TeamFameSharePercent = 1',
+      'BlockOverflowLoverHomeBattle = false',
+      'SameSectAreaShareEnabled = false',
+      'CharacterDataTestHotkeyEnabled = false',
+      '',
+      '[Relationship]',
+      'FeaturesEnabled = true',
+      'ExtraRelationshipGainChancePercent = 25',
+      'TeamAutoFavorEnabled = false',
+      'TeamAutoFavorPerDay = 2.5',
+      'TeamFameShareEnabled = true',
+      'TeamFameSharePercent = 45.5',
+      'BlockOverflowLoverHomeBattle = true',
+      'MaxLoverCount = 12',
+      'UnrelatedRelationshipSetting = keep-relationship',
+      '',
+      '[Teaching]',
+      'SameSectAreaShareEnabled = true',
+      'UnrelatedTeachingSetting = keep-teaching',
+      '',
+      '[Debug]',
+      'CharacterDataTestHotkeyEnabled = true',
+      'UnrelatedDebugSetting = keep-debug',
+      ''
+    ].join('\r\n')
+  );
+
+  const current = await readVisibleSettings(gameRoot);
+  assert.equal(current.relationshipFeaturesEnabled, true);
+  assert.equal(current.teamFameShareEnabled, true);
+  assert.equal(current.teamFameSharePercent, 45.5);
+  assert.equal(current.blockOverflowLoverHomeBattle, true);
+  assert.equal(current.sameSectAreaShareEnabled, true);
+  assert.equal(current.characterDataTestHotkeyEnabled, true);
+  assert.equal(current.maxLoverCount, 12);
+
+  const saved = await saveVisibleSettings(gameRoot, {
+    ...current,
+    relationshipFeaturesEnabled: false,
+    teamFameShareEnabled: false,
+    teamFameSharePercent: 37.5,
+    blockOverflowLoverHomeBattle: false,
+    sameSectAreaShareEnabled: false,
+    characterDataTestHotkeyEnabled: false,
+    maxLoverCount: 16
+  });
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.equal(saved.relationshipFeaturesEnabled, false);
+  assert.equal(saved.teamFameShareEnabled, false);
+  assert.equal(saved.teamFameSharePercent, 37.5);
+  assert.equal(saved.blockOverflowLoverHomeBattle, false);
+  assert.equal(saved.sameSectAreaShareEnabled, false);
+  assert.equal(saved.characterDataTestHotkeyEnabled, false);
+  assert.equal(saved.maxLoverCount, 16);
+  assert.match(text, /\[Relationship\][\s\S]*?^FeaturesEnabled = false$/m);
+  assert.match(text, /\[Relationship\][\s\S]*?^TeamFameShareEnabled = false$/m);
+  assert.match(text, /\[Relationship\][\s\S]*?^TeamFameSharePercent = 37\.5$/m);
+  assert.match(text, /\[Relationship\][\s\S]*?^BlockOverflowLoverHomeBattle = false$/m);
+  assert.match(text, /\[Relationship\][\s\S]*?^MaxLoverCount = 16$/m);
+  assert.match(text, /\[Teaching\][\s\S]*?^SameSectAreaShareEnabled = false$/m);
+  assert.match(text, /\[Debug\][\s\S]*?^CharacterDataTestHotkeyEnabled = false$/m);
+  assert.match(text, /^UnrelatedRelationshipSetting = keep-relationship$/m);
+  assert.match(text, /^UnrelatedTeachingSetting = keep-teaching$/m);
+  assert.match(text, /^UnrelatedDebugSetting = keep-debug$/m);
+  assert.match(text, /\[WrongSection\]\r?\nFeaturesEnabled = false/);
+});
+
+test('saving missing relationship keys preserves CRLF line endings', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[Relationship]',
+      'MaxLoverCount = 8',
+      '',
+      '[Teaching]',
+      'SameSectAreaShareEnabled = true',
+      '',
+      '[Debug]',
+      'TracerEnabled = false',
+      ''
+    ].join('\r\n')
+  );
+
+  const current = await readVisibleSettings(gameRoot);
+  await saveVisibleSettings(gameRoot, current);
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+  const withoutCrLf = text.replace(/\r\n/g, '');
+
+  assert.equal(withoutCrLf.includes('\r'), false, 'must not introduce lone carriage returns');
+  assert.equal(withoutCrLf.includes('\n'), false, 'must not introduce lone line feeds');
+  assert.match(text, /MaxLoverCount = 8\r\nFeaturesEnabled = false\r\n/);
+  assert.match(text, /CharacterDataTestHotkeyEnabled = false\r\n/);
+  assert.doesNotMatch(text, /(?:\r\n){3,}/, 'must not expand section spacing');
+  assert.match(text, /BlockOverflowLoverHomeBattle = true\r\n\r\n\[Teaching\]/);
+});
+
 test('exploration full-reveal setting reads only the Exploration section and round-trips', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));

@@ -28,6 +28,44 @@ function Assert-Equal($Expected, $Actual, [string]$Label) {
     }
 }
 
+function Write-PendingPluginFixture(
+    [string]$StageRoot,
+    [string]$PluginName,
+    [string]$Payload,
+    [string]$InteropHash,
+    [string]$GameHash,
+    [string]$GameVersion,
+    [System.Text.Encoding]$Encoding
+) {
+    $dllPath = Join-Path $StageRoot "$PluginName.dll"
+    $pendingPath = "$dllPath.pending"
+    $metadataPath = "$dllPath.build.json"
+    [System.IO.File]::WriteAllText($dllPath, $Payload, $Encoding)
+    $artifactHash = Get-Sha256 $dllPath
+    $marker = [ordered]@{
+        SchemaVersion  = 1
+        PluginName     = $PluginName
+        ArtifactSha256 = $artifactHash
+        MetadataFile   = [System.IO.Path]::GetFileName($metadataPath)
+        CreatedAtUtc   = [DateTime]::UtcNow.ToString("o")
+    } | ConvertTo-Json
+    $metadata = [ordered]@{
+        SchemaVersion = 1
+        PluginName = $PluginName
+        Artifact = [ordered]@{ Sha256 = $artifactHash }
+        Interop = [ordered]@{ AssemblyCSharpSha256 = $InteropHash }
+        TargetGame = [ordered]@{ Sha256 = $GameHash; ProductVersion = $GameVersion }
+    } | ConvertTo-Json -Depth 4
+    [System.IO.File]::WriteAllText($metadataPath, $metadata, $Encoding)
+    [System.IO.File]::WriteAllText($pendingPath, $marker, $Encoding)
+    return [pscustomobject]@{
+        DllPath = $dllPath
+        PendingPath = $pendingPath
+        MetadataPath = $metadataPath
+        Hash = $artifactHash
+    }
+}
+
 if (-not $RepoRoot) {
     $RepoRoot = Join-Path $PSScriptRoot ".."
 }
@@ -257,7 +295,151 @@ try {
     Assert-Equal -Expected $newHash -Actual (Get-Sha256 $liveDll) -Label "运行中 live DLL"
     Assert-Equal -Expected $true -Actual (Test-Path -LiteralPath $pendingMarker -PathType Leaf) -Label "运行中 pending 标记"
 
-    Write-Host "PASS: staged promotion, backup, hashes, interop binding, pending semantics, WhatIf isolation, and running-game guard."
+    Stop-Process -Id $fakeGameProcess.Id -Force
+    Wait-Process -Id $fakeGameProcess.Id -Timeout 5 -ErrorAction SilentlyContinue
+    $fakeGameProcess = $null
+
+    # Promoting the renamed main plugin must back up and remove the legacy DLL,
+    # otherwise BepInEx would load both copies of the same mod.
+    $migrationRepo = Join-Path $testRoot "migration-repo"
+    $migrationGame = Join-Path $testRoot "migration-game"
+    $migrationStageRoot = Join-Path $migrationRepo "_codex_staged_updates\BepInEx\plugins"
+    $migrationLiveRoot = Join-Path $migrationGame "BepInEx\plugins"
+    $migrationInteropRoot = Join-Path $migrationGame "BepInEx\interop"
+    New-Item -ItemType Directory -Path $migrationStageRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $migrationLiveRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $migrationInteropRoot -Force | Out-Null
+    $migrationGameExe = Join-Path $migrationGame "MigrationGame.exe"
+    $migrationInterop = Join-Path $migrationInteropRoot "Assembly-CSharp.dll"
+    $legacyDll = Join-Path $migrationLiveRoot "LongYinStaminaLock.dll"
+    $renamedLiveDll = Join-Path $migrationLiveRoot "LongYinProMax.dll"
+    Copy-Item -LiteralPath (Join-Path $PSHOME "powershell.exe") -Destination $migrationGameExe -Force
+    [System.IO.File]::WriteAllText($migrationInterop, "migration-interop", $utf8NoBom)
+    [System.IO.File]::WriteAllText($legacyDll, "legacy-main-plugin", $utf8NoBom)
+    $legacyHash = Get-Sha256 $legacyDll
+    $migrationFixture = Write-PendingPluginFixture `
+        -StageRoot $migrationStageRoot `
+        -PluginName "LongYinProMax" `
+        -Payload "renamed-main-plugin" `
+        -InteropHash (Get-Sha256 $migrationInterop) `
+        -GameHash (Get-Sha256 $migrationGameExe) `
+        -GameVersion ([string]([System.Diagnostics.FileVersionInfo]::GetVersionInfo($migrationGameExe).ProductVersion)) `
+        -Encoding $utf8NoBom
+
+    & $controlScript `
+        -RepoRoot $migrationRepo `
+        -GameRoot $migrationGame `
+        -GameExecutable "MigrationGame.exe" `
+        -SkipLaunch
+
+    Assert-Equal -Expected $migrationFixture.Hash -Actual (Get-Sha256 $renamedLiveDll) -Label "改名插件提升"
+    Assert-Equal -Expected $false -Actual (Test-Path -LiteralPath $legacyDll) -Label "旧名插件删除"
+    Assert-Equal -Expected $false -Actual (Test-Path -LiteralPath $migrationFixture.PendingPath) -Label "改名插件 pending 消费"
+    $legacyBackup = Get-ChildItem -LiteralPath (Join-Path $migrationGame "_codex_plugin_backups") -File -Filter "LongYinStaminaLock.dll" -Recurse | Select-Object -First 1
+    if ($null -eq $legacyBackup) {
+        throw "改名提升未生成旧名 DLL 备份。"
+    }
+    Assert-Equal -Expected $legacyHash -Actual (Get-Sha256 $legacyBackup.FullName) -Label "旧名插件备份"
+
+    # Once the renamed plugin is live, a stale legacy pending marker must fail
+    # closed instead of reinstalling the old DLL beside it.
+    $staleLegacyFixture = Write-PendingPluginFixture `
+        -StageRoot $migrationStageRoot `
+        -PluginName "LongYinStaminaLock" `
+        -Payload "stale-legacy-plugin" `
+        -InteropHash (Get-Sha256 $migrationInterop) `
+        -GameHash (Get-Sha256 $migrationGameExe) `
+        -GameVersion ([string]([System.Diagnostics.FileVersionInfo]::GetVersionInfo($migrationGameExe).ProductVersion)) `
+        -Encoding $utf8NoBom
+    $staleLegacyBlocked = $false
+    try {
+        & $controlScript `
+            -RepoRoot $migrationRepo `
+            -GameRoot $migrationGame `
+            -GameExecutable "MigrationGame.exe" `
+            -SkipLaunch
+    }
+    catch {
+        if ($_.Exception.Message -like '*live 目录已存在新主插件*拒绝提升旧插件*') {
+            $staleLegacyBlocked = $true
+        }
+        else {
+            throw
+        }
+    }
+    Assert-Equal -Expected $true -Actual $staleLegacyBlocked -Label "新插件 live 时拒绝旧 pending"
+    Assert-Equal -Expected $migrationFixture.Hash -Actual (Get-Sha256 $renamedLiveDll) -Label "拒绝旧 pending 后新插件未变"
+    Assert-Equal -Expected $false -Actual (Test-Path -LiteralPath $legacyDll -PathType Leaf) -Label "拒绝旧 pending 后旧插件未出现"
+    Assert-Equal -Expected $true -Actual (Test-Path -LiteralPath $staleLegacyFixture.PendingPath -PathType Leaf) -Label "拒绝旧 pending 后 marker 保留"
+
+    # If a later item in the same batch fails, batch rollback must remove the
+    # newly promoted name and restore the old-name DLL from its verified backup.
+    $rollbackRepo = Join-Path $testRoot "rollback-repo"
+    $rollbackGame = Join-Path $testRoot "rollback-game"
+    $rollbackStageRoot = Join-Path $rollbackRepo "_codex_staged_updates\BepInEx\plugins"
+    $rollbackLiveRoot = Join-Path $rollbackGame "BepInEx\plugins"
+    $rollbackInteropRoot = Join-Path $rollbackGame "BepInEx\interop"
+    New-Item -ItemType Directory -Path $rollbackStageRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $rollbackLiveRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $rollbackInteropRoot -Force | Out-Null
+    $rollbackGameExe = Join-Path $rollbackGame "RollbackGame.exe"
+    $rollbackInterop = Join-Path $rollbackInteropRoot "Assembly-CSharp.dll"
+    $rollbackLegacyDll = Join-Path $rollbackLiveRoot "LongYinStaminaLock.dll"
+    $rollbackRenamedDll = Join-Path $rollbackLiveRoot "LongYinProMax.dll"
+    Copy-Item -LiteralPath (Join-Path $PSHOME "powershell.exe") -Destination $rollbackGameExe -Force
+    [System.IO.File]::WriteAllText($rollbackInterop, "rollback-interop", $utf8NoBom)
+    [System.IO.File]::WriteAllText($rollbackLegacyDll, "rollback-legacy-plugin", $utf8NoBom)
+    $rollbackLegacyHash = Get-Sha256 $rollbackLegacyDll
+    $rollbackInteropHash = Get-Sha256 $rollbackInterop
+    $rollbackGameHash = Get-Sha256 $rollbackGameExe
+    $rollbackGameVersion = [string]([System.Diagnostics.FileVersionInfo]::GetVersionInfo($rollbackGameExe).ProductVersion)
+    $rollbackMainFixture = Write-PendingPluginFixture -StageRoot $rollbackStageRoot -PluginName "LongYinProMax" -Payload "rollback-new-plugin" -InteropHash $rollbackInteropHash -GameHash $rollbackGameHash -GameVersion $rollbackGameVersion -Encoding $utf8NoBom
+    $rollbackFailureFixture = Write-PendingPluginFixture -StageRoot $rollbackStageRoot -PluginName "ZRollbackProbe" -Payload "must-fail" -InteropHash $rollbackInteropHash -GameHash $rollbackGameHash -GameVersion $rollbackGameVersion -Encoding $utf8NoBom
+    New-Item -ItemType Directory -Path (Join-Path $rollbackLiveRoot "ZRollbackProbe.dll") -Force | Out-Null
+
+    $batchFailed = $false
+    try {
+        & $controlScript `
+            -RepoRoot $rollbackRepo `
+            -GameRoot $rollbackGame `
+            -GameExecutable "RollbackGame.exe" `
+            -SkipLaunch
+    }
+    catch {
+        $batchFailed = $true
+    }
+    Assert-Equal -Expected $true -Actual $batchFailed -Label "批次故障触发"
+    Assert-Equal -Expected $rollbackLegacyHash -Actual (Get-Sha256 $rollbackLegacyDll) -Label "失败后旧名插件恢复"
+    Assert-Equal -Expected $false -Actual (Test-Path -LiteralPath $rollbackRenamedDll -PathType Leaf) -Label "失败后新名插件移除"
+    Assert-Equal -Expected $true -Actual (Test-Path -LiteralPath $rollbackMainFixture.PendingPath -PathType Leaf) -Label "失败后主插件 pending 保留"
+    Assert-Equal -Expected $true -Actual (Test-Path -LiteralPath $rollbackFailureFixture.PendingPath -PathType Leaf) -Label "失败后故障插件 pending 保留"
+
+    # A queue containing both names is ambiguous and must be rejected before
+    # either DLL is touched, even when unrelated pending items are also present.
+    $conflictingLegacyFixture = Write-PendingPluginFixture -StageRoot $rollbackStageRoot -PluginName "LongYinStaminaLock" -Payload "conflicting-legacy-plugin" -InteropHash $rollbackInteropHash -GameHash $rollbackGameHash -GameVersion $rollbackGameVersion -Encoding $utf8NoBom
+    $conflictingQueueBlocked = $false
+    try {
+        & $controlScript `
+            -RepoRoot $rollbackRepo `
+            -GameRoot $rollbackGame `
+            -GameExecutable "RollbackGame.exe" `
+            -SkipLaunch
+    }
+    catch {
+        if ($_.Exception.Message -like '*新旧主插件同时处于 pending*') {
+            $conflictingQueueBlocked = $true
+        }
+        else {
+            throw
+        }
+    }
+    Assert-Equal -Expected $true -Actual $conflictingQueueBlocked -Label "同批次新旧 pending 拒绝"
+    Assert-Equal -Expected $rollbackLegacyHash -Actual (Get-Sha256 $rollbackLegacyDll) -Label "冲突队列拒绝后旧插件未变"
+    Assert-Equal -Expected $false -Actual (Test-Path -LiteralPath $rollbackRenamedDll -PathType Leaf) -Label "冲突队列拒绝后新插件未出现"
+    Assert-Equal -Expected $true -Actual (Test-Path -LiteralPath $rollbackMainFixture.PendingPath -PathType Leaf) -Label "冲突队列拒绝后新 marker 保留"
+    Assert-Equal -Expected $true -Actual (Test-Path -LiteralPath $conflictingLegacyFixture.PendingPath -PathType Leaf) -Label "冲突队列拒绝后旧 marker 保留"
+
+    Write-Host "PASS: staged promotion, renamed-plugin migration/rollback, stale/conflicting pending guards, backup, hashes, interop binding, pending semantics, WhatIf isolation, and running-game guard."
 }
 finally {
     if ($null -ne $fakeGameProcess) {

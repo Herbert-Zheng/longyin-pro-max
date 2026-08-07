@@ -5,6 +5,8 @@ import crypto from 'node:crypto';
 const INSTALL_STATE_DIRECTORY = '.longyin-plus';
 const INSTALL_MANIFEST_NAME = 'install-manifest.json';
 const INSTALL_MANIFEST_VERSION = 1 as const;
+const PRIMARY_PLUGIN_RELATIVE_PATH = 'BepInEx/plugins/LongYinProMax.dll';
+const LEGACY_PRIMARY_PLUGIN_RELATIVE_PATH = 'BepInEx/plugins/LongYinStaminaLock.dll';
 
 type ManifestAction = 'created' | 'replaced' | 'preserved';
 
@@ -311,15 +313,38 @@ export async function installOwnedPayload(gameRoot: string, payloadRoot: string)
   );
   const { backupRoot, updateBackupRoot } = manifestPaths(gameRoot);
   const payloadPaths = new Set(relativeFiles.map((relativePath) => relativePath.toLowerCase()));
+  const installsRenamedPrimaryPlugin = payloadPaths.has(PRIMARY_PLUGIN_RELATIVE_PATH.toLowerCase());
+  const legacyPrimaryPluginKey = LEGACY_PRIMARY_PLUGIN_RELATIVE_PATH.toLowerCase();
+  const legacyTargetPath = resolveInside(gameRoot, LEGACY_PRIMARY_PLUGIN_RELATIVE_PATH);
+  const legacyTargetExists = await fileExists(legacyTargetPath);
+  const legacyManifestEntry = entriesByPath.get(legacyPrimaryPluginKey);
+  const legacyNeedsFreshBackup = installsRenamedPrimaryPlugin && legacyTargetExists &&
+    (!legacyManifestEntry || legacyManifestEntry.action === 'preserved');
+  if (legacyNeedsFreshBackup) {
+    // Older installations may predate the manifest. Keep a persistent backup so
+    // uninstall can restore the original legacy plugin after the rename migration.
+    // A preserved entry also represents a pre-existing file that the old installer
+    // deliberately left untouched, so removing it now changes the action to replaced.
+    entriesByPath.set(legacyPrimaryPluginKey, {
+      relativePath: LEGACY_PRIMARY_PLUGIN_RELATIVE_PATH,
+      action: 'replaced'
+    });
+  }
   for (const entry of manifest.entries) {
-    if (entry.action === 'replaced' && !(await fileExists(resolveInside(backupRoot, entry.relativePath)))) {
+    if (
+      entry.action === 'replaced' &&
+      !(legacyNeedsFreshBackup && entry.relativePath.toLowerCase() === legacyPrimaryPluginKey) &&
+      !(await fileExists(resolveInside(backupRoot, entry.relativePath)))
+    ) {
       throw new Error(`无法安全覆盖载荷：缺少原文件备份 ${entry.relativePath}`);
     }
   }
 
   const filesToCopy: string[] = [];
   const obsoleteEntries = manifest.entries.filter(
-    (entry) => !payloadPaths.has(entry.relativePath.toLowerCase())
+    (entry) =>
+      !payloadPaths.has(entry.relativePath.toLowerCase()) &&
+      !(installsRenamedPrimaryPlugin && entry.relativePath.toLowerCase() === legacyPrimaryPluginKey)
   );
 
   for (const relativePath of relativeFiles) {
@@ -367,7 +392,8 @@ export async function installOwnedPayload(gameRoot: string, payloadRoot: string)
   const protectedPaths = [manifestPath];
   for (const relativePath of new Set([
     ...manifest.entries.map((entry) => entry.relativePath),
-    ...relativeFiles
+    ...relativeFiles,
+    ...(installsRenamedPrimaryPlugin ? [LEGACY_PRIMARY_PLUGIN_RELATIVE_PATH] : [])
   ])) {
     protectedPaths.push(
       resolveInside(gameRoot, relativePath),
@@ -378,6 +404,21 @@ export async function installOwnedPayload(gameRoot: string, payloadRoot: string)
 
   const transaction = await createInstallTransaction(gameRoot, protectedPaths);
   try {
+    if (installsRenamedPrimaryPlugin) {
+      const legacyBackupPath = resolveInside(backupRoot, LEGACY_PRIMARY_PLUGIN_RELATIVE_PATH);
+      const legacyEntry = entriesByPath.get(legacyPrimaryPluginKey);
+      if (
+        legacyEntry?.action === 'replaced' &&
+        legacyTargetExists &&
+        (legacyNeedsFreshBackup || !(await fileExists(legacyBackupPath)))
+      ) {
+        await fs.mkdir(path.dirname(legacyBackupPath), { recursive: true });
+        await fs.copyFile(legacyTargetPath, legacyBackupPath);
+      }
+      await fs.rm(legacyTargetPath, { force: true });
+      await removeEmptyParents(legacyTargetPath, gameRoot);
+    }
+
     for (const entry of obsoleteEntries) {
       const entryKey = entry.relativePath.toLowerCase();
       const targetPath = resolveInside(gameRoot, entry.relativePath);

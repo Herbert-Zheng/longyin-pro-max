@@ -160,7 +160,7 @@ The game exposes:
 - `SinglePlotChoiceData`
 - `PlotController`
 
-Our current mod already patches plot-related functions in [LongYinStaminaLock.cs](G:\Steam\steamapps\common\longyin_plus_repo\mod-src\LongYinStaminaLock\LongYinStaminaLock.cs):
+Our current mod already patches plot-related functions in `mod-src/LongYinProMax/LongYinProMax.cs`:
 
 - line 242 patches `PlotController.ChangePlotDataBase`
 - line 247 patches `PlotController.ShowPlot`
@@ -168,8 +168,7 @@ Our current mod already patches plot-related functions in [LongYinStaminaLock.cs
 
 The mod also already constructs custom plot objects:
 
-- [LongYinStaminaLock.cs:713](G:\Steam\steamapps\common\longyin_plus_repo\mod-src\LongYinStaminaLock\LongYinStaminaLock.cs#L713)
-- [LongYinStaminaLock.cs:724](G:\Steam\steamapps\common\longyin_plus_repo\mod-src\LongYinStaminaLock\LongYinStaminaLock.cs#L724)
+- `mod-src/LongYinProMax/LongYinProMax.cs`
 
 And the existing notes confirm direct construction is viable:
 

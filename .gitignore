@@ -28,7 +28,7 @@ mod-prototype/LongYinQuestSnapshot/test.txt
 archive/
 _codex_staged_updates/
 config.js
-mod-src/LongYinStaminaLock/LongYinStaminaLock.dll
+mod-src/LongYinProMax/LongYinProMax.dll
 
 # Logs
 *.log

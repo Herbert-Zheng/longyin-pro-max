@@ -1,5 +1,5 @@
 param(
-    [string]$SourcePath = (Join-Path $PSScriptRoot '..\mod-src\LongYinStaminaLock\LongYinStaminaLock.cs')
+    [string]$SourcePath = (Join-Path $PSScriptRoot '..\mod-src\LongYinProMax\LongYinProMax.cs')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,6 +34,8 @@ function Reject-Pattern {
 $activeMethod = Get-CSharpMethodText 'TryGetActiveGovernmentStorageTradeUi'
 $updateMethod = Get-CSharpMethodText 'UpdateGovernmentStorageRefreshAssist'
 $refreshMethod = Get-CSharpMethodText 'TryRefreshGovernmentStorage'
+$ensureButtonMethod = Get-CSharpMethodText 'EnsureGovernmentStorageRefreshButton'
+$resolveButtonLayoutMethod = Get-CSharpMethodText 'TryResolveGovernmentStorageRefreshButtonLayout'
 $clickMethod = Get-CSharpMethodText 'OverlayButtonOnPointerClickPrefix'
 $gameUpdateMethod = Get-CSharpMethodText 'GameControllerUpdatePostfix'
 
@@ -48,6 +50,13 @@ Require-Pattern $activeMethod 'catch\s*\(Exception ex\)[\s\S]*?!_governmentStora
 Require-Pattern $updateMethod '!_governmentStorageRefreshHooksReady[\s\S]*?!_governmentStorageRefreshEnabled\.Value[\s\S]*?!TryGetActiveGovernmentStorageTradeUi\(out var tradeUi\)[\s\S]*?Input\.GetKeyDown\(_governmentStorageRefreshHotkey\.Value\)[\s\S]*?TryRefreshGovernmentStorage\("hotkey"\)' 'The configurable hotkey must dispatch only while compatible, enabled, and on the government storage page.'
 Require-Pattern $clickMethod 'isGovernmentStorageRefresh[\s\S]*?_governmentStorageRefreshEnabled\.Value[\s\S]*?TryRefreshGovernmentStorage\("button"\)' 'The government storage button must be gated by the feature switch and dispatch the same refresh action.'
 Require-Pattern $gameUpdateMethod 'UpdateGovernmentStorageRefreshAssist\(\);' 'GameController.Update must poll the government storage assist.'
+
+Require-Pattern $ensureButtonMethod 'TryResolveGovernmentStorageRefreshButtonLayout\(\s*tradeUi,\s*out var expectedParent,\s*out var buttonAnchor,\s*out var buttonAnchoredPosition\s*\)' 'Government storage refresh must resolve its layout from the visible storage list instead of the player contribution label.'
+Require-Pattern $ensureButtonMethod 'buttonAnchor,\s*buttonAnchor,\s*new Vector2\(0\.5f, 0\.5f\),\s*buttonAnchoredPosition' 'Government storage refresh must use a centered pivot at the resolved bottom-center position.'
+Reject-Pattern $ensureButtonMethod 'leftResourceLabel' 'Government storage refresh must not anchor to the player contribution label because that overlaps the player item grid.'
+Reject-Pattern $ensureButtonMethod 'new Vector2\(18f, 58f\)' 'The legacy left-side button offset must not return.'
+Require-Pattern $resolveButtonLayoutMethod 'tradeUi\.rightList[\s\S]*?TryGetAuctionPreviewScreenRect\(storageListRect, camera, out var storageBounds\)[\s\S]*?storageBounds\.center\.x[\s\S]*?storageBounds\.yMin\s*-\s*32f' 'Government storage refresh must sit centered 32 pixels below the government item list.'
+Require-Pattern $resolveButtonLayoutMethod 'ScreenPointToLocalPointInRectangle\(\s*parentRect,\s*targetScreenPoint,\s*camera,\s*out var targetLocalPoint\s*\)' 'Government storage refresh must convert the list bottom-center screen point into its parent layout space.'
 
 Require-Pattern $refreshMethod '_governmentStorageRefreshBusy[\s\S]*?!_governmentStorageRefreshHooksReady[\s\S]*?!_governmentStorageRefreshEnabled\.Value[\s\S]*?!TryGetActiveGovernmentStorageTradeUi\(out var tradeUi\)' 'The refresh action must retain busy, compatibility, enabled, and active-page gates internally.'
 Require-Pattern $refreshMethod 'try\s*\{[\s\S]*?var storageBefore\s*=\s*worldData\.governStorage[\s\S]*?storageSnapshot\s*=\s*storageBefore\?\.Clone\(\)\s+as\s+ItemListData[\s\S]*?itemsBefore\s*=\s*DescribeGovernmentStorageItems\(storageBefore\)' 'Reading, cloning, and describing the current storage must all be protected by the refresh try/finally.'

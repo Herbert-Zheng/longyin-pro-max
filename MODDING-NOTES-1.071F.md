@@ -79,7 +79,7 @@ Current supported launcher and packaged plugins:
 - `BepInEx\plugins\LongYinQuestSnapshot.dll`
 - `BepInEx\plugins\LongYinSkillTalentGrant.dll`
 - `BepInEx\plugins\LongYinSkipIntro.dll`
-- `BepInEx\plugins\LongYinStaminaLock.dll`
+- `BepInEx\plugins\LongYinProMax.dll`
 
 Legacy retired probes and tracers are archived and not part of the active mod payload.
 

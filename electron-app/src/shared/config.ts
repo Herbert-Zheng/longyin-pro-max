@@ -33,7 +33,7 @@ const REQUIRED_PLUGIN_NAMES = [
   'LongYinQuestSnapshot.dll',
   'LongYinSkillTalentGrant.dll',
   'LongYinSkipIntro.dll',
-  'LongYinStaminaLock.dll'
+  'LongYinProMax.dll'
 ];
 
 interface MainConfigHidden {
@@ -78,6 +78,7 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   materialPurchaseMinRareLv: 0,
   materialPurchaseMinItemLv: 0,
   shopOwnershipEnabled: true,
+  skillBookOwnershipIndicatorEnabled: true,
   auctionEventAlwaysRedEnabled: true,
   auctionPreviewRefreshEnabled: true,
   auctionPreviewRefreshHotkey: 'R',
@@ -698,6 +699,9 @@ MaterialPurchaseMinRareLv = ${settings.materialPurchaseMinRareLv}
 MaterialPurchaseMinItemLv = ${settings.materialPurchaseMinItemLv}
 ShopOwnershipEnabled = ${boolText(settings.shopOwnershipEnabled)}
 
+[SkillDisplay]
+BookOwnershipIndicatorEnabled = ${boolText(settings.skillBookOwnershipIndicatorEnabled)}
+
 [Auction]
 EventAlwaysRedEnabled = ${boolText(settings.auctionEventAlwaysRedEnabled)}
 PreviewRefreshEnabled = ${boolText(settings.auctionPreviewRefreshEnabled)}
@@ -941,6 +945,7 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
     materialPurchaseMinRareLv: Math.round(clamp(input.materialPurchaseMinRareLv, 0, 5)),
     materialPurchaseMinItemLv: Math.round(clamp(input.materialPurchaseMinItemLv, 0, 5)),
     shopOwnershipEnabled: input.shopOwnershipEnabled,
+    skillBookOwnershipIndicatorEnabled: input.skillBookOwnershipIndicatorEnabled,
     auctionEventAlwaysRedEnabled: input.auctionEventAlwaysRedEnabled,
     auctionPreviewRefreshEnabled: input.auctionPreviewRefreshEnabled,
     auctionPreviewRefreshHotkey: normalizeHotkey(
@@ -1007,6 +1012,7 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
   const debugSection = getIniSectionBody(text, 'Debug');
   const systemsSection = getIniSectionBody(text, 'Systems') ?? getIniSectionBody(text, 'Time');
   const commerceSection = getIniSectionBody(text, 'Commerce');
+  const skillDisplaySection = getIniSectionBody(text, 'SkillDisplay');
   const auctionSection = getIniSectionBody(text, 'Auction');
   const governmentStorageSection = getIniSectionBody(text, 'GovernmentStorage');
   const treasureIdentifySection = getIniSectionBody(text, 'TreasureIdentify');
@@ -1065,6 +1071,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       commerceSection,
       'ShopOwnershipEnabled',
       DEFAULT_VISIBLE_SETTINGS.shopOwnershipEnabled
+    ),
+    skillBookOwnershipIndicatorEnabled: readBool(
+      skillDisplaySection,
+      'BookOwnershipIndicatorEnabled',
+      DEFAULT_VISIBLE_SETTINGS.skillBookOwnershipIndicatorEnabled
     ),
     auctionEventAlwaysRedEnabled: readBool(
       auctionSection,
@@ -1560,6 +1571,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'Commerce',
     'ShopOwnershipEnabled',
     boolText(normalized.shopOwnershipEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'SkillDisplay',
+    'BookOwnershipIndicatorEnabled',
+    boolText(normalized.skillBookOwnershipIndicatorEnabled)
   );
   nextMain = upsertIniSectionValue(
     nextMain,

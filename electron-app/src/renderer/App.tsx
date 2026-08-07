@@ -1287,6 +1287,17 @@ export function App() {
                   </p>
                 </Card>
 
+                <Card title="功法悬浮信息" eyebrow="Skill Display">
+                  <div className="field-grid">
+                    <CheckboxField
+                      label="显示功法书拥有状态"
+                      value={settings.skillBookOwnershipIndicatorEnabled}
+                      onChange={(value) => updateSetting('skillBookOwnershipIndicatorEnabled', value)}
+                      hint="悬浮功法时合并检查背包与仓库（个人仓库及门派藏书）；已拥有显示绿色，未拥有显示红色。保存后需重启游戏生效。"
+                    />
+                  </div>
+                </Card>
+
                 <Card title="心悟机制" eyebrow="Insight">
                   <div className="field-grid">
                     <NumberField

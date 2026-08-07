@@ -69,7 +69,7 @@
 - [x] Electron `npm run typecheck` 通过。
 - [x] Electron `npm run build` 通过，ZIP 与 manifest 校验通过。
 - [x] .NET Updater 和 Overlay 构建通过。
-- [x] `LongYinStaminaLock` 使用目标 interop 构建通过。
+- [x] `LongYinProMax` 使用目标 interop 构建通过。
 - [x] staged DLL 提升流程验证：pending、备份、提升、哈希检查全部通过。
 - [x] staged DLL 负向验证：目标 interop 缺失或哈希不一致时 live DLL 不变且 pending 保留。
 - [x] 游戏启动到主菜单，BepInEx 完成加载且没有未处理异常。

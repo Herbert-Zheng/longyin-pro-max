@@ -20,7 +20,7 @@ if (-not $InteropAssembly) {
 
 if (-not $PluginSource) {
     $PluginSource = @(
-        (Join-Path $RepoRoot 'mod-src\LongYinStaminaLock\LongYinStaminaLock.cs'),
+        (Join-Path $RepoRoot 'mod-src\LongYinProMax\LongYinProMax.cs'),
         (Join-Path $RepoRoot 'mod-src\LongYinBattleTurbo\LongYinBattleTurbo.cs'),
         (Join-Path $RepoRoot 'mod-src\LongYinHorseStaminaMultiplier\LongYinHorseStaminaMultiplier.cs'),
         (Join-Path $RepoRoot 'mod-src\LongYinSkipIntro\LongYinSkipIntro.cs')
@@ -48,11 +48,11 @@ $inspection = & $inspectScript `
 
 $interopHasHeroTagDatabase =
     $inspection -match '(?im)^(FIELDS|PROPERTIES|METHODS)\s+.*heroTagDataBase'
-$staminaSource = $PluginSource | Where-Object { [System.IO.Path]::GetFileName($_) -eq 'LongYinStaminaLock.cs' } | Select-Object -First 1
-if (-not $staminaSource) {
-    throw 'LongYinStaminaLock.cs is required for the static compatibility check.'
+$proMaxSource = $PluginSource | Where-Object { [System.IO.Path]::GetFileName($_) -eq 'LongYinProMax.cs' } | Select-Object -First 1
+if (-not $proMaxSource) {
+    throw 'LongYinProMax.cs is required for the static compatibility check.'
 }
-$sourceText = Get-Content -LiteralPath $staminaSource -Raw
+$sourceText = Get-Content -LiteralPath $proMaxSource -Raw
 $sourceHasStaticHeroTagReference =
     $sourceText -match '(?m)(?:\.|\?\.)heroTagDataBase\b'
 $sourceUsesPrivateIdentifyAnswer =
@@ -161,7 +161,7 @@ if (-not $SkipRuntimeLog) {
         }
 
         $requiredMarkers = @(
-            'LongYin Stamina Lock loaded',
+            'LongYin Pro Max loaded',
             'LongYin Battle Turbo 1.1.2 loaded',
             'LongYin Horse Stamina Multiplier 1.0.1 loaded',
             'LongYin Skip Intro 1.0.1 loaded',

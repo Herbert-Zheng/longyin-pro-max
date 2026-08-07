@@ -1,5 +1,5 @@
 param(
-    [string]$SourcePath = (Join-Path $PSScriptRoot '..\mod-src\LongYinStaminaLock\LongYinStaminaLock.cs'),
+    [string]$SourcePath = (Join-Path $PSScriptRoot '..\mod-src\LongYinProMax\LongYinProMax.cs'),
     [string]$ConfigPath = (Join-Path $PSScriptRoot '..\dist\BepInEx\config\codex.longyin.staminalock.cfg')
 )
 

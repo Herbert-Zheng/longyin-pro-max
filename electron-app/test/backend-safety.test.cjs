@@ -263,17 +263,17 @@ test('uninstall restores replaced files and leaves unrelated BepInEx files untou
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
   await writeFile(payloadRoot, 'winhttp.dll', 'longyin loader');
-  await writeFile(payloadRoot, 'BepInEx/plugins/LongYinStaminaLock.dll', 'longyin plugin');
+  await writeFile(payloadRoot, 'BepInEx/plugins/LongYinProMax.dll', 'longyin plugin');
   await writeFile(payloadRoot, 'BepInEx/plugins/LongYinSkipIntro.dll', 'new plugin');
   await writeFile(payloadRoot, 'BepInEx/unity-libs/runtime.zip', 'nested runtime archive');
   await writeFile(gameRoot, 'winhttp.dll', 'original loader');
-  await writeFile(gameRoot, 'BepInEx/plugins/LongYinStaminaLock.dll', 'original plugin');
+  await writeFile(gameRoot, 'BepInEx/plugins/LongYinProMax.dll', 'original plugin');
   await writeFile(gameRoot, 'BepInEx/plugins/ThirdParty.dll', 'third party');
 
   await installOwnedPayload(gameRoot, payloadRoot);
   assert.equal(await fs.readFile(path.join(gameRoot, 'winhttp.dll'), 'utf8'), 'longyin loader');
   assert.equal(
-    await fs.readFile(path.join(gameRoot, 'BepInEx/plugins/LongYinStaminaLock.dll'), 'utf8'),
+    await fs.readFile(path.join(gameRoot, 'BepInEx/plugins/LongYinProMax.dll'), 'utf8'),
     'longyin plugin'
   );
   assert.equal(
@@ -284,7 +284,7 @@ test('uninstall restores replaced files and leaves unrelated BepInEx files untou
   await uninstallOwnedPayload(gameRoot, payloadRoot);
   assert.equal(await fs.readFile(path.join(gameRoot, 'winhttp.dll'), 'utf8'), 'original loader');
   assert.equal(
-    await fs.readFile(path.join(gameRoot, 'BepInEx/plugins/LongYinStaminaLock.dll'), 'utf8'),
+    await fs.readFile(path.join(gameRoot, 'BepInEx/plugins/LongYinProMax.dll'), 'utf8'),
     'original plugin'
   );
   assert.equal(await fs.readFile(path.join(gameRoot, 'BepInEx/plugins/ThirdParty.dll'), 'utf8'), 'third party');
@@ -308,7 +308,7 @@ test('reinstall preserves an existing user configuration file', async (t) => {
 test('reinstall backs up a live plugin DLL before overwriting drift', async (t) => {
   const { root, gameRoot, payloadRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const relativePlugin = 'BepInEx/plugins/LongYinStaminaLock.dll';
+  const relativePlugin = 'BepInEx/plugins/LongYinProMax.dll';
   await writeFile(payloadRoot, relativePlugin, 'payload v1');
   await installOwnedPayload(gameRoot, payloadRoot);
   await writeFile(gameRoot, relativePlugin, 'live drift');
@@ -347,6 +347,157 @@ test('payload upgrade removes obsolete created files and restores obsolete repla
   await uninstallOwnedPayload(gameRoot, payloadRoot);
   assert.equal(await fs.readFile(path.join(gameRoot, replacedPlugin), 'utf8'), 'third-party original');
   assert.equal(await exists(path.join(gameRoot, retainedPlugin)), false);
+});
+
+test('installing renamed primary plugin removes legacy DLL without an install manifest', async (t) => {
+  const { root, gameRoot, payloadRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const currentPlugin = 'BepInEx/plugins/LongYinProMax.dll';
+  const legacyPlugin = 'BepInEx/plugins/LongYinStaminaLock.dll';
+
+  await writeFile(gameRoot, legacyPlugin, 'legacy plugin');
+  await writeFile(payloadRoot, currentPlugin, 'renamed plugin');
+
+  await installOwnedPayload(gameRoot, payloadRoot);
+
+  assert.equal(await exists(path.join(gameRoot, legacyPlugin)), false);
+  assert.equal(await fs.readFile(path.join(gameRoot, currentPlugin), 'utf8'), 'renamed plugin');
+  assert.equal(
+    await fs.readFile(path.join(gameRoot, '.longyin-plus/backups', legacyPlugin), 'utf8'),
+    'legacy plugin'
+  );
+
+  await uninstallOwnedPayload(gameRoot, payloadRoot);
+  assert.equal(await fs.readFile(path.join(gameRoot, legacyPlugin), 'utf8'), 'legacy plugin');
+  assert.equal(await exists(path.join(gameRoot, currentPlugin)), false);
+});
+
+test('renamed primary plugin migration replaces a stale legacy backup with the current live DLL', async (t) => {
+  const { root, gameRoot, payloadRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const currentPlugin = 'BepInEx/plugins/LongYinProMax.dll';
+  const legacyPlugin = 'BepInEx/plugins/LongYinStaminaLock.dll';
+
+  await writeFile(gameRoot, legacyPlugin, 'current live legacy plugin');
+  await writeFile(gameRoot, `.longyin-plus/backups/${legacyPlugin}`, 'stale legacy backup');
+  await writeFile(payloadRoot, currentPlugin, 'renamed plugin');
+
+  await installOwnedPayload(gameRoot, payloadRoot);
+
+  assert.equal(await exists(path.join(gameRoot, legacyPlugin)), false);
+  assert.equal(
+    await fs.readFile(path.join(gameRoot, '.longyin-plus/backups', legacyPlugin), 'utf8'),
+    'current live legacy plugin'
+  );
+
+  await uninstallOwnedPayload(gameRoot, payloadRoot);
+  assert.equal(
+    await fs.readFile(path.join(gameRoot, legacyPlugin), 'utf8'),
+    'current live legacy plugin'
+  );
+  assert.equal(await exists(path.join(gameRoot, currentPlugin)), false);
+});
+
+test('installing renamed primary plugin removes legacy DLL tracked by an older manifest', async (t) => {
+  const { root, gameRoot, payloadRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const currentPlugin = 'BepInEx/plugins/LongYinProMax.dll';
+  const legacyPlugin = 'BepInEx/plugins/LongYinStaminaLock.dll';
+
+  await writeFile(gameRoot, legacyPlugin, 'legacy original');
+  await writeFile(payloadRoot, legacyPlugin, 'legacy payload');
+  await installOwnedPayload(gameRoot, payloadRoot);
+  await fs.rm(path.join(payloadRoot, legacyPlugin), { force: true });
+  await writeFile(payloadRoot, currentPlugin, 'renamed plugin');
+
+  await installOwnedPayload(gameRoot, payloadRoot);
+
+  assert.equal(await exists(path.join(gameRoot, legacyPlugin)), false);
+  assert.equal(await fs.readFile(path.join(gameRoot, currentPlugin), 'utf8'), 'renamed plugin');
+  const manifest = JSON.parse(
+    await fs.readFile(path.join(gameRoot, '.longyin-plus/install-manifest.json'), 'utf8')
+  );
+  assert.equal(
+    manifest.entries.some((entry) => entry.relativePath.toLowerCase() === legacyPlugin.toLowerCase()),
+    true
+  );
+  assert.equal(
+    await fs.readFile(path.join(gameRoot, '.longyin-plus/backups', legacyPlugin), 'utf8'),
+    'legacy original'
+  );
+
+  await uninstallOwnedPayload(gameRoot, payloadRoot);
+  assert.equal(await fs.readFile(path.join(gameRoot, legacyPlugin), 'utf8'), 'legacy original');
+  assert.equal(await exists(path.join(gameRoot, currentPlugin)), false);
+});
+
+test('renamed primary plugin migration preserves a pre-existing legacy DLL recorded as preserved', async (t) => {
+  const { root, gameRoot, payloadRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const currentPlugin = 'BepInEx/plugins/LongYinProMax.dll';
+  const legacyPlugin = 'BepInEx/plugins/LongYinStaminaLock.dll';
+
+  await writeFile(gameRoot, legacyPlugin, 'matching pre-existing plugin');
+  await writeFile(payloadRoot, legacyPlugin, 'matching pre-existing plugin');
+  await installOwnedPayload(gameRoot, payloadRoot);
+
+  await fs.rm(path.join(payloadRoot, legacyPlugin), { force: true });
+  await writeFile(payloadRoot, currentPlugin, 'renamed plugin');
+  await installOwnedPayload(gameRoot, payloadRoot);
+
+  assert.equal(await exists(path.join(gameRoot, legacyPlugin)), false);
+  assert.equal(
+    await fs.readFile(path.join(gameRoot, '.longyin-plus/backups', legacyPlugin), 'utf8'),
+    'matching pre-existing plugin'
+  );
+
+  await uninstallOwnedPayload(gameRoot, payloadRoot);
+  assert.equal(
+    await fs.readFile(path.join(gameRoot, legacyPlugin), 'utf8'),
+    'matching pre-existing plugin'
+  );
+  assert.equal(await exists(path.join(gameRoot, currentPlugin)), false);
+});
+
+test('renamed primary plugin migration refuses a replaced legacy entry whose original backup is missing', async (t) => {
+  const { root, gameRoot, payloadRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const currentPlugin = 'BepInEx/plugins/LongYinProMax.dll';
+  const legacyPlugin = 'BepInEx/plugins/LongYinStaminaLock.dll';
+
+  await writeFile(gameRoot, legacyPlugin, 'legacy original');
+  await writeFile(payloadRoot, legacyPlugin, 'legacy payload');
+  await installOwnedPayload(gameRoot, payloadRoot);
+  await fs.rm(path.join(gameRoot, '.longyin-plus/backups', legacyPlugin), { force: true });
+  await fs.rm(path.join(payloadRoot, legacyPlugin), { force: true });
+  await writeFile(payloadRoot, currentPlugin, 'renamed plugin');
+
+  await assert.rejects(
+    installOwnedPayload(gameRoot, payloadRoot),
+    /缺少原文件备份/
+  );
+  assert.equal(await fs.readFile(path.join(gameRoot, legacyPlugin), 'utf8'), 'legacy payload');
+  assert.equal(await exists(path.join(gameRoot, currentPlugin)), false);
+});
+
+test('renamed primary plugin install restores legacy DLL when a later copy fails', async (t) => {
+  const { root, gameRoot, payloadRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const currentPlugin = 'BepInEx/plugins/LongYinProMax.dll';
+  const legacyPlugin = 'BepInEx/plugins/LongYinStaminaLock.dll';
+
+  await writeFile(gameRoot, legacyPlugin, 'legacy plugin');
+  await writeFile(payloadRoot, currentPlugin, 'renamed plugin');
+  await writeFile(payloadRoot, 'blocked/file.dll', 'cannot be copied');
+  await writeFile(gameRoot, 'blocked', 'parent path is a file');
+
+  await assert.rejects(
+    installOwnedPayload(gameRoot, payloadRoot),
+    /已回滚至安装前状态/
+  );
+
+  assert.equal(await fs.readFile(path.join(gameRoot, legacyPlugin), 'utf8'), 'legacy plugin');
+  assert.equal(await exists(path.join(gameRoot, currentPlugin)), false);
 });
 
 test('payload upgrade rolls back earlier deletes and copies when a later copy fails', async (t) => {
@@ -736,6 +887,47 @@ test('government storage refresh is section-scoped and round-trips without touch
   );
 });
 
+test('skill book ownership indicator defaults enabled and round-trips only in SkillDisplay', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+
+  const defaults = await readVisibleSettings(gameRoot);
+  assert.equal(defaults.skillBookOwnershipIndicatorEnabled, true);
+
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[WrongSection]',
+      'BookOwnershipIndicatorEnabled = true',
+      'UnrelatedDecoySetting = keep-decoy',
+      '',
+      '[SkillDisplay]',
+      'BookOwnershipIndicatorEnabled = false',
+      'UnrelatedSkillDisplaySetting = keep-owner',
+      ''
+    ].join('\r\n')
+  );
+
+  const current = await readVisibleSettings(gameRoot);
+  assert.equal(current.skillBookOwnershipIndicatorEnabled, false);
+
+  const saved = await saveVisibleSettings(gameRoot, {
+    ...current,
+    skillBookOwnershipIndicatorEnabled: true
+  });
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.equal(saved.skillBookOwnershipIndicatorEnabled, true);
+  assert.match(text, /\[SkillDisplay\][\s\S]*?^BookOwnershipIndicatorEnabled = true$/m);
+  assert.match(text, /^UnrelatedSkillDisplaySetting = keep-owner$/m);
+  assert.match(
+    text,
+    /\[WrongSection\]\r?\nBookOwnershipIndicatorEnabled = true\r?\nUnrelatedDecoySetting = keep-decoy/
+  );
+});
+
 test('commerce and assist settings have safe defaults with only the supported auction shortcut', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -1023,7 +1215,7 @@ test('stale runtime-log findings warn without forcing a payload repair loop', as
     'LongYinQuestSnapshot.dll',
     'LongYinSkillTalentGrant.dll',
     'LongYinSkipIntro.dll',
-    'LongYinStaminaLock.dll'
+    'LongYinProMax.dll'
   ];
 
   await writeFile(gameRoot, 'LongYinLiZhiZhuan.exe', 'game');
@@ -1074,7 +1266,7 @@ test('current hard runtime failures block launch while compatibility degradation
     'LongYinQuestSnapshot.dll',
     'LongYinSkillTalentGrant.dll',
     'LongYinSkipIntro.dll',
-    'LongYinStaminaLock.dll'
+    'LongYinProMax.dll'
   ];
 
   await writeFile(gameRoot, 'LongYinLiZhiZhuan.exe', 'game');

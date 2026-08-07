@@ -14,8 +14,8 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Stamina Lock", "1.34.0")]
-public sealed class LongYinStaminaLockPlugin : BasePlugin
+[BepInPlugin("codex.longyin.staminalock", "LongYin Pro Max", "1.35.0")]
+public sealed class LongYinProMaxPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
     private const string TreasureChestChoicePlotCallbackName = nameof(PlotController.ChangePlotDataBase);
@@ -133,6 +133,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static ConfigEntry<bool> _auctionEventAlwaysRedEnabled = null!;
     private static ConfigEntry<bool> _governmentStorageRefreshEnabled = null!;
     private static ConfigEntry<KeyCode> _governmentStorageRefreshHotkey = null!;
+    private static ConfigEntry<bool> _skillBookOwnershipIndicatorEnabled = null!;
     private static ConfigEntry<bool> _treasureIdentifyBestValueAssistEnabled = null!;
     private static ConfigEntry<bool> _breakthroughRerollEnabled = null!;
     private static ConfigEntry<bool> _craftRerollEnabled = null!;
@@ -562,6 +563,11 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private static bool _governmentStorageRefreshHooksReady;
     private static bool _governmentStorageActiveLookupFailureLogged;
     private static float _governmentStorageRefreshButtonReadyAt;
+    private static bool _skillBookOwnershipHooksReady;
+    private static UILabel? _skillBookOwnershipAppliedNguiLabel;
+    private static Text? _skillBookOwnershipAppliedUnityLabel;
+    private static int _skillBookOwnershipAppliedSkillId = -1;
+    private static bool _skillBookOwnershipLookupFailureLogged;
     private static IdentifyMatchController? _identifyMatchController;
     private static GameObject? _identifyBestTreasureButtonRoot;
     private static Button? _identifyBestTreasureButton;
@@ -695,6 +701,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         _auctionEventAlwaysRedEnabled = Config.Bind("Auction", "EventAlwaysRedEnabled", true, "When true, the 拍卖大会 world event is generated at difficulty 10, the red highest event grade, including its grade-dependent auction content.");
         _governmentStorageRefreshEnabled = Config.Bind("GovernmentStorage", "RefreshEnabled", true, "Adds a refresh button to the government storage page.");
         _governmentStorageRefreshHotkey = Config.Bind("GovernmentStorage", "RefreshHotkey", KeyCode.R, "Single-key shortcut that refreshes items only while the government storage page is visible.");
+        _skillBookOwnershipIndicatorEnabled = Config.Bind("SkillDisplay", "BookOwnershipIndicatorEnabled", true, "Shows whether the hovered martial skill has a matching book in the player inventory, personal storage, or current sect book storage.");
         _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the treasure with the highest player-appraised value shown in parentheses. Confirmation remains manual.");
         _breakthroughRerollEnabled = Config.Bind("Breakthrough", "RerollEnabled", true, "Adds a button that rebuilds the current breakthrough choices without confirming a choice or consuming money, items, or time.");
         _craftRerollEnabled = Config.Bind("Craft", "RerollEnabled", true, "Adds preview-only buttons that rebuild normal crafting or special-enhancement choices without confirming, consuming materials, spending money, or advancing time.");
@@ -846,6 +853,16 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var tradeUiHidePatched = PatchMethod(typeof(TradeUIController), nameof(TradeUIController.HideTradeUI), Type.EmptyTypes, null, nameof(HideTradeUiPostfix));
         PatchMethod(typeof(ItemIconController), nameof(ItemIconController.OnClick), Type.EmptyTypes, null, nameof(ItemIconOnClickPostfix));
         var governmentStorageShowPatched = PatchMethod(typeof(PlotController), nameof(PlotController.ShowGovernStorage), Type.EmptyTypes, null, nameof(ShowGovernmentStoragePostfix));
+        var skillBookOwnershipUpdatePatched = false;
+        if (_skillBookOwnershipIndicatorEnabled.Value)
+        {
+            skillBookOwnershipUpdatePatched = PatchMethod(
+                typeof(QuickDetail),
+                "Update",
+                Type.EmptyTypes,
+                null,
+                nameof(SkillBookOwnershipUpdatePostfix));
+        }
         var auctionPreviewShowPatched = PatchMethod(typeof(PlotController), nameof(PlotController.ShowAuctionItem), Type.EmptyTypes, null, nameof(ShowAuctionItemPostfix));
         var auctionPreviewHidePatched = PatchMethod(typeof(PlotController), nameof(PlotController.HidePlotItem), Type.EmptyTypes, null, nameof(HidePlotItemPostfix));
         PatchMethod(typeof(WorldEventController), nameof(WorldEventController.GetWorldEventRandomDifficulty), new[] { typeof(WorldEventDataBase) }, nameof(AuctionWorldEventDifficultyPrefix), null);
@@ -951,6 +968,10 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         LoggerInstance.LogInfo(
             $"[Compatibility] Government storage refresh: {(_governmentStorageRefreshHooksReady ? "ENABLED" : "DISABLED")} " +
             "(ShowGovernStorage, HideTradeUI, overlay click, and update hooks required).");
+        _skillBookOwnershipHooksReady = skillBookOwnershipUpdatePatched;
+        LoggerInstance.LogInfo(
+            $"[Compatibility] Skill book ownership indicator: {(!_skillBookOwnershipIndicatorEnabled.Value ? "DISABLED BY CONFIG" : _skillBookOwnershipHooksReady ? "ENABLED" : "DEGRADED")} " +
+            "(QuickDetail.Update hook required when enabled).");
         _breakthroughRerollHooksReady = breakthroughChoiceShowPatched &&
             breakthroughChoiceClickPatched &&
             breakthroughBookChoosePatched &&
@@ -1049,7 +1070,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             identifyHidePatched,
             mailDeliveryPatched);
 
-        Log.LogInfo("LongYin Stamina Lock loaded.");
+        Log.LogInfo("LongYin Pro Max loaded.");
         Log.LogInfo("Legacy in-game mod panel is disabled. External Mod Control is the supported UI path.");
         Log.LogInfo($"Exploration stamina lock starts {(_lockExploreStamina.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Exploration first-move full reveal starts {(_revealAllOnStepTile.Value ? "ON" : "OFF")}.");
@@ -1095,6 +1116,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         Log.LogInfo(
             $"Government storage refresh starts {(_governmentStorageRefreshEnabled.Value ? "ON" : "OFF")} " +
             $"with shortcut {_governmentStorageRefreshHotkey.Value} only while that page is visible.");
+        Log.LogInfo($"Skill book ownership indicator starts {(_skillBookOwnershipIndicatorEnabled.Value && _skillBookOwnershipHooksReady ? "ON" : "OFF")} for inventory, personal storage, and sect book storage.");
         Log.LogInfo($"Treasure identify best-value button starts {(_treasureIdentifyBestValueAssistEnabled.Value ? "ON" : "OFF")}; confirmation remains manual.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
         Log.LogInfo($"Relationship and character-data features start {(_relationshipFeaturesEnabled.Value ? "ON" : "OFF")}; MaxLoverCount remains independent.");
@@ -1170,7 +1192,7 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     private bool PatchResolvedMethod(MethodBase target, string? prefixName, string? postfixName)
     {
         const BindingFlags PatchFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
-        var patchType = typeof(LongYinStaminaLockPlugin);
+        var patchType = typeof(LongYinProMaxPlugin);
         var prefix = prefixName == null ? null : patchType.GetMethod(prefixName, PatchFlags);
         var postfix = postfixName == null ? null : patchType.GetMethod(postfixName, PatchFlags);
 
@@ -6363,10 +6385,12 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
             return;
         }
 
-        var resourceLabel = tradeUi.leftResourceLabel;
-        var resourceRect = resourceLabel?.GetComponent<RectTransform>();
-        var expectedParent = resourceLabel?.transform?.parent;
-        if (resourceLabel == null || resourceRect == null || expectedParent == null)
+        if (!TryResolveGovernmentStorageRefreshButtonLayout(
+                tradeUi,
+                out var expectedParent,
+                out var buttonAnchor,
+                out var buttonAnchoredPosition) ||
+            expectedParent == null)
         {
             return;
         }
@@ -6393,10 +6417,10 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
                 GovernmentStorageRefreshButtonName,
                 expectedParent,
                 buttonTemplate,
-                resourceRect.anchorMin,
-                resourceRect.anchorMax,
-                resourceRect.pivot,
-                resourceRect.anchoredPosition + new Vector2(18f, 58f),
+                buttonAnchor,
+                buttonAnchor,
+                new Vector2(0.5f, 0.5f),
+                buttonAnchoredPosition,
                 new Vector2(120f, 42f),
                 "刷新",
                 out _governmentStorageRefreshButtonRoot,
@@ -6408,14 +6432,72 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         {
             _governmentStorageRefreshCreationFailed = true;
             DestroyGovernmentStorageRefreshButton();
-            LoggerInstance.LogWarning("[GovernmentStorage] Could not create the refresh button above the contribution value.");
+            LoggerInstance.LogWarning("[GovernmentStorage] Could not create the refresh button below the government item list.");
             return;
         }
 
         _governmentStorageRefreshButtonHost = expectedParent;
         ConfigureMaterialControlButtonLabel(_governmentStorageRefreshButtonLabel, 18);
         _governmentStorageRefreshButton.interactable = !_governmentStorageRefreshBusy;
-        LoggerInstance.LogInfo("[GovernmentStorage] Refresh button created above the government contribution value.");
+        LoggerInstance.LogInfo("[GovernmentStorage] Refresh button created at the centered position below the government item list.");
+    }
+
+    private static bool TryResolveGovernmentStorageRefreshButtonLayout(
+        TradeUIController tradeUi,
+        out Transform? expectedParent,
+        out Vector2 buttonAnchor,
+        out Vector2 buttonAnchoredPosition)
+    {
+        expectedParent = null;
+        buttonAnchor = new Vector2(0.5f, 0f);
+        buttonAnchoredPosition = default;
+
+        try
+        {
+            var storageList = tradeUi.rightList;
+            var storageListObject = storageList?.gameObject;
+            var storageListRect = storageListObject?.GetComponent<RectTransform>();
+            var parentRect = storageListRect?.parent?.GetComponent<RectTransform>();
+            if (storageListObject == null ||
+                storageListRect == null ||
+                parentRect == null ||
+                !storageListObject.activeInHierarchy)
+            {
+                return false;
+            }
+
+            var canvas = storageListRect.GetComponentInParent<Canvas>();
+            var camera = canvas == null || canvas.renderMode == RenderMode.ScreenSpaceOverlay
+                ? null
+                : canvas.worldCamera;
+            if (!TryGetAuctionPreviewScreenRect(storageListRect, camera, out var storageBounds))
+            {
+                return false;
+            }
+
+            var targetScreenPoint = new Vector2(storageBounds.center.x, storageBounds.yMin - 32f);
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    parentRect,
+                    targetScreenPoint,
+                    camera,
+                    out var targetLocalPoint))
+            {
+                return false;
+            }
+
+            var anchorReferenceLocalPoint = new Vector2(
+                (buttonAnchor.x - parentRect.pivot.x) * parentRect.rect.width,
+                (buttonAnchor.y - parentRect.pivot.y) * parentRect.rect.height);
+            buttonAnchoredPosition = targetLocalPoint - anchorReferenceLocalPoint;
+            expectedParent = parentRect.transform;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[GovernmentStorage] Refresh button layout lookup failed: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
     }
 
     private static void DestroyGovernmentStorageRefreshButton()
@@ -9490,6 +9572,540 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         }
 
         return rolled;
+    }
+
+    private static void SkillBookOwnershipUpdatePostfix(QuickDetail? __instance)
+    {
+        if (__instance == null ||
+            !_skillBookOwnershipIndicatorEnabled.Value ||
+            !_skillBookOwnershipHooksReady)
+        {
+            ResetSkillBookOwnershipAppliedLabel();
+            return;
+        }
+
+        try
+        {
+            var skillDetailVisible = __instance.skillDetail != null && __instance.skillDetail.activeInHierarchy;
+            if (!skillDetailVisible)
+            {
+                ResetSkillBookOwnershipAppliedLabel();
+                return;
+            }
+
+            var skillId = ResolveVisibleSkillDetailId(__instance);
+            if (skillId <= 0)
+            {
+                ResetSkillBookOwnershipAppliedLabel();
+                return;
+            }
+
+            if (_skillBookOwnershipAppliedSkillId == skillId &&
+                ((_skillBookOwnershipAppliedNguiLabel != null &&
+                  _skillBookOwnershipAppliedNguiLabel.gameObject.activeInHierarchy &&
+                  _skillBookOwnershipAppliedNguiLabel.text.IndexOf("功法书：", StringComparison.Ordinal) >= 0) ||
+                 (_skillBookOwnershipAppliedUnityLabel != null &&
+                  _skillBookOwnershipAppliedUnityLabel.gameObject.activeInHierarchy &&
+                  _skillBookOwnershipAppliedUnityLabel.text.IndexOf("功法书：", StringComparison.Ordinal) >= 0)))
+            {
+                return;
+            }
+
+            TryApplySkillBookOwnershipToVisibleDescription(__instance, skillId);
+        }
+        catch (Exception ex)
+        {
+            ResetSkillBookOwnershipAppliedLabel();
+            LogSkillBookOwnershipLookupFailure("updating the visible skill detail", ex);
+        }
+    }
+
+    private static int ResolveVisibleSkillDetailId(QuickDetail quickDetail)
+    {
+        var hoveredIcon = TryFindSkillIconController(MouseController.hoveredObject);
+        var shownIcon = TryFindSkillIconController(quickDetail.nowShowObject);
+        var skillId = hoveredIcon?.skillLvData?.skillID ?? -1;
+        if (skillId <= 0)
+        {
+            skillId = shownIcon?.skillLvData?.skillID ?? -1;
+        }
+
+        if (skillId > 0)
+        {
+            return skillId;
+        }
+
+        skillId = TryResolveSkillIconListId(quickDetail, hoveredIcon);
+        if (skillId > 0)
+        {
+            return skillId;
+        }
+
+        skillId = TryResolveSkillIconListId(quickDetail, shownIcon);
+        return skillId > 0 ? skillId : TryResolveSkillIdFromVisibleLabels(quickDetail);
+    }
+
+    private static SkillIconController? TryFindSkillIconController(GameObject? target)
+    {
+        if (target == null)
+        {
+            return null;
+        }
+
+        SkillIconController? fallback = null;
+        for (Transform? current = target.transform; current != null; current = current.parent)
+        {
+            var components = current.gameObject.GetComponents<SkillIconController>();
+            for (var index = 0; index < components.Length; index++)
+            {
+                var component = components[index];
+                if (component == null)
+                {
+                    continue;
+                }
+
+                fallback ??= component;
+                if ((component.skillLvData?.skillID ?? -1) > 0)
+                {
+                    return component;
+                }
+            }
+        }
+
+        var descendants = target.GetComponentsInChildren<SkillIconController>(includeInactive: true);
+        for (var index = 0; index < descendants.Length; index++)
+        {
+            var component = descendants[index];
+            if (component == null)
+            {
+                continue;
+            }
+
+            fallback ??= component;
+            if ((component.skillLvData?.skillID ?? -1) > 0)
+            {
+                return component;
+            }
+        }
+
+        return fallback;
+    }
+
+    private static int TryResolveSkillIconListId(QuickDetail quickDetail, SkillIconController? skillIcon)
+    {
+        if (skillIcon == null)
+        {
+            return -1;
+        }
+
+        HeroData? targetHero = null;
+        try
+        {
+            targetHero = quickDetail.GetTargetHero();
+        }
+        catch (Exception ex)
+        {
+            LogSkillBookOwnershipLookupFailure("resolving the quick-detail target hero from a skill list slot", ex);
+        }
+
+        targetHero ??= TryGetPlayerHero();
+        if (targetHero == null)
+        {
+            return -1;
+        }
+
+        var listId = skillIcon.skillListID;
+        try
+        {
+            var skills = targetHero.kungfuSkills;
+            if (skills != null && listId >= 0 && listId < skills.Count)
+            {
+                var indexedSkillId = skills[listId]?.skillID ?? -1;
+                if (indexedSkillId > 0)
+                {
+                    return indexedSkillId;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogSkillBookOwnershipLookupFailure("resolving a skill from the target hero's skill list slot", ex);
+        }
+
+        var fallback = listId > 0 ? TryFindHeroSkill(targetHero, listId) : null;
+        return fallback?.skillID == listId ? listId : -1;
+    }
+
+    private static int TryResolveSkillIdFromVisibleLabels(QuickDetail quickDetail)
+    {
+        HeroData? targetHero = null;
+        try
+        {
+            targetHero = quickDetail.GetTargetHero();
+        }
+        catch (Exception ex)
+        {
+            LogSkillBookOwnershipLookupFailure("resolving the quick-detail target hero for the title fallback", ex);
+        }
+
+        targetHero ??= TryGetPlayerHero();
+        var skills = targetHero?.kungfuSkills;
+        if (skills == null)
+        {
+            return -1;
+        }
+
+        var skillId = TryResolveSkillIdFromLabels(quickDetail.skillDetail, skills);
+        if (skillId > 0)
+        {
+            return skillId;
+        }
+
+        skillId = TryResolveSkillIdFromLabels(quickDetail.describeGrid, skills);
+        return skillId > 0 ? skillId : TryResolveSkillIdFromLabels(quickDetail.gameObject, skills);
+    }
+
+    private static int TryResolveSkillIdFromLabels(GameObject? searchRoot, Il2CppSystem.Collections.Generic.List<KungfuSkillLvData> skills)
+    {
+        if (searchRoot == null)
+        {
+            return -1;
+        }
+
+        var labels = searchRoot.GetComponentsInChildren<UILabel>(includeInactive: true);
+        for (var labelIndex = 0; labelIndex < labels.Length; labelIndex++)
+        {
+            var label = labels[labelIndex];
+            if (label == null || !label.gameObject.activeInHierarchy || string.IsNullOrWhiteSpace(label.text))
+            {
+                continue;
+            }
+
+            for (var skillIndex = 0; skillIndex < skills.Count; skillIndex++)
+            {
+                var skill = skills[skillIndex];
+                var skillId = skill?.skillID ?? -1;
+                if (skillId <= 0)
+                {
+                    continue;
+                }
+
+                var skillName = TryGetSkillName(skill);
+                if (VisibleSkillTitleMatches(label.text, skillName))
+                {
+                    return skillId;
+                }
+            }
+        }
+
+        var unityLabels = searchRoot.GetComponentsInChildren<Text>(includeInactive: true);
+        for (var labelIndex = 0; labelIndex < unityLabels.Length; labelIndex++)
+        {
+            var label = unityLabels[labelIndex];
+            if (label == null || !label.gameObject.activeInHierarchy || string.IsNullOrWhiteSpace(label.text))
+            {
+                continue;
+            }
+
+            for (var skillIndex = 0; skillIndex < skills.Count; skillIndex++)
+            {
+                var skill = skills[skillIndex];
+                var skillId = skill?.skillID ?? -1;
+                if (skillId <= 0)
+                {
+                    continue;
+                }
+
+                var skillName = TryGetSkillName(skill);
+                if (VisibleSkillTitleMatches(label.text, skillName))
+                {
+                    return skillId;
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool VisibleSkillTitleMatches(string? labelText, string? skillName)
+    {
+        if (string.IsNullOrWhiteSpace(labelText) || string.IsNullOrWhiteSpace(skillName))
+        {
+            return false;
+        }
+
+        return string.Equals(
+            StripVisibleTextFormatting(labelText).Trim(),
+            StripVisibleTextFormatting(skillName).Trim(),
+            StringComparison.Ordinal);
+    }
+
+    private static string StripVisibleTextFormatting(string text)
+    {
+        var result = new System.Text.StringBuilder(text.Length);
+        var closingDelimiter = '\0';
+        for (var index = 0; index < text.Length; index++)
+        {
+            var character = text[index];
+            if (closingDelimiter != '\0')
+            {
+                if (character == closingDelimiter)
+                {
+                    closingDelimiter = '\0';
+                }
+
+                continue;
+            }
+
+            if (character == '<')
+            {
+                closingDelimiter = '>';
+                continue;
+            }
+
+            if (character == '[')
+            {
+                closingDelimiter = ']';
+                continue;
+            }
+
+            result.Append(character);
+        }
+
+        return result.ToString();
+    }
+
+    private static bool TryApplySkillBookOwnershipToVisibleDescription(QuickDetail quickDetail, int skillId)
+    {
+        if (TryApplySkillBookOwnershipToNguiLabels(quickDetail.skillDetail, skillId) ||
+            TryApplySkillBookOwnershipToNguiLabels(quickDetail.describeGrid, skillId) ||
+            TryApplySkillBookOwnershipToUnityLabels(quickDetail.skillDetail, skillId) ||
+            TryApplySkillBookOwnershipToUnityLabels(quickDetail.describeGrid, skillId) ||
+            TryApplySkillBookOwnershipToNguiLabels(quickDetail.gameObject, skillId) ||
+            TryApplySkillBookOwnershipToUnityLabels(quickDetail.gameObject, skillId))
+        {
+            _skillBookOwnershipAppliedSkillId = skillId;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryApplySkillBookOwnershipToNguiLabels(GameObject? searchRoot, int skillId)
+    {
+        if (searchRoot == null)
+        {
+            return false;
+        }
+
+        var labels = searchRoot.GetComponentsInChildren<UILabel>(includeInactive: true);
+        for (var index = 0; index < labels.Length; index++)
+        {
+            var label = labels[index];
+            if (label == null || !label.gameObject.activeInHierarchy || string.IsNullOrWhiteSpace(label.text))
+            {
+                continue;
+            }
+
+            if (!TryBuildSkillBookOwnershipDescription(label.text, skillId, out var updatedText))
+            {
+                continue;
+            }
+
+            label.supportEncoding = true;
+            label.text = updatedText;
+            _skillBookOwnershipAppliedNguiLabel = label;
+            _skillBookOwnershipAppliedUnityLabel = null;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryApplySkillBookOwnershipToUnityLabels(GameObject? searchRoot, int skillId)
+    {
+        if (searchRoot == null)
+        {
+            return false;
+        }
+
+        var labels = searchRoot.GetComponentsInChildren<Text>(includeInactive: true);
+        for (var index = 0; index < labels.Length; index++)
+        {
+            var label = labels[index];
+            if (label == null || !label.gameObject.activeInHierarchy || string.IsNullOrWhiteSpace(label.text))
+            {
+                continue;
+            }
+
+            if (!TryBuildSkillBookOwnershipDescription(label.text, skillId, out var updatedText))
+            {
+                continue;
+            }
+
+            label.supportRichText = true;
+            label.text = updatedText;
+            _skillBookOwnershipAppliedNguiLabel = null;
+            _skillBookOwnershipAppliedUnityLabel = label;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryBuildSkillBookOwnershipDescription(string currentText, int skillId, out string updatedText)
+    {
+        updatedText = currentText;
+        const string Marker = "功法书：";
+        var ownershipText = BuildSkillBookOwnershipLabel(skillId);
+        var markerIndex = currentText.IndexOf(Marker, StringComparison.Ordinal);
+        if (markerIndex >= 0)
+        {
+            var valueStart = markerIndex + Marker.Length;
+            var valueEnd = currentText.IndexOf("</color>", valueStart, StringComparison.Ordinal);
+            if (valueEnd >= 0)
+            {
+                valueEnd += "</color>".Length;
+                updatedText = currentText.Remove(valueStart, valueEnd - valueStart).Insert(valueStart, ownershipText);
+                return true;
+            }
+        }
+
+        const string ShiftPrompt = "Shift查看详情";
+        var shiftPromptIndex = currentText.IndexOf(ShiftPrompt, StringComparison.Ordinal);
+        if (shiftPromptIndex >= 0)
+        {
+            updatedText = currentText.Insert(
+                shiftPromptIndex + ShiftPrompt.Length,
+                $"　{Marker}{ownershipText}");
+            return true;
+        }
+
+        const string EquipmentHeading = "装备效果";
+        var headingIndex = currentText.IndexOf(EquipmentHeading, StringComparison.Ordinal);
+        if (headingIndex < 0)
+        {
+            return false;
+        }
+
+        var insertAt = headingIndex + EquipmentHeading.Length;
+        updatedText = currentText.Insert(insertAt, $"　{Marker}{ownershipText}");
+        return true;
+    }
+
+    private static void ResetSkillBookOwnershipAppliedLabel()
+    {
+        _skillBookOwnershipAppliedNguiLabel = null;
+        _skillBookOwnershipAppliedUnityLabel = null;
+        _skillBookOwnershipAppliedSkillId = -1;
+    }
+
+    private static string BuildSkillBookOwnershipLabel(int skillId)
+    {
+        var player = TryGetPlayerHero();
+        return PlayerOwnsSkillBook(player, skillId)
+            ? "<color=#8FD17A>已拥有</color>"
+            : "<color=#F08A6A>未拥有</color>";
+    }
+
+    private static bool PlayerOwnsSkillBook(HeroData? player, int skillId)
+    {
+        if (player == null || skillId <= 0)
+        {
+            return false;
+        }
+
+        if (PlayerInventoryHasSkillBook(player, skillId) ||
+            ItemListHasSkillBook(player.selfStorage, skillId))
+        {
+            return true;
+        }
+
+        ForceData? playerForce;
+        try
+        {
+            playerForce = player.GetForce(false);
+        }
+        catch (Exception ex)
+        {
+            LogSkillBookOwnershipLookupFailure("resolving the player's current sect", ex);
+            return false;
+        }
+
+        if (playerForce == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (playerForce.BookStorageFindSkill(skillId) != null)
+            {
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogSkillBookOwnershipLookupFailure("querying the current sect book storage", ex);
+        }
+
+        return ItemListHasSkillBook(playerForce.bookStorage, skillId);
+    }
+
+    private static bool PlayerInventoryHasSkillBook(HeroData? player, int skillId)
+    {
+        var inventoryItems = player?.itemListData?.allItem;
+        if (inventoryItems == null || skillId <= 0)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < inventoryItems.Count; index++)
+        {
+            var item = inventoryItems[index];
+            if (item != null &&
+                item.type == ItemType.Book &&
+                item.bookData?.skillID == skillId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ItemListHasSkillBook(ItemListData? itemList, int skillId)
+    {
+        var items = itemList?.allItem;
+        if (items == null || skillId <= 0)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < items.Count; index++)
+        {
+            var item = items[index];
+            if (item != null &&
+                item.type == ItemType.Book &&
+                item.bookData?.skillID == skillId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void LogSkillBookOwnershipLookupFailure(string operation, Exception ex)
+    {
+        if (_skillBookOwnershipLookupFailureLogged)
+        {
+            return;
+        }
+
+        _skillBookOwnershipLookupFailureLogged = true;
+        LoggerInstance.LogWarning(
+            $"[SkillDisplay] Skill book ownership lookup failed while {operation}: {DescribeCompatibilityException(ex)}");
     }
 
     private static void BookStorageAddBookPostfix(ForceData __instance, ItemData book, bool showInfo)

@@ -182,6 +182,18 @@ test('trade and craft settings expose dedicated government storage refresh contr
   assert.match(renderer, /快捷键只在官府仓库页面可见时生效/);
 });
 
+test('growth settings expose the skill book ownership indicator and its inventory scope', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+
+  assert.match(renderer, /<Card title="功法悬浮信息" eyebrow="Skill Display">/);
+  assert.match(
+    renderer,
+    /label="显示功法书拥有状态"[\s\S]{0,240}value=\{settings\.skillBookOwnershipIndicatorEnabled\}[\s\S]{0,240}updateSetting\('skillBookOwnershipIndicatorEnabled', value\)/
+  );
+  assert.match(renderer, /背包与仓库（个人仓库及门派藏书）/);
+  assert.match(renderer, /已拥有显示绿色，未拥有显示红色/);
+});
+
 test('launcher keeps primary actions visible and clearly marks unsaved settings', () => {
   const renderer = readSource('src/renderer/App.tsx');
   const styles = readSource('src/renderer/styles.css');

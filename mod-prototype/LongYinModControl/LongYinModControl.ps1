@@ -78,6 +78,8 @@ $stageRoot = Join-Path $repoRootPath "_codex_staged_updates\BepInEx\plugins"
 $livePluginRoot = Join-Path $gameRootPath "BepInEx\plugins"
 $liveInteropPath = Join-Path $gameRootPath "BepInEx\interop\Assembly-CSharp.dll"
 $gameExePath = Join-Path $gameRootPath $GameExecutable
+$renamedPluginName = "LongYinProMax.dll"
+$legacyPluginName = "LongYinStaminaLock.dll"
 Assert-File -Path $gameExePath -Label "游戏可执行文件"
 
 $runningGame = Get-RunningGameProcess -ExecutablePath $gameExePath
@@ -184,6 +186,19 @@ if (Test-Path -LiteralPath $stageRoot -PathType Container) {
     }
 }
 
+$queuedPluginNames = @($promotionItems | ForEach-Object { $_.Name })
+$renamedPluginQueued = $queuedPluginNames -contains $renamedPluginName
+$legacyPluginQueued = $queuedPluginNames -contains $legacyPluginName
+if ($renamedPluginQueued -and $legacyPluginQueued) {
+    throw "检测到新旧主插件同时处于 pending：$renamedPluginName、$legacyPluginName。为避免 BepInEx 同时加载两份插件，已拒绝整个提升批次。"
+}
+if ($legacyPluginQueued) {
+    $renamedLivePath = Join-Path $livePluginRoot $renamedPluginName
+    if (Test-Path -LiteralPath $renamedLivePath -PathType Leaf) {
+        throw "live 目录已存在新主插件 $renamedPluginName，拒绝提升旧插件 $legacyPluginName。请移除旧 pending 后重试。"
+    }
+}
+
 Write-Host "RepoRoot: $repoRootPath"
 Write-Host "GameRoot: $gameRootPath"
 Write-Host "Pending DLL count: $($promotionItems.Count)"
@@ -227,6 +242,22 @@ foreach ($item in $promotionItems) {
         }
     }
 
+    $legacyLivePath = $null
+    $legacyBackupPath = $null
+    $legacyPreviousHash = $null
+    $legacyRemoved = $false
+    if ($item.Name -eq $renamedPluginName) {
+        $legacyLivePath = Join-Path $livePluginRoot $legacyPluginName
+        if (Test-Path -LiteralPath $legacyLivePath -PathType Leaf) {
+            $legacyPreviousHash = Get-Sha256 $legacyLivePath
+            $legacyBackupPath = Join-Path $backupRoot $legacyPluginName
+            Copy-Item -LiteralPath $legacyLivePath -Destination $legacyBackupPath -Force
+            if ((Get-Sha256 $legacyBackupPath) -ne $legacyPreviousHash) {
+                throw "旧名 live DLL 备份校验失败，未迁移：$legacyLivePath"
+            }
+        }
+    }
+
     $incomingPath = Join-Path $livePluginRoot (".{0}.{1}.incoming" -f $item.Name, [guid]::NewGuid().ToString("N"))
     try {
         Copy-Item -LiteralPath $item.StagedPath -Destination $incomingPath -Force
@@ -239,15 +270,45 @@ foreach ($item in $promotionItems) {
             throw "提升后的 live DLL 哈希校验失败：$($item.LivePath)"
         }
 
+        if ($legacyPreviousHash) {
+            Remove-Item -LiteralPath $legacyLivePath -Force
+            $legacyRemoved = $true
+            if (Test-Path -LiteralPath $legacyLivePath) {
+                throw "旧名 live DLL 删除失败：$legacyLivePath"
+            }
+        }
+
     }
     catch {
         $promotionError = $_
         Remove-Item -LiteralPath $incomingPath -Force -ErrorAction SilentlyContinue
-        if ($liveExisted -and (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
-            Copy-Item -LiteralPath $backupPath -Destination $item.LivePath -Force
+        $itemRollbackFailures = @()
+        try {
+            if ($liveExisted -and (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
+                Copy-Item -LiteralPath $backupPath -Destination $item.LivePath -Force
+            }
+            elseif (-not $liveExisted) {
+                Remove-Item -LiteralPath $item.LivePath -Force -ErrorAction SilentlyContinue
+            }
         }
-        elseif (-not $liveExisted) {
-            Remove-Item -LiteralPath $item.LivePath -Force -ErrorAction SilentlyContinue
+        catch {
+            $itemRollbackFailures += "新名 DLL：$($_.Exception.Message)"
+        }
+
+        try {
+            if ($legacyPreviousHash -and $legacyRemoved) {
+                Copy-Item -LiteralPath $legacyBackupPath -Destination $legacyLivePath -Force
+                if ((Get-Sha256 $legacyLivePath) -ne $legacyPreviousHash) {
+                    throw "恢复后哈希不一致"
+                }
+            }
+        }
+        catch {
+            $itemRollbackFailures += "旧名 DLL：$($_.Exception.Message)"
+        }
+
+        if ($itemRollbackFailures.Count -gt 0) {
+            throw "DLL 提升失败且当前项回滚不完整：$($itemRollbackFailures -join ' | ')；原始错误：$($promotionError.Exception.Message)"
         }
 
         throw $promotionError
@@ -261,6 +322,9 @@ foreach ($item in $promotionItems) {
         PreviousSha256 = $previousHash
         PromotedSha256 = $item.StagedHash
         BackupPath    = if ($liveExisted) { $backupPath } else { $null }
+        LegacyLivePath = $legacyLivePath
+        LegacyPreviousSha256 = $legacyPreviousHash
+        LegacyBackupPath = $legacyBackupPath
         MetadataPath  = if (Test-Path -LiteralPath $item.MetadataPath -PathType Leaf) { $item.MetadataPath } else { $null }
         PendingPath   = $item.PendingPath
     }
@@ -272,6 +336,7 @@ catch {
     $batchRollbackFailures = @()
     for ($rollbackIndex = $receipts.Count - 1; $rollbackIndex -ge 0; $rollbackIndex--) {
         $previousReceipt = $receipts[$rollbackIndex]
+        $receiptRollbackFailures = @()
         try {
             if ($previousReceipt.PreviousSha256) {
                 Assert-File -Path $previousReceipt.BackupPath -Label "批次回滚备份"
@@ -285,7 +350,22 @@ catch {
             }
         }
         catch {
-            $batchRollbackFailures += "$($previousReceipt.Plugin): $($_.Exception.Message)"
+            $receiptRollbackFailures += "新名 DLL：$($_.Exception.Message)"
+        }
+        try {
+            if ($previousReceipt.LegacyPreviousSha256) {
+                Assert-File -Path $previousReceipt.LegacyBackupPath -Label "批次回滚旧名 DLL 备份"
+                Copy-Item -LiteralPath $previousReceipt.LegacyBackupPath -Destination $previousReceipt.LegacyLivePath -Force
+                if ((Get-Sha256 $previousReceipt.LegacyLivePath) -ne $previousReceipt.LegacyPreviousSha256) {
+                    throw "旧名 DLL 恢复后哈希不一致"
+                }
+            }
+        }
+        catch {
+            $receiptRollbackFailures += "旧名 DLL：$($_.Exception.Message)"
+        }
+        if ($receiptRollbackFailures.Count -gt 0) {
+            $batchRollbackFailures += "$($previousReceipt.Plugin): $($receiptRollbackFailures -join ' | ')"
         }
     }
     $receipts = @()

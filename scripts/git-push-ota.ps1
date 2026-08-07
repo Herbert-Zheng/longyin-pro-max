@@ -435,6 +435,33 @@ function Invoke-GitHubUpload {
 if (-not $RepoRoot) {
   $RepoRoot = Join-Path $PSScriptRoot '..'
 }
+
+function Assert-ZipEntryAbsent {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ZipPath,
+    [Parameter(Mandatory = $true)]
+    [string]$EntrySuffix,
+    [Parameter(Mandatory = $true)]
+    [string]$Label
+  )
+
+  Add-Type -AssemblyName System.IO.Compression
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    $legacyEntry = $zip.Entries | Where-Object {
+      $_.FullName.Replace('/', '\').EndsWith($EntrySuffix, [System.StringComparison]::OrdinalIgnoreCase)
+    } | Select-Object -First 1
+    if ($legacyEntry) {
+      throw "$Label 不应出现在 ZIP 中：$($legacyEntry.FullName)"
+    }
+  }
+  finally {
+    $zip.Dispose()
+  }
+}
 $RepoRoot = (Resolve-Path $RepoRoot).Path
 $ElectronRoot = Join-Path $RepoRoot 'electron-app'
 $ReleaseRoot = Join-Path $ElectronRoot 'release'
@@ -472,10 +499,13 @@ $zipName = "LongYinProMaxApp-$version-win-x64.zip"
 $zipPath = Join-Path $ReleaseRoot $zipName
 $manifestPath = Join-Path $ReleaseRoot 'update-manifest.json'
 $payloadInteropRelativePath = 'resources\payload\BepInEx\interop\Assembly-CSharp.dll'
+$legacyPrimaryPluginRelativePath = 'BepInEx\plugins\LongYinStaminaLock.dll'
+$legacyPrimaryPluginDistPath = Join-Path $RepoRoot "dist\$legacyPrimaryPluginRelativePath"
+$legacyPrimaryPluginZipSuffix = "resources\payload\$legacyPrimaryPluginRelativePath"
 $pluginBuildSpecs = @(
   [pscustomobject]@{
-    Name = 'LongYinStaminaLock'
-    SourceRelativePath = 'mod-src\LongYinStaminaLock\LongYinStaminaLock.cs'
+    Name = 'LongYinProMax'
+    SourceRelativePath = 'mod-src\LongYinProMax\LongYinProMax.cs'
   },
   [pscustomobject]@{
     Name = 'LongYinBattleTurbo'
@@ -521,6 +551,10 @@ if ($statusPorcelain) {
 }
 
 $payloadSyncs = @()
+if (Test-Path -LiteralPath $legacyPrimaryPluginDistPath -PathType Leaf) {
+  throw "dist 中仍存在旧主插件，禁止打包新旧 DLL：$legacyPrimaryPluginDistPath"
+}
+
 if (-not $SkipBuild) {
   Assert-BuildPrereqs
   foreach ($pluginSpec in $pluginBuildSpecs) {
@@ -623,6 +657,11 @@ foreach ($payloadSync in $payloadSyncs) {
     throw "ZIP 内 $($payloadSync.PluginName).dll 与构建产物不一致：$($payloadSync.ArtifactHash) vs $zipPluginHash"
   }
 }
+
+Assert-ZipEntryAbsent `
+  -ZipPath $zipPath `
+  -EntrySuffix $legacyPrimaryPluginZipSuffix `
+  -Label '旧主插件 LongYinStaminaLock.dll'
 
 $interopHashes = @($payloadSyncs | ForEach-Object { $_.InteropHash } | Select-Object -Unique)
 if ($interopHashes.Count -ne 1) {

@@ -29,6 +29,45 @@ function Get-CSharpMethodText {
     return $source.Substring($methodMatch.Index, $endIndex - $methodMatch.Index)
 }
 
+function Get-CSharpBraceBlockText {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Scope,
+        [Parameter(Mandatory)][string]$StartPattern,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $startMatch = [System.Text.RegularExpressions.Regex]::Match(
+        $Scope,
+        $StartPattern,
+        [System.Text.RegularExpressions.RegexOptions]::Singleline)
+    if (-not $startMatch.Success) {
+        $failures.Add("Could not locate C# brace block: $Label")
+        return ''
+    }
+
+    $openingBraceIndex = $Scope.IndexOf('{', $startMatch.Index + $startMatch.Length)
+    if ($openingBraceIndex -lt 0) {
+        $failures.Add("Could not locate opening brace for C# block: $Label")
+        return ''
+    }
+
+    $depth = 0
+    for ($index = $openingBraceIndex; $index -lt $Scope.Length; $index++) {
+        switch ($Scope[$index]) {
+            '{' { $depth++ }
+            '}' {
+                $depth--
+                if ($depth -eq 0) {
+                    return $Scope.Substring($openingBraceIndex, $index - $openingBraceIndex + 1)
+                }
+            }
+        }
+    }
+
+    $failures.Add("Could not locate closing brace for C# block: $Label")
+    return ''
+}
+
 function Require-Pattern {
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Scope,
@@ -60,6 +99,7 @@ function Reject-Pattern {
 }
 
 Require-Pattern $source 'Config\.Bind\("Relationship",\s*"FeaturesEnabled",\s*false,' 'Relationship.FeaturesEnabled must exist and default to false.'
+Require-Pattern $source 'Config\.Bind\("Relationship",\s*"BlockOverflowLoverHomeBattle",\s*true,' 'Relationship.BlockOverflowLoverHomeBattle must exist and preserve the prior enabled behavior behind the master switch.'
 Require-Pattern $source 'Config\.Bind\("Relationship",\s*"TeamFameShareEnabled",\s*true,' 'Relationship.TeamFameShareEnabled must exist and preserve the prior enabled behavior behind the master switch.'
 Require-Pattern $source 'Config\.Bind\("Relationship",\s*"TeamFameSharePercent",\s*30f,' 'Relationship.TeamFameSharePercent must exist and default to 30 percent.'
 Require-Pattern $source 'Config\.Bind\("Debug",\s*"CharacterDataTestHotkeyEnabled",\s*false,' 'The character-data test hotkey must exist and default to disabled.'
@@ -71,6 +111,48 @@ Require-Pattern $source 'Character-data test uses on-demand HeroDetailController
 
 $loadMethod = Get-CSharpMethodText 'Load'
 Require-Pattern $loadMethod 'if\s*\(_relationshipFeaturesEnabled\.Value\)[\s\S]*?changeFavorPatched\s*=\s*PatchMethod\(typeof\(HeroData\),\s*nameof\(HeroData\.ChangeFavor\)[\s\S]*?PatchHeroChangeFameMethod\(\);[\s\S]*?PatchMethod\(typeof\(PlotController\),\s*nameof\(PlotController\.ManageTeachSkill\)' 'Relationship-specific ChangeFavor, ChangeFame, and ManageTeachSkill hooks must only be registered behind the master switch.'
+Require-Pattern $loadMethod 'nameof\(PlotController\.LoverInteractWithNPC\)[\s\S]*?nameof\(PlotController\.FinishHeroToLover\)[\s\S]*?nameof\(PlotController\.CheckChoiceMeetRequire\)[\s\S]*?if\s*\(_relationshipFeaturesEnabled\.Value\s*&&\s*_blockOverflowLoverHomeBattle\.Value\)' 'MaxLoverCount hooks must remain registered independently before the lover home-battle hook gate.'
+
+$loverBattleRegistrationBlock = Get-CSharpBraceBlockText `
+    -Scope $loadMethod `
+    -StartPattern 'if\s*\(_relationshipFeaturesEnabled\.Value\s*&&\s*_blockOverflowLoverHomeBattle\.Value\)\s*' `
+    -Label 'relationship master plus lover home-battle blocker registration gate'
+Reject-Pattern $loverBattleRegistrationBlock 'MaxLoverCountSyncPrefix|CheckChoiceMeetRequirePostfix|MeetLoverResultRequirePostfix' 'MaxLoverCount hooks must remain outside the lover home-battle registration gate.'
+
+$dedicatedLoverBattlePatchPatterns = @(
+    'PatchMethod\(typeof\(PlotController\),\s*nameof\(PlotController\.PlotStartLoverResultFight\),',
+    'PatchMethod\(typeof\(PlotController\),\s*nameof\(PlotController\.PlotStartLoverResultFightResult\),',
+    'PatchMethod\(typeof\(BattleController\),\s*nameof\(BattleController\.PrepareBattleMap\),[^;]+nameof\(LoverBattlePrepareBattleMapDirectPrefix\),',
+    'PatchMethod\(typeof\(BattleController\),\s*nameof\(BattleController\.PrepareBattleMap\),[^;]+nameof\(LoverBattlePrepareBattleMapGroupedPrefix\),',
+    'PatchMethod\(typeof\(BattleController\),\s*nameof\(BattleController\.BattleTeamPrepare\),[^;]+nameof\(LoverBattleTeamPreparePrefix\),'
+)
+foreach ($patchPattern in $dedicatedLoverBattlePatchPatterns) {
+    $loadRegistrationCount = [System.Text.RegularExpressions.Regex]::Matches(
+        $loadMethod,
+        $patchPattern,
+        [System.Text.RegularExpressions.RegexOptions]::Singleline).Count
+    $guardedRegistrationCount = [System.Text.RegularExpressions.Regex]::Matches(
+        $loverBattleRegistrationBlock,
+        $patchPattern,
+        [System.Text.RegularExpressions.RegexOptions]::Singleline).Count
+    if ($loadRegistrationCount -ne 1 -or $guardedRegistrationCount -ne 1) {
+        $failures.Add("Each dedicated lover home-battle hook must have exactly one registration site and it must be inside the combined guard block; pattern '$patchPattern' matched $loadRegistrationCount time(s) in Load and $guardedRegistrationCount time(s) in the guard block.")
+    }
+}
+
+Require-Pattern $loadMethod 'LogCompatibilitySummary\(\s*loverBattlePlotStartPatched,\s*loverBattlePlotResultPatched,\s*battlePrepareDirectPatched,\s*battlePrepareGroupedPatched,\s*battleTeamPreparePatched,\s*battleSpeedPatched,' 'LogCompatibilitySummary must receive the five lover-battle hook results in order, followed by the independent battle-speed result.'
+
+$compatibilitySummary = Get-CSharpMethodText 'LogCompatibilitySummary'
+Require-Pattern $compatibilitySummary 'LogCompatibilitySummary\(\s*bool\s+loverBattlePlotStartPatched,\s*bool\s+loverBattlePlotResultPatched,\s*bool\s+battlePrepareDirectPatched,\s*bool\s+battlePrepareGroupedPatched,\s*bool\s+battleTeamPreparePatched,\s*bool\s+battleSpeedPatched,' 'LogCompatibilitySummary parameters must map the five lover-battle hook results in order, followed by battle speed.'
+$loverBattleCountBlock = Get-CSharpBraceBlockText `
+    -Scope $compatibilitySummary `
+    -StartPattern 'var\s+loverBattleHookCount\s*=\s*new\[\]\s*' `
+    -Label 'lover-battle compatibility count initializer'
+Require-Pattern $loverBattleCountBlock '^\{\s*loverBattlePlotStartPatched,\s*loverBattlePlotResultPatched,\s*battlePrepareDirectPatched,\s*battlePrepareGroupedPatched,\s*battleTeamPreparePatched\s*\}$' 'The lover-battle compatibility count must contain exactly the five dedicated hook results in registration order.'
+Reject-Pattern $loverBattleCountBlock '\bbattleSpeedPatched\b' 'The general battle-speed hook must not be counted as a lover home-battle blocker hook.'
+Require-Pattern $compatibilitySummary 'loverBattleHookCount\s*==\s*5' 'The lover-battle compatibility state must require all five dedicated hooks.'
+Require-Pattern $compatibilitySummary '\{loverBattleHookCount\}/5\s+dedicated targets patched' 'The lover-battle compatibility log must report a five-target denominator.'
+Require-Pattern $compatibilitySummary 'Battle speed hook:\s*\{\(battleSpeedPatched\s*\?\s*"ENABLED"\s*:\s*"DEGRADED"\)\}' 'Battle speed compatibility must be reported independently from lover home-battle hooks.'
 
 $viewedHeroReader = Get-CSharpMethodText 'TryGetViewedHeroDetailHero'
 Require-Pattern $viewedHeroReader '!heroDetailController\.gameObject\.activeInHierarchy[\s\S]*?return\s+null' 'The on-demand viewed-hero reader must ignore inactive character-detail UI state.'

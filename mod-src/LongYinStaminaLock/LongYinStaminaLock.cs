@@ -774,14 +774,22 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         PatchMethod(typeof(PlotController), nameof(PlotController.StartAskHeroToLoverPlot), new[] { typeof(string) }, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.SureHeroToLover), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.FinishHeroToLover), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
-        PatchMethod(typeof(PlotController), nameof(PlotController.PlotStartLoverResultFight), Type.EmptyTypes, nameof(LoverBattlePlotStartPrefix), null);
-        PatchMethod(typeof(PlotController), nameof(PlotController.PlotStartLoverResultFightResult), new[] { typeof(string) }, nameof(LoverBattlePlotResultPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.CheckChoiceMeetRequire), new[] { typeof(Il2CppSystem.Collections.Generic.List<PlotChoiceRequirement>), typeof(bool) }, nameof(MaxLoverCountSyncPrefix), nameof(CheckChoiceMeetRequirePostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.CheckMeetRequire), new[] { typeof(ChoiceRequirementType), typeof(float), typeof(bool) }, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(GameController), nameof(GameController.MeetLoverResultRequire), Type.EmptyTypes, null, nameof(MeetLoverResultRequirePostfix));
-        var battlePrepareDirectPatched = PatchMethod(typeof(BattleController), nameof(BattleController.PrepareBattleMap), new[] { typeof(BattleType), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(float), typeof(string), typeof(bool), typeof(bool), typeof(BattleMapTypeData), typeof(int), typeof(float) }, nameof(LoverBattlePrepareBattleMapDirectPrefix), null);
-        var battlePrepareGroupedPatched = PatchMethod(typeof(BattleController), nameof(BattleController.PrepareBattleMap), new[] { typeof(BattleType), typeof(Il2CppSystem.Collections.Generic.List<Il2CppSystem.Collections.Generic.List<HeroData>>), typeof(Il2CppSystem.Collections.Generic.List<Il2CppSystem.Collections.Generic.List<HeroData>>), typeof(float), typeof(string), typeof(bool), typeof(BattleMapTypeData), typeof(int), typeof(float) }, nameof(LoverBattlePrepareBattleMapGroupedPrefix), null);
-        var battleTeamPreparePatched = PatchMethod(typeof(BattleController), nameof(BattleController.BattleTeamPrepare), Type.EmptyTypes, nameof(LoverBattleTeamPreparePrefix), null);
+        var loverBattlePlotStartPatched = false;
+        var loverBattlePlotResultPatched = false;
+        var battlePrepareDirectPatched = false;
+        var battlePrepareGroupedPatched = false;
+        var battleTeamPreparePatched = false;
+        if (_relationshipFeaturesEnabled.Value && _blockOverflowLoverHomeBattle.Value)
+        {
+            loverBattlePlotStartPatched = PatchMethod(typeof(PlotController), nameof(PlotController.PlotStartLoverResultFight), Type.EmptyTypes, nameof(LoverBattlePlotStartPrefix), null);
+            loverBattlePlotResultPatched = PatchMethod(typeof(PlotController), nameof(PlotController.PlotStartLoverResultFightResult), new[] { typeof(string) }, nameof(LoverBattlePlotResultPrefix), null);
+            battlePrepareDirectPatched = PatchMethod(typeof(BattleController), nameof(BattleController.PrepareBattleMap), new[] { typeof(BattleType), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(Il2CppSystem.Collections.Generic.List<HeroData>), typeof(float), typeof(string), typeof(bool), typeof(bool), typeof(BattleMapTypeData), typeof(int), typeof(float) }, nameof(LoverBattlePrepareBattleMapDirectPrefix), null);
+            battlePrepareGroupedPatched = PatchMethod(typeof(BattleController), nameof(BattleController.PrepareBattleMap), new[] { typeof(BattleType), typeof(Il2CppSystem.Collections.Generic.List<Il2CppSystem.Collections.Generic.List<HeroData>>), typeof(Il2CppSystem.Collections.Generic.List<Il2CppSystem.Collections.Generic.List<HeroData>>), typeof(float), typeof(string), typeof(bool), typeof(BattleMapTypeData), typeof(int), typeof(float) }, nameof(LoverBattlePrepareBattleMapGroupedPrefix), null);
+            battleTeamPreparePatched = PatchMethod(typeof(BattleController), nameof(BattleController.BattleTeamPrepare), Type.EmptyTypes, nameof(LoverBattleTeamPreparePrefix), null);
+        }
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.Update), Type.EmptyTypes, null, nameof(DialogChoiceRowPostfix));
         PatchMethod(typeof(PlotInteractController), nameof(PlotInteractController.OnClick), Type.EmptyTypes, nameof(DialogChoiceClickPrefix), null);
         PatchMethod(typeof(BuildChoiceButtonController), nameof(BuildChoiceButtonController.OnClick), Type.EmptyTypes, null, nameof(TreasureChestChoiceButtonClickedPostfix));
@@ -1024,6 +1032,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
 
         var maxLoverSyncAvailable = ApplyConfiguredMaxLoverCount("startup compatibility probe");
         LogCompatibilitySummary(
+            loverBattlePlotStartPatched,
+            loverBattlePlotResultPatched,
             battlePrepareDirectPatched,
             battlePrepareGroupedPatched,
             battleTeamPreparePatched,
@@ -1261,6 +1271,8 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
     }
 
     private void LogCompatibilitySummary(
+        bool loverBattlePlotStartPatched,
+        bool loverBattlePlotResultPatched,
         bool battlePrepareDirectPatched,
         bool battlePrepareGroupedPatched,
         bool battleTeamPreparePatched,
@@ -1276,12 +1288,13 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         bool identifyHidePatched,
         bool mailDeliveryPatched)
     {
-        var battleHookCount = new[]
+        var loverBattleHookCount = new[]
         {
+            loverBattlePlotStartPatched,
+            loverBattlePlotResultPatched,
             battlePrepareDirectPatched,
             battlePrepareGroupedPatched,
-            battleTeamPreparePatched,
-            battleSpeedPatched
+            battleTeamPreparePatched
         }.Count(enabled => enabled);
         var auctionPreviewCoreAvailable =
             auctionPreviewShowPatched &&
@@ -1291,9 +1304,14 @@ public sealed class LongYinStaminaLockPlugin : BasePlugin
         var identifyCoreAvailable = identifyShowPatched && identifyHidePatched && overlayButtonPointerPatched;
 
         Log.LogInfo($"[Compatibility] Summary: {_patchedMethodCount} method patches enabled, {_skippedMethodCount} safely skipped.");
-        var battleState = battleHookCount == 4 ? "ENABLED" : battleHookCount > 0 ? "PARTIAL" : "DEGRADED";
+        var loverBattleHooksRequested = _relationshipFeaturesEnabled.Value && _blockOverflowLoverHomeBattle.Value;
+        var loverBattleState = !loverBattleHooksRequested
+            ? "DISABLED BY CONFIG"
+            : loverBattleHookCount == 5 ? "ENABLED" : loverBattleHookCount > 0 ? "PARTIAL" : "DEGRADED";
         Log.LogInfo(
-            $"[Compatibility] Battle hooks: {battleState} ({battleHookCount}/4 owned targets); " +
+            $"[Compatibility] Lover home battle blocker hooks: {loverBattleState} ({loverBattleHookCount}/5 dedicated targets patched).");
+        Log.LogInfo(
+            $"[Compatibility] Battle speed hook: {(battleSpeedPatched ? "ENABLED" : "DEGRADED")}; " +
             "BattleController.HeroEnterBattleFieldCoroutine is not registered by this plugin.");
         Log.LogInfo(
             $"[Compatibility] Horse refresh hook: {(horseRefreshPatched ? "ENABLED" : "DEGRADED")}" +

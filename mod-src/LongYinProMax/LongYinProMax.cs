@@ -9958,39 +9958,98 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         updatedText = currentText;
         const string Marker = "功法书：";
         var ownershipText = BuildSkillBookOwnershipLabel(skillId);
-        var markerIndex = currentText.IndexOf(Marker, StringComparison.Ordinal);
-        if (markerIndex >= 0)
+        var descriptionWithoutOwnership = RemoveSkillBookOwnershipDescription(currentText, Marker);
+        var practiceStatusEnd = FindSkillPracticeStatusInsertionIndex(descriptionWithoutOwnership);
+        if (practiceStatusEnd >= 0)
         {
-            var valueStart = markerIndex + Marker.Length;
-            var valueEnd = currentText.IndexOf("</color>", valueStart, StringComparison.Ordinal);
-            if (valueEnd >= 0)
-            {
-                valueEnd += "</color>".Length;
-                updatedText = currentText.Remove(valueStart, valueEnd - valueStart).Insert(valueStart, ownershipText);
-                return true;
-            }
+            updatedText = descriptionWithoutOwnership.Insert(
+                practiceStatusEnd,
+                $"　{Marker}{ownershipText}");
+            return true;
         }
 
         const string ShiftPrompt = "Shift查看详情";
-        var shiftPromptIndex = currentText.IndexOf(ShiftPrompt, StringComparison.Ordinal);
+        var shiftPromptIndex = descriptionWithoutOwnership.IndexOf(ShiftPrompt, StringComparison.Ordinal);
         if (shiftPromptIndex >= 0)
         {
-            updatedText = currentText.Insert(
+            updatedText = descriptionWithoutOwnership.Insert(
                 shiftPromptIndex + ShiftPrompt.Length,
                 $"　{Marker}{ownershipText}");
             return true;
         }
 
         const string EquipmentHeading = "装备效果";
-        var headingIndex = currentText.IndexOf(EquipmentHeading, StringComparison.Ordinal);
+        var headingIndex = descriptionWithoutOwnership.IndexOf(EquipmentHeading, StringComparison.Ordinal);
         if (headingIndex < 0)
         {
             return false;
         }
 
         var insertAt = headingIndex + EquipmentHeading.Length;
-        updatedText = currentText.Insert(insertAt, $"　{Marker}{ownershipText}");
+        updatedText = descriptionWithoutOwnership.Insert(insertAt, $"　{Marker}{ownershipText}");
         return true;
+    }
+
+    private static string RemoveSkillBookOwnershipDescription(string currentText, string marker)
+    {
+        var markerIndex = currentText.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+        {
+            return currentText;
+        }
+
+        var removeStart = markerIndex > 0 && currentText[markerIndex - 1] == '　'
+            ? markerIndex - 1
+            : markerIndex;
+        var valueStart = markerIndex + marker.Length;
+        var valueEnd = currentText.IndexOf("</color>", valueStart, StringComparison.Ordinal);
+        if (valueEnd < 0)
+        {
+            return currentText;
+        }
+
+        valueEnd += "</color>".Length;
+        return currentText.Remove(removeStart, valueEnd - removeStart);
+    }
+
+    private static int FindSkillPracticeStatusInsertionIndex(string currentText)
+    {
+        var learnedIndex = currentText.IndexOf("已修习", StringComparison.Ordinal);
+        var unlearnedIndex = currentText.IndexOf("未修习", StringComparison.Ordinal);
+        var statusIndex = learnedIndex < 0
+            ? unlearnedIndex
+            : unlearnedIndex < 0
+                ? learnedIndex
+                : Math.Min(learnedIndex, unlearnedIndex);
+        if (statusIndex < 0)
+        {
+            return -1;
+        }
+
+        var insertionIndex = statusIndex + "已修习".Length;
+        while (insertionIndex < currentText.Length)
+        {
+            if (currentText.IndexOf("[-]", insertionIndex, StringComparison.Ordinal) == insertionIndex)
+            {
+                insertionIndex += "[-]".Length;
+                continue;
+            }
+
+            if (currentText.IndexOf("</", insertionIndex, StringComparison.Ordinal) != insertionIndex)
+            {
+                break;
+            }
+
+            var tagEnd = currentText.IndexOf('>', insertionIndex + 2);
+            if (tagEnd < 0)
+            {
+                break;
+            }
+
+            insertionIndex = tagEnd + 1;
+        }
+
+        return insertionIndex;
     }
 
     private static void ResetSkillBookOwnershipAppliedLabel()

@@ -45,6 +45,8 @@ $visibleDescriptionMethod = Get-CSharpMethodText 'TryApplySkillBookOwnershipToVi
 $nguiDescriptionMethod = Get-CSharpMethodText 'TryApplySkillBookOwnershipToNguiLabels'
 $unityDescriptionMethod = Get-CSharpMethodText 'TryApplySkillBookOwnershipToUnityLabels'
 $buildDescriptionMethod = Get-CSharpMethodText 'TryBuildSkillBookOwnershipDescription'
+$removeDescriptionMethod = Get-CSharpMethodText 'RemoveSkillBookOwnershipDescription'
+$practiceStatusMethod = Get-CSharpMethodText 'FindSkillPracticeStatusInsertionIndex'
 $inventoryMethod = Get-CSharpMethodText 'PlayerInventoryHasSkillBook'
 $ownershipMethod = Get-CSharpMethodText 'PlayerOwnsSkillBook'
 
@@ -63,7 +65,9 @@ if ($resolveLabelSkillMethod -match 'IndexOf\s*\(\s*skillName') {
 Require-Pattern $visibleDescriptionMethod 'TryApplySkillBookOwnershipToNguiLabels\(quickDetail\.skillDetail[\s\S]*?TryApplySkillBookOwnershipToNguiLabels\(quickDetail\.describeGrid[\s\S]*?TryApplySkillBookOwnershipToUnityLabels\(quickDetail\.skillDetail[\s\S]*?TryApplySkillBookOwnershipToUnityLabels\(quickDetail\.describeGrid[\s\S]*?quickDetail\.gameObject' 'The visible description updater must cover the original skill roots and both NGUI and Unity text implementations.'
 Require-Pattern $nguiDescriptionMethod 'GetComponentsInChildren<UILabel>\(includeInactive:\s*true\)[\s\S]*?supportEncoding\s*=\s*true[\s\S]*?_skillBookOwnershipAppliedNguiLabel' 'NGUI skill labels must preserve encoded color text and remember the applied label.'
 Require-Pattern $unityDescriptionMethod 'GetComponentsInChildren<Text>\(includeInactive:\s*true\)[\s\S]*?supportRichText\s*=\s*true[\s\S]*?_skillBookOwnershipAppliedUnityLabel' 'Unity skill labels must preserve rich color text and remember the applied label.'
-Require-Pattern $buildDescriptionMethod '功法书：[\s\S]*?BuildSkillBookOwnershipLabel[\s\S]*?Shift查看详情[\s\S]*?装备效果' 'The status must update idempotently and prefer the always-visible Shift prompt before the equipment heading fallback.'
+Require-Pattern $buildDescriptionMethod '功法书：[\s\S]*?BuildSkillBookOwnershipLabel[\s\S]*?RemoveSkillBookOwnershipDescription[\s\S]*?FindSkillPracticeStatusInsertionIndex[\s\S]*?practiceStatusEnd\s*>=\s*0[\s\S]*?Shift查看详情[\s\S]*?装备效果' 'The status must replace an existing ownership fragment and prefer the learned/unlearned status before the Shift and equipment fallbacks.'
+Require-Pattern $removeDescriptionMethod 'IndexOf\(marker[\s\S]*?currentText\[markerIndex\s*-\s*1\]\s*==\s*''　''[\s\S]*?IndexOf\("</color>"[\s\S]*?currentText\.Remove' 'Idempotent updates must remove the prior colored ownership fragment and its separator before choosing the current insertion point.'
+Require-Pattern $practiceStatusMethod 'IndexOf\("已修习"[\s\S]*?IndexOf\("未修习"[\s\S]*?Math\.Min[\s\S]*?IndexOf\("\[-\]"[\s\S]*?IndexOf\("</"[\s\S]*?IndexOf\(''>''' 'The preferred insertion point must support either practice status and advance beyond adjacent NGUI or HTML closing tags.'
 
 Require-Pattern $inventoryMethod 'player\?\.itemListData\?\.allItem[\s\S]*?ItemType\.Book[\s\S]*?item\.bookData\?\.skillID\s*==\s*skillId' 'Backpack ownership must scan book items and compare BookData.skillID.'
 Require-Pattern $ownershipMethod 'PlayerInventoryHasSkillBook\(player, skillId\)[\s\S]*?player\.selfStorage[\s\S]*?player\.GetForce\(false\)[\s\S]*?BookStorageFindSkill\(skillId\)' 'Ownership must merge the player backpack, personal storage, and current sect book storage by skill ID.'

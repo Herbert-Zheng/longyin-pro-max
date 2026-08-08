@@ -14,7 +14,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Pro Max", "1.36.0")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Pro Max", "1.37.0")]
 public sealed class LongYinProMaxPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -73,6 +73,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private const int MaterialAffixFilterMaxTextLength = 40;
     private const string AuctionPreviewRefreshButtonName = "CodexAuctionPreviewRefreshButton";
     private const string GovernmentStorageRefreshButtonName = "CodexGovernmentStorageRefreshButton";
+    private const string YellowCraneCandidateRefreshButtonName = "CodexYellowCraneCandidateRefreshButton";
     private const float AuctionRedEventDifficulty = 10f;
     private const string IdentifyBestTreasureButtonName = "CodexIdentifyBestTreasureButton";
     private const string BreakthroughRerollButtonName = "CodexBreakthroughRerollButton";
@@ -133,6 +134,10 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static ConfigEntry<bool> _auctionEventAlwaysRedEnabled = null!;
     private static ConfigEntry<bool> _governmentStorageRefreshEnabled = null!;
     private static ConfigEntry<KeyCode> _governmentStorageRefreshHotkey = null!;
+    private static ConfigEntry<bool> _yellowCraneCandidateRefreshEnabled = null!;
+    private static ConfigEntry<bool> _forceBountyRefreshEnabled = null!;
+    private static ConfigEntry<bool> _commonBountyRefreshEnabled = null!;
+    private static ConfigEntry<bool> _governBountyRefreshEnabled = null!;
     private static ConfigEntry<bool> _skillBookOwnershipIndicatorEnabled = null!;
     private static ConfigEntry<bool> _treasureIdentifyBestValueAssistEnabled = null!;
     private static ConfigEntry<bool> _breakthroughRerollEnabled = null!;
@@ -563,6 +568,26 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static bool _governmentStorageRefreshHooksReady;
     private static bool _governmentStorageActiveLookupFailureLogged;
     private static float _governmentStorageRefreshButtonReadyAt;
+    private static RecruitUIController? _yellowCraneCandidateRefreshController;
+    private static GameObject? _yellowCraneCandidateRefreshButtonRoot;
+    private static Button? _yellowCraneCandidateRefreshButton;
+    private static Text? _yellowCraneCandidateRefreshButtonLabel;
+    private static Transform? _yellowCraneCandidateRefreshButtonHost;
+    private static RecruitUIType _yellowCraneCandidateRefreshType;
+    private static int _yellowCraneCandidateRefreshHeroCount;
+    private static float _yellowCraneCandidateRefreshLevel;
+    private static int _yellowCraneCandidateGenerationStartFrame = -1;
+    private static int _yellowCraneFinishRecruitFrame = -1;
+    private static RecruitUIType _yellowCraneFinishRecruitType;
+    private static float _yellowCraneFinishRecruitLevel;
+    private static bool _yellowCraneCandidateRefreshHooksReady;
+    private static bool _yellowCraneCandidateRefreshSessionActive;
+    private static bool _yellowCraneCandidateRefreshReady;
+    private static bool _yellowCraneCandidateRefreshBusy;
+    private static bool _yellowCraneCandidateRefreshReopening;
+    private static bool _yellowCraneCandidateRefreshCreationFailed;
+    private static bool _bountyRefreshHooksReady;
+    private static bool _bountyRefreshReentry;
     private static bool _skillBookOwnershipHooksReady;
     private static UILabel? _skillBookOwnershipAppliedNguiLabel;
     private static Text? _skillBookOwnershipAppliedUnityLabel;
@@ -701,6 +726,10 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         _auctionEventAlwaysRedEnabled = Config.Bind("Auction", "EventAlwaysRedEnabled", true, "When true, the 拍卖大会 world event is generated at difficulty 10, the red highest event grade, including its grade-dependent auction content.");
         _governmentStorageRefreshEnabled = Config.Bind("GovernmentStorage", "RefreshEnabled", true, "Adds a refresh button to the government storage page.");
         _governmentStorageRefreshHotkey = Config.Bind("GovernmentStorage", "RefreshHotkey", KeyCode.R, "Single-key shortcut that refreshes items only while the government storage page is visible.");
+        _yellowCraneCandidateRefreshEnabled = Config.Bind("YellowCraneTower", "CandidateRefreshEnabled", true, "Adds an unlimited refresh button to Yellow Crane Tower candidate selection without repeating the time-consuming search event.");
+        _forceBountyRefreshEnabled = Config.Bind("BountyRefresh", "ForceEnabled", true, "Keeps the original refresh button available for sect commission lists and preserves the original refresh counter.");
+        _commonBountyRefreshEnabled = Config.Bind("BountyRefresh", "CommonEnabled", true, "Keeps the original refresh button available for notice-board commission lists and preserves the original refresh counter.");
+        _governBountyRefreshEnabled = Config.Bind("BountyRefresh", "GovernEnabled", true, "Keeps the original refresh button available for government commission lists and preserves the original refresh counter.");
         _skillBookOwnershipIndicatorEnabled = Config.Bind("SkillDisplay", "BookOwnershipIndicatorEnabled", true, "Shows whether the hovered martial skill has a matching book in the player inventory, personal storage, or current sect book storage.");
         _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the treasure with the highest player-appraised value shown in parentheses. Confirmation remains manual.");
         _breakthroughRerollEnabled = Config.Bind("Breakthrough", "RerollEnabled", true, "Adds a button that rebuilds the current breakthrough choices without confirming a choice or consuming money, items, or time.");
@@ -853,6 +882,22 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         var tradeUiHidePatched = PatchMethod(typeof(TradeUIController), nameof(TradeUIController.HideTradeUI), Type.EmptyTypes, null, nameof(HideTradeUiPostfix));
         PatchMethod(typeof(ItemIconController), nameof(ItemIconController.OnClick), Type.EmptyTypes, null, nameof(ItemIconOnClickPostfix));
         var governmentStorageShowPatched = PatchMethod(typeof(PlotController), nameof(PlotController.ShowGovernStorage), Type.EmptyTypes, null, nameof(ShowGovernmentStoragePostfix));
+        var yellowCraneFinishRecruitPatched = false;
+        var yellowCraneRecruitShowPatched = false;
+        var yellowCraneRecruitHidePatched = false;
+        if (_yellowCraneCandidateRefreshEnabled.Value)
+        {
+            yellowCraneFinishRecruitPatched = PatchMethod(typeof(PlotController), nameof(PlotController.FinishRecruitHero), new[] { typeof(string) }, nameof(FinishRecruitHeroPrefix), null);
+            yellowCraneRecruitShowPatched = PatchMethod(typeof(RecruitUIController), nameof(RecruitUIController.ShowRecruitUI), new[] { typeof(RecruitUIType), typeof(int), typeof(float) }, null, nameof(RecruitUIControllerShowRecruitUIPostfix));
+            yellowCraneRecruitHidePatched = PatchMethod(typeof(RecruitUIController), nameof(RecruitUIController.HideRecruitUI), Type.EmptyTypes, null, nameof(RecruitUIControllerHideRecruitUIPostfix));
+        }
+        var bountyFreshButtonPatched = false;
+        var bountyFreshPatched = false;
+        if (_forceBountyRefreshEnabled.Value || _commonBountyRefreshEnabled.Value || _governBountyRefreshEnabled.Value)
+        {
+            bountyFreshButtonPatched = PatchMethod(typeof(BountyUIController), nameof(BountyUIController.FreshBountyButtonClicked), Type.EmptyTypes, nameof(BountyFreshButtonClickedPrefix), null);
+            bountyFreshPatched = PatchMethod(typeof(BountyUIController), nameof(BountyUIController.FreshBounty), Type.EmptyTypes, null, nameof(BountyFreshPostfix));
+        }
         var skillBookOwnershipUpdatePatched = false;
         if (_skillBookOwnershipIndicatorEnabled.Value)
         {
@@ -968,6 +1013,26 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         LoggerInstance.LogInfo(
             $"[Compatibility] Government storage refresh: {(_governmentStorageRefreshHooksReady ? "ENABLED" : "DISABLED")} " +
             "(ShowGovernStorage, HideTradeUI, overlay click, and update hooks required).");
+        _yellowCraneCandidateRefreshHooksReady = yellowCraneFinishRecruitPatched &&
+            yellowCraneRecruitShowPatched &&
+            yellowCraneRecruitHidePatched &&
+            overlayButtonPointerPatched &&
+            gameControllerUpdatePatched &&
+            loadRecentGamePatched &&
+            loadGamePatched &&
+            loadAllGameDataPatched;
+        if (!_yellowCraneCandidateRefreshHooksReady)
+        {
+            ResetYellowCraneCandidateRefreshState("required hooks unavailable or feature disabled");
+        }
+
+        LoggerInstance.LogInfo(
+            $"[Compatibility] Yellow Crane Tower candidate refresh: {(!_yellowCraneCandidateRefreshEnabled.Value ? "DISABLED BY CONFIG" : _yellowCraneCandidateRefreshHooksReady ? "ENABLED" : "DEGRADED")} " +
+            "(FinishRecruitHero, RecruitUI show/hide, overlay click, update, and load hooks required).");
+        _bountyRefreshHooksReady = bountyFreshButtonPatched && bountyFreshPatched;
+        LoggerInstance.LogInfo(
+            $"[Compatibility] Commission refresh: {(!(_forceBountyRefreshEnabled.Value || _commonBountyRefreshEnabled.Value || _governBountyRefreshEnabled.Value) ? "DISABLED BY CONFIG" : _bountyRefreshHooksReady ? "ENABLED" : "DEGRADED")} " +
+            "(original FreshBountyButtonClicked and FreshBounty hooks required).");
         _skillBookOwnershipHooksReady = skillBookOwnershipUpdatePatched;
         LoggerInstance.LogInfo(
             $"[Compatibility] Skill book ownership indicator: {(!_skillBookOwnershipIndicatorEnabled.Value ? "DISABLED BY CONFIG" : _skillBookOwnershipHooksReady ? "ENABLED" : "DEGRADED")} " +
@@ -2220,6 +2285,8 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         var isAuctionRefresh = string.Equals(buttonName, AuctionPreviewRefreshButtonName, StringComparison.Ordinal);
         var isGovernmentStorageRefresh = string.Equals(buttonName, GovernmentStorageRefreshButtonName, StringComparison.Ordinal) &&
             __instance == _governmentStorageRefreshButton;
+        var isYellowCraneCandidateRefresh = string.Equals(buttonName, YellowCraneCandidateRefreshButtonName, StringComparison.Ordinal) &&
+            __instance == _yellowCraneCandidateRefreshButton;
         var isIdentifyAssist = string.Equals(buttonName, IdentifyBestTreasureButtonName, StringComparison.Ordinal);
         var isBreakthroughReroll = string.Equals(buttonName, BreakthroughRerollButtonName, StringComparison.Ordinal) &&
             __instance == _breakthroughRerollButton;
@@ -2249,6 +2316,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             out var materialAffixRuleIndex);
         if (!isAuctionRefresh &&
             !isGovernmentStorageRefresh &&
+            !isYellowCraneCandidateRefresh &&
             !isIdentifyAssist &&
             !isBreakthroughReroll &&
             !isCraftReroll &&
@@ -2276,7 +2344,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             return false;
         }
 
-        if ((isAuctionRefresh || isGovernmentStorageRefresh || isIdentifyAssist || isBreakthroughReroll || isCraftReroll || isSpeEnhanceReroll) &&
+        if ((isAuctionRefresh || isGovernmentStorageRefresh || isYellowCraneCandidateRefresh || isIdentifyAssist || isBreakthroughReroll || isCraftReroll || isSpeEnhanceReroll) &&
             (eventData == null || eventData.button != PointerEventData.InputButton.Left))
         {
             return false;
@@ -2302,6 +2370,13 @@ public sealed class LongYinProMaxPlugin : BasePlugin
                 if (_governmentStorageRefreshEnabled.Value)
                 {
                     TryRefreshGovernmentStorage("button");
+                }
+            }
+            else if (isYellowCraneCandidateRefresh)
+            {
+                if (_yellowCraneCandidateRefreshEnabled.Value)
+                {
+                    TryRefreshYellowCraneCandidates();
                 }
             }
             else if (isIdentifyAssist)
@@ -4629,6 +4704,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
                 if (button == null ||
                     string.Equals(buttonName, AuctionPreviewRefreshButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, GovernmentStorageRefreshButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, YellowCraneCandidateRefreshButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, IdentifyBestTreasureButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, BreakthroughRerollButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, CraftRerollButtonName, StringComparison.Ordinal) ||
@@ -6633,6 +6709,610 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         }
 
         return items.Count > 0 ? string.Join(",", items) : "empty";
+    }
+
+    private static void FinishRecruitHeroPrefix(string __0)
+    {
+        _yellowCraneFinishRecruitFrame = -1;
+        if (!_yellowCraneCandidateRefreshEnabled.Value ||
+            string.IsNullOrWhiteSpace(__0) ||
+            !TryParseRecruitFinishContext(__0, out var recruitType, out var recruitLevel))
+        {
+            return;
+        }
+
+        _yellowCraneFinishRecruitFrame = Time.frameCount;
+        _yellowCraneFinishRecruitType = recruitType;
+        _yellowCraneFinishRecruitLevel = recruitLevel;
+    }
+
+    private static bool TryParseRecruitFinishContext(
+        string param,
+        out RecruitUIType recruitType,
+        out float recruitLevel)
+    {
+        recruitType = RecruitUIType.Normal;
+        recruitLevel = 0f;
+        var separator = param.IndexOf('-');
+        if (separator <= 0 || separator >= param.Length - 1)
+        {
+            return false;
+        }
+
+        var typeText = param.Substring(0, separator).Trim();
+        var levelText = param.Substring(separator + 1).Trim();
+        return Enum.TryParse(typeText, ignoreCase: true, out recruitType) &&
+            float.TryParse(levelText, out recruitLevel);
+    }
+
+    private static void RecruitUIControllerShowRecruitUIPostfix(
+        RecruitUIController __instance,
+        RecruitUIType __0,
+        int __1,
+        float __2)
+    {
+        if (__instance == null ||
+            !_yellowCraneCandidateRefreshEnabled.Value ||
+            !_yellowCraneCandidateRefreshHooksReady)
+        {
+            return;
+        }
+
+        var isOriginalYellowCraneOpen =
+            _yellowCraneFinishRecruitFrame == Time.frameCount &&
+            _yellowCraneFinishRecruitType == __0 &&
+            Math.Abs(_yellowCraneFinishRecruitLevel - __2) < 0.01f;
+        if (!_yellowCraneCandidateRefreshReopening && !isOriginalYellowCraneOpen)
+        {
+            return;
+        }
+
+        _yellowCraneFinishRecruitFrame = -1;
+        _yellowCraneCandidateRefreshController = __instance;
+        _yellowCraneCandidateRefreshType = __0;
+        _yellowCraneCandidateRefreshHeroCount = Math.Max(1, __1);
+        _yellowCraneCandidateRefreshLevel = __2;
+        _yellowCraneCandidateGenerationStartFrame = Time.frameCount;
+        _yellowCraneCandidateRefreshSessionActive = true;
+        _yellowCraneCandidateRefreshReady = false;
+        _yellowCraneCandidateRefreshBusy = true;
+        _yellowCraneCandidateRefreshCreationFailed = false;
+        SetOverlayObjectActive(_yellowCraneCandidateRefreshButtonRoot, false);
+
+        LoggerInstance.LogInfo(
+            $"[YellowCraneTower] Candidate session opened: type={__0}, count={__1}, level={__2:0.###}, " +
+            $"source={(isOriginalYellowCraneOpen ? "FinishRecruitHero" : "refresh reopen")}.");
+    }
+
+    private static void RecruitUIControllerHideRecruitUIPostfix(RecruitUIController __instance)
+    {
+        if (_yellowCraneCandidateRefreshReopening)
+        {
+            return;
+        }
+
+        ResetYellowCraneCandidateRefreshState("RecruitUIController.HideRecruitUI");
+    }
+
+    private static void UpdateYellowCraneCandidateRefreshAssist()
+    {
+        if (!_yellowCraneCandidateRefreshEnabled.Value ||
+            !_yellowCraneCandidateRefreshHooksReady ||
+            !_yellowCraneCandidateRefreshSessionActive)
+        {
+            SetOverlayObjectActive(_yellowCraneCandidateRefreshButtonRoot, false);
+            return;
+        }
+
+        var controller = _yellowCraneCandidateRefreshController;
+        var panel = controller?.recruitUIPanel;
+        if (controller == null || panel == null || !panel.activeInHierarchy)
+        {
+            ResetYellowCraneCandidateRefreshState("recruit panel closed or controller unavailable");
+            return;
+        }
+
+        var candidateCount = GetYellowCraneCandidateHeroes(controller, activeOnly: true).Count;
+        if (_yellowCraneCandidateRefreshBusy)
+        {
+            if (Time.frameCount <= _yellowCraneCandidateGenerationStartFrame ||
+                candidateCount != _yellowCraneCandidateRefreshHeroCount)
+            {
+                SetOverlayObjectActive(_yellowCraneCandidateRefreshButtonRoot, false);
+                return;
+            }
+
+            _yellowCraneCandidateRefreshBusy = false;
+            _yellowCraneCandidateRefreshReady = true;
+            LoggerInstance.LogInfo(
+                $"[YellowCraneTower] Candidate generation ready: {candidateCount}/{_yellowCraneCandidateRefreshHeroCount}.");
+        }
+
+        EnsureYellowCraneCandidateRefreshButton(controller);
+        if (_yellowCraneCandidateRefreshButtonRoot != null)
+        {
+            SetOverlayObjectActive(_yellowCraneCandidateRefreshButtonRoot, _yellowCraneCandidateRefreshReady);
+        }
+    }
+
+    private static void EnsureYellowCraneCandidateRefreshButton(RecruitUIController controller)
+    {
+        if (!_yellowCraneCandidateRefreshReady ||
+            _yellowCraneCandidateRefreshCreationFailed ||
+            !TryResolveYellowCraneCandidateRefreshButtonLayout(
+                controller,
+                out var expectedParent,
+                out var template,
+                out var buttonPosition) ||
+            expectedParent == null ||
+            template == null)
+        {
+            return;
+        }
+
+        if (_yellowCraneCandidateRefreshButtonRoot != null &&
+            _yellowCraneCandidateRefreshButton != null &&
+            _yellowCraneCandidateRefreshButtonLabel != null &&
+            _yellowCraneCandidateRefreshButtonHost == expectedParent &&
+            _yellowCraneCandidateRefreshButtonRoot.transform.parent == expectedParent)
+        {
+            _yellowCraneCandidateRefreshButton.interactable = !_yellowCraneCandidateRefreshBusy;
+            _yellowCraneCandidateRefreshButtonLabel.text = _yellowCraneCandidateRefreshBusy ? "刷新中…" : "刷新候选人";
+            return;
+        }
+
+        DestroyYellowCraneCandidateRefreshButton();
+        if (!TryCreateButtonTemplateButton(
+                YellowCraneCandidateRefreshButtonName,
+                expectedParent,
+                template,
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f),
+                buttonPosition,
+                new Vector2(170f, 42f),
+                "刷新候选人",
+                out _yellowCraneCandidateRefreshButtonRoot,
+                out _yellowCraneCandidateRefreshButton,
+                out _yellowCraneCandidateRefreshButtonLabel) ||
+            _yellowCraneCandidateRefreshButtonRoot == null ||
+            _yellowCraneCandidateRefreshButton == null ||
+            _yellowCraneCandidateRefreshButtonLabel == null)
+        {
+            _yellowCraneCandidateRefreshCreationFailed = true;
+            DestroyYellowCraneCandidateRefreshButton();
+            LoggerInstance.LogWarning("[YellowCraneTower] Could not create the candidate refresh button.");
+            return;
+        }
+
+        _yellowCraneCandidateRefreshButtonHost = expectedParent;
+        ConfigureMaterialControlButtonLabel(_yellowCraneCandidateRefreshButtonLabel, 18);
+        _yellowCraneCandidateRefreshButton.interactable = !_yellowCraneCandidateRefreshBusy;
+        LoggerInstance.LogInfo("[YellowCraneTower] Candidate refresh button created between the candidate list and confirmation row.");
+    }
+
+    private static bool TryResolveYellowCraneCandidateRefreshButtonLayout(
+        RecruitUIController controller,
+        out Transform? expectedParent,
+        out Button? template,
+        out Vector2 buttonAnchoredPosition)
+    {
+        expectedParent = null;
+        template = null;
+        buttonAnchoredPosition = default;
+
+        try
+        {
+            var sureButtonObject = controller.sureButton;
+            template = sureButtonObject?.GetComponent<Button>() ??
+                sureButtonObject?.GetComponentInChildren<Button>(includeInactive: true) ??
+                (controller.recruitUIPanel == null ? null : FindUiButtonTemplate(controller.recruitUIPanel));
+            var templateRect = template?.GetComponent<RectTransform>();
+            var parentRect = templateRect?.parent?.GetComponent<RectTransform>();
+            if (sureButtonObject == null || template == null || templateRect == null || parentRect == null)
+            {
+                return false;
+            }
+
+            expectedParent = parentRect.transform;
+            var fallbackPosition = templateRect.anchoredPosition + new Vector2(0f, 58f);
+            var toggleGroupRect = controller.recruitUIPanel?.transform.Find("ToggleGroup")?.GetComponent<RectTransform>();
+            var cancelRect = controller.cancelButton?.GetComponent<RectTransform>();
+            var canvas = parentRect.GetComponentInParent<Canvas>();
+            var camera = canvas == null || canvas.renderMode == RenderMode.ScreenSpaceOverlay
+                ? null
+                : canvas.worldCamera;
+            if (toggleGroupRect == null ||
+                !toggleGroupRect.gameObject.activeInHierarchy ||
+                !TryGetAuctionPreviewScreenRect(toggleGroupRect, camera, out var candidateBounds) ||
+                !TryGetAuctionPreviewScreenRect(templateRect, camera, out var sureBounds))
+            {
+                buttonAnchoredPosition = fallbackPosition;
+                return true;
+            }
+
+            var controlsTop = sureBounds.yMax;
+            if (cancelRect != null && TryGetAuctionPreviewScreenRect(cancelRect, camera, out var cancelBounds))
+            {
+                controlsTop = Math.Max(controlsTop, cancelBounds.yMax);
+            }
+
+            var targetY = candidateBounds.yMin > controlsTop + 8f
+                ? (candidateBounds.yMin + controlsTop) * 0.5f
+                : controlsTop + 30f;
+            var targetScreenPoint = new Vector2(candidateBounds.center.x, targetY);
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    parentRect,
+                    targetScreenPoint,
+                    camera,
+                    out var targetLocalPoint))
+            {
+                buttonAnchoredPosition = fallbackPosition;
+                return true;
+            }
+
+            var anchorReferenceLocalPoint = new Vector2(
+                (0.5f - parentRect.pivot.x) * parentRect.rect.width,
+                (0.5f - parentRect.pivot.y) * parentRect.rect.height);
+            buttonAnchoredPosition = targetLocalPoint - anchorReferenceLocalPoint;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[YellowCraneTower] Candidate refresh layout lookup failed: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+    }
+
+    private static bool TryRefreshYellowCraneCandidates()
+    {
+        var controller = _yellowCraneCandidateRefreshController;
+        if (!_yellowCraneCandidateRefreshHooksReady ||
+            !_yellowCraneCandidateRefreshEnabled.Value ||
+            !_yellowCraneCandidateRefreshSessionActive ||
+            !_yellowCraneCandidateRefreshReady ||
+            _yellowCraneCandidateRefreshBusy ||
+            controller == null ||
+            controller.recruitUIPanel == null ||
+            !controller.recruitUIPanel.activeInHierarchy)
+        {
+            return false;
+        }
+
+        var worldData = GameController.Instance?.worldData;
+        if (worldData == null)
+        {
+            PushPlayerLog("候选人刷新失败：当前存档尚未就绪");
+            return false;
+        }
+
+        var oldCandidates = GetYellowCraneCandidateHeroes(controller, activeOnly: false);
+        var recruitType = _yellowCraneCandidateRefreshType;
+        var heroCount = _yellowCraneCandidateRefreshHeroCount;
+        var recruitLevel = _yellowCraneCandidateRefreshLevel;
+        _yellowCraneCandidateRefreshBusy = true;
+        _yellowCraneCandidateRefreshReady = false;
+        SetOverlayObjectActive(_yellowCraneCandidateRefreshButtonRoot, false);
+        _yellowCraneCandidateRefreshReopening = true;
+
+        try
+        {
+            DeactivateYellowCraneCandidateIcons(controller);
+            foreach (var hero in oldCandidates)
+            {
+                if (hero != null && hero.isTempHero)
+                {
+                    worldData.RemoveTempHero(hero);
+                }
+            }
+
+            controller.HideRecruitUI();
+            controller.ShowRecruitUI(recruitType, heroCount, recruitLevel);
+            if (controller.recruitUIPanel == null || !controller.recruitUIPanel.activeInHierarchy)
+            {
+                throw new InvalidOperationException("the candidate panel did not reopen");
+            }
+
+            PushPlayerLog("黄鹤楼候选人已刷新");
+            LoggerInstance.LogInfo(
+                $"[YellowCraneTower] Refreshed candidates: removedTemp={oldCandidates.Count}, " +
+                $"type={recruitType}, count={heroCount}, level={recruitLevel:0.###}.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[YellowCraneTower] Candidate refresh failed: {DescribeCompatibilityException(ex)}");
+            try
+            {
+                controller.HideRecruitUI();
+                controller.ShowRecruitUI(recruitType, heroCount, recruitLevel);
+                PushPlayerLog("候选人刷新异常，已重新生成候选列表");
+                LoggerInstance.LogInfo("[YellowCraneTower] Candidate panel recovered with the original session arguments.");
+            }
+            catch (Exception recoveryEx)
+            {
+                PushPlayerLog("候选人刷新失败，请关闭窗口后重试");
+                LoggerInstance.LogWarning(
+                    $"[YellowCraneTower] Candidate panel recovery failed: {DescribeCompatibilityException(recoveryEx)}");
+                ResetYellowCraneCandidateRefreshState("refresh and recovery failed");
+            }
+            return false;
+        }
+        finally
+        {
+            _yellowCraneCandidateRefreshReopening = false;
+        }
+    }
+
+    private static List<HeroData> GetYellowCraneCandidateHeroes(
+        RecruitUIController controller,
+        bool activeOnly)
+    {
+        var heroes = new List<HeroData>();
+        try
+        {
+            var toggleGroup = controller.recruitUIPanel?.transform.Find("ToggleGroup");
+            if (toggleGroup == null)
+            {
+                return heroes;
+            }
+
+            foreach (var icon in toggleGroup.gameObject.GetComponentsInChildren<HeroIconController>(includeInactive: true))
+            {
+                if (icon == null || icon.gameObject == null)
+                {
+                    continue;
+                }
+
+                var hero = icon.heroData;
+                if (hero == null || (activeOnly && !icon.gameObject.activeInHierarchy))
+                {
+                    continue;
+                }
+
+                if (!heroes.Any(candidate => ReferenceEquals(candidate, hero)))
+                {
+                    heroes.Add(hero);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[YellowCraneTower] Candidate lookup failed: {DescribeCompatibilityException(ex)}");
+        }
+
+        return heroes;
+    }
+
+    private static void DeactivateYellowCraneCandidateIcons(RecruitUIController controller)
+    {
+        try
+        {
+            var toggleGroup = controller.recruitUIPanel?.transform.Find("ToggleGroup");
+            if (toggleGroup == null)
+            {
+                return;
+            }
+
+            foreach (var icon in toggleGroup.gameObject.GetComponentsInChildren<HeroIconController>(includeInactive: true))
+            {
+                if (icon?.gameObject != null)
+                {
+                    icon.gameObject.SetActive(false);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[YellowCraneTower] Could not hide discarded candidate icons before rebuild: {DescribeCompatibilityException(ex)}");
+        }
+    }
+
+    private static void ResetYellowCraneCandidateRefreshState(string source)
+    {
+        _yellowCraneFinishRecruitFrame = -1;
+        _yellowCraneCandidateRefreshController = null;
+        _yellowCraneCandidateRefreshSessionActive = false;
+        _yellowCraneCandidateRefreshReady = false;
+        _yellowCraneCandidateRefreshBusy = false;
+        _yellowCraneCandidateRefreshReopening = false;
+        _yellowCraneCandidateRefreshCreationFailed = false;
+        _yellowCraneCandidateRefreshHeroCount = 0;
+        _yellowCraneCandidateRefreshLevel = 0f;
+        _yellowCraneCandidateGenerationStartFrame = -1;
+        DestroyYellowCraneCandidateRefreshButton();
+
+        if (_traceMode.Value)
+        {
+            LoggerInstance.LogInfo($"[YellowCraneTower] Candidate refresh state reset from {source}.");
+        }
+    }
+
+    private static void DestroyYellowCraneCandidateRefreshButton()
+    {
+        if (_yellowCraneCandidateRefreshButtonRoot != null)
+        {
+            try
+            {
+                _yellowCraneCandidateRefreshButtonRoot.SetActive(false);
+                UnityEngine.Object.Destroy(_yellowCraneCandidateRefreshButtonRoot);
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.LogWarning(
+                    $"[YellowCraneTower] Could not destroy stale candidate refresh button: {ex.Message}");
+            }
+        }
+
+        _yellowCraneCandidateRefreshButtonRoot = null;
+        _yellowCraneCandidateRefreshButton = null;
+        _yellowCraneCandidateRefreshButtonLabel = null;
+        _yellowCraneCandidateRefreshButtonHost = null;
+    }
+
+    private static bool BountyFreshButtonClickedPrefix(BountyUIController __instance)
+    {
+        if (_bountyRefreshReentry ||
+            !_bountyRefreshHooksReady ||
+            __instance == null ||
+            !TryResolveBountyType(__instance, out var bountyType) ||
+            !IsBountyRefreshEnabled(bountyType))
+        {
+            return true;
+        }
+
+        var worldData = GameController.Instance?.worldData;
+        var targetBuilding = __instance.targetBuildingData;
+        if (worldData == null || targetBuilding == null)
+        {
+            return true;
+        }
+
+        var originalRefreshCount = worldData.monthFreshBountyTime;
+        AreaBuildingData? buildingSnapshot;
+        try
+        {
+            buildingSnapshot = targetBuilding.Clone() as AreaBuildingData;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[BountyRefresh] Snapshot failed for {bountyType}; leaving this click on the vanilla path: {DescribeCompatibilityException(ex)}");
+            return true;
+        }
+
+        _bountyRefreshReentry = true;
+        try
+        {
+            // Vanilla increments the counter before rebuilding the list, then disables
+            // FreshButton whenever the resulting value is above zero. Starting at -1
+            // lets the unmodified original path generate, clear, rebuild, and play its
+            // sound while keeping the button usable for this invocation.
+            worldData.monthFreshBountyTime = -1;
+            __instance.FreshBountyButtonClicked();
+            PushPlayerLog("委托列表已刷新");
+            LoggerInstance.LogInfo(
+                $"[BountyRefresh] Refreshed {bountyType} through the original button path; " +
+                $"monthFreshBountyTime preserved at {originalRefreshCount}.");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            if (buildingSnapshot != null)
+            {
+                targetBuilding.missionDatas = buildingSnapshot.missionDatas;
+                targetBuilding.missionNumCount = buildingSnapshot.missionNumCount;
+            }
+
+            try
+            {
+                __instance.FreshBounty();
+            }
+            catch (Exception rollbackEx)
+            {
+                LoggerInstance.LogWarning(
+                    $"[BountyRefresh] Rollback UI rebuild failed: {DescribeCompatibilityException(rollbackEx)}");
+            }
+
+            PushPlayerLog(buildingSnapshot != null
+                ? "委托刷新失败，原列表已恢复"
+                : "委托刷新失败，请关闭窗口后重试");
+            LoggerInstance.LogWarning(
+                $"[BountyRefresh] Refresh failed for {bountyType}: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+        finally
+        {
+            worldData.monthFreshBountyTime = originalRefreshCount;
+            _bountyRefreshReentry = false;
+        }
+    }
+
+    private static void BountyFreshPostfix(BountyUIController __instance)
+    {
+        if (!_bountyRefreshHooksReady ||
+            __instance == null ||
+            !TryResolveBountyType(__instance, out var bountyType) ||
+            !IsBountyRefreshEnabled(bountyType))
+        {
+            return;
+        }
+
+        try
+        {
+            var freshButton = __instance.bountyUIPanel?.transform.Find("FreshButton")?.GetComponent<Button>();
+            if (freshButton != null)
+            {
+                freshButton.interactable = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[BountyRefresh] Could not keep the original {bountyType} refresh button enabled: {DescribeCompatibilityException(ex)}");
+        }
+    }
+
+    private static bool TryResolveBountyType(BountyUIController controller, out BountyType bountyType)
+    {
+        bountyType = BountyType.NpcBounty;
+        var targetBuilding = controller?.targetBuildingData;
+        if (targetBuilding == null)
+        {
+            return false;
+        }
+
+        BountyType expectedType;
+        switch (targetBuilding.buildingID)
+        {
+            case 0:
+                expectedType = BountyType.ForceBounty;
+                break;
+            case 15:
+                expectedType = BountyType.GovernBounty;
+                break;
+            case 18:
+                expectedType = BountyType.CommonBounty;
+                break;
+            default:
+                return false;
+        }
+
+        var missions = targetBuilding.missionDatas;
+        if (missions != null && missions.Count > 0)
+        {
+            for (var i = 0; i < missions.Count; i++)
+            {
+                var mission = missions[i];
+                if (mission == null)
+                {
+                    continue;
+                }
+
+                if (mission.missionBountyType != expectedType)
+                {
+                    return false;
+                }
+            }
+        }
+
+        bountyType = expectedType;
+        return true;
+    }
+
+    private static bool IsBountyRefreshEnabled(BountyType bountyType)
+    {
+        return bountyType switch
+        {
+            BountyType.ForceBounty => _forceBountyRefreshEnabled.Value,
+            BountyType.CommonBounty => _commonBountyRefreshEnabled.Value,
+            BountyType.GovernBounty => _governBountyRefreshEnabled.Value,
+            _ => false
+        };
     }
 
     private static int ClampMaterialFilterLevel(int level)
@@ -11307,6 +11987,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         ResetBreakthroughRerollState("StartMenu.ShowStartMenu");
         ResetCraftRerollState("StartMenu.ShowStartMenu");
         ResetSpeEnhanceRerollState("StartMenu.ShowStartMenu");
+        ResetYellowCraneCandidateRefreshState("StartMenu.ShowStartMenu");
         ClearShopOwnershipRuntimeState("StartMenu.ShowStartMenu");
         ResetStudySkillTimeScalingState("StartMenu.ShowStartMenu");
     }
@@ -11317,6 +11998,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         ResetBreakthroughRerollState("GameTitle.ShowMainMenu");
         ResetCraftRerollState("GameTitle.ShowMainMenu");
         ResetSpeEnhanceRerollState("GameTitle.ShowMainMenu");
+        ResetYellowCraneCandidateRefreshState("GameTitle.ShowMainMenu");
         ClearShopOwnershipRuntimeState("GameTitle.ShowMainMenu");
         ResetStudySkillTimeScalingState("GameTitle.ShowMainMenu");
     }
@@ -11379,6 +12061,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         ResetBreakthroughRerollState("SaveLoadMenu.LoadRecentGame");
         ResetCraftRerollState("SaveLoadMenu.LoadRecentGame");
         ResetSpeEnhanceRerollState("SaveLoadMenu.LoadRecentGame");
+        ResetYellowCraneCandidateRefreshState("SaveLoadMenu.LoadRecentGame");
         int? saveSlotId = null;
         try
         {
@@ -11404,6 +12087,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         ResetBreakthroughRerollState("SaveLoadMenu.LoadGame");
         ResetCraftRerollState("SaveLoadMenu.LoadGame");
         ResetSpeEnhanceRerollState("SaveLoadMenu.LoadGame");
+        ResetYellowCraneCandidateRefreshState("SaveLoadMenu.LoadGame");
         if (saveID < 0)
         {
             LoggerInstance.LogWarning($"Shop ownership load sync skipped because load slot {saveID} is invalid.");
@@ -11788,6 +12472,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         ApplyPlayerCarryWeightOverride("Update");
         UpdateTreasureTradeUiState();
         UpdateGovernmentStorageRefreshAssist();
+        UpdateYellowCraneCandidateRefreshAssist();
         UpdateAuctionPreviewRefreshAssist();
         UpdateTreasureIdentifyBestValueAssist();
         UpdateBreakthroughRerollAssist();
@@ -11943,6 +12628,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         ResetBreakthroughRerollState("GameDataController.LoadAllGameData");
         ResetCraftRerollState("GameDataController.LoadAllGameData");
         ResetSpeEnhanceRerollState("GameDataController.LoadAllGameData");
+        ResetYellowCraneCandidateRefreshState("GameDataController.LoadAllGameData");
         LoadCustomTalentPackFromDisk();
         TryGetHeroTagDatabase("LoadAllGameData", out _);
 

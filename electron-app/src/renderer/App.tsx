@@ -1800,6 +1800,40 @@ export function App() {
                     />
                   </div>
                 </Card>
+
+                <Card title="城内事务刷新" eyebrow="City Affairs">
+                  <div className="stack">
+                    <p className="body-copy">
+                      这些开关只控制对应界面中的刷新功能，不添加键盘快捷键。关闭后恢复原版刷新规则。
+                    </p>
+                    <div className="field-grid">
+                      <CheckboxField
+                        label="黄鹤楼候选人刷新"
+                        value={settings.yellowCraneCandidateRefreshEnabled}
+                        onChange={(value) => updateSetting('yellowCraneCandidateRefreshEnabled', value)}
+                        hint="在黄鹤楼招募候选人界面显示刷新按钮，可重新生成本次候选人。"
+                      />
+                      <CheckboxField
+                        label="门派委托刷新"
+                        value={settings.forceBountyRefreshEnabled}
+                        onChange={(value) => updateSetting('forceBountyRefreshEnabled', value)}
+                        hint="允许在门派委托界面重复使用原版刷新按钮。"
+                      />
+                      <CheckboxField
+                        label="看板委托刷新"
+                        value={settings.commonBountyRefreshEnabled}
+                        onChange={(value) => updateSetting('commonBountyRefreshEnabled', value)}
+                        hint="允许在城市看板委托界面重复使用原版刷新按钮。"
+                      />
+                      <CheckboxField
+                        label="官府委托刷新"
+                        value={settings.governBountyRefreshEnabled}
+                        onChange={(value) => updateSetting('governBountyRefreshEnabled', value)}
+                        hint="允许在官府委托界面重复使用原版刷新按钮。"
+                      />
+                    </div>
+                  </div>
+                </Card>
               </div>
             ) : null}
 

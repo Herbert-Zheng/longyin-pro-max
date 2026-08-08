@@ -182,6 +182,25 @@ test('trade and craft settings expose dedicated government storage refresh contr
   assert.match(renderer, /快捷键只在官府仓库页面可见时生效/);
 });
 
+test('world exploration exposes button-only city affair refresh controls', () => {
+  const renderer = readSource('src/renderer/App.tsx');
+
+  assert.match(renderer, /<Card title="城内事务刷新" eyebrow="City Affairs">/);
+  for (const [label, setting] of [
+    ['黄鹤楼候选人刷新', 'yellowCraneCandidateRefreshEnabled'],
+    ['门派委托刷新', 'forceBountyRefreshEnabled'],
+    ['看板委托刷新', 'commonBountyRefreshEnabled'],
+    ['官府委托刷新', 'governBountyRefreshEnabled']
+  ]) {
+    assert.match(
+      renderer,
+      new RegExp(`label="${label}"[\\s\\S]{0,240}value=\\{settings\\.${setting}\\}[\\s\\S]{0,240}updateSetting\\('${setting}', value\\)`)
+    );
+  }
+  assert.match(renderer, /只控制对应界面中的刷新功能，不添加键盘快捷键/);
+  assert.doesNotMatch(renderer, /(?:yellowCraneCandidate|forceBounty|commonBounty|governBounty)RefreshHotkey/);
+});
+
 test('growth settings expose the skill book ownership indicator and its inventory scope', () => {
   const renderer = readSource('src/renderer/App.tsx');
 

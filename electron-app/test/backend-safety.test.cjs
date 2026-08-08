@@ -887,6 +887,82 @@ test('government storage refresh is section-scoped and round-trips without touch
   );
 });
 
+test('city affair refresh controls default enabled without adding shortcut settings', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const settings = await readVisibleSettings(gameRoot);
+
+  assert.equal(settings.yellowCraneCandidateRefreshEnabled, true);
+  assert.equal(settings.forceBountyRefreshEnabled, true);
+  assert.equal(settings.commonBountyRefreshEnabled, true);
+  assert.equal(settings.governBountyRefreshEnabled, true);
+  for (const key of Object.keys(settings)) {
+    if (/yellowCrane|Bounty/.test(key)) {
+      assert.doesNotMatch(key, /hotkey/i);
+    }
+  }
+});
+
+test('city affair refresh controls are section-scoped and preserve unknown keys on round-trip', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[WrongSection]',
+      'CandidateRefreshEnabled = decoy-candidate',
+      'ForceEnabled = decoy-force',
+      'CommonEnabled = decoy-common',
+      'GovernEnabled = decoy-govern',
+      'UnrelatedDecoySetting = keep-decoy',
+      '',
+      '[YellowCraneTower]',
+      'CandidateRefreshEnabled = false',
+      'UnrelatedYellowCraneSetting = keep-yellow-crane',
+      '',
+      '[BountyRefresh]',
+      'ForceEnabled = false',
+      'CommonEnabled = true',
+      'GovernEnabled = false',
+      'UnrelatedBountySetting = keep-bounty',
+      ''
+    ].join('\r\n')
+  );
+
+  const current = await readVisibleSettings(gameRoot);
+  assert.equal(current.yellowCraneCandidateRefreshEnabled, false);
+  assert.equal(current.forceBountyRefreshEnabled, false);
+  assert.equal(current.commonBountyRefreshEnabled, true);
+  assert.equal(current.governBountyRefreshEnabled, false);
+
+  const saved = await saveVisibleSettings(gameRoot, {
+    ...current,
+    yellowCraneCandidateRefreshEnabled: true,
+    forceBountyRefreshEnabled: true,
+    commonBountyRefreshEnabled: false,
+    governBountyRefreshEnabled: true
+  });
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.equal(saved.yellowCraneCandidateRefreshEnabled, true);
+  assert.equal(saved.forceBountyRefreshEnabled, true);
+  assert.equal(saved.commonBountyRefreshEnabled, false);
+  assert.equal(saved.governBountyRefreshEnabled, true);
+  assert.match(text, /\[YellowCraneTower\][\s\S]*?^CandidateRefreshEnabled = true$/m);
+  assert.match(text, /\[BountyRefresh\][\s\S]*?^ForceEnabled = true$/m);
+  assert.match(text, /\[BountyRefresh\][\s\S]*?^CommonEnabled = false$/m);
+  assert.match(text, /\[BountyRefresh\][\s\S]*?^GovernEnabled = true$/m);
+  assert.match(text, /^UnrelatedYellowCraneSetting = keep-yellow-crane$/m);
+  assert.match(text, /^UnrelatedBountySetting = keep-bounty$/m);
+  assert.match(
+    text,
+    /\[WrongSection\]\r?\nCandidateRefreshEnabled = decoy-candidate\r?\nForceEnabled = decoy-force\r?\nCommonEnabled = decoy-common\r?\nGovernEnabled = decoy-govern\r?\nUnrelatedDecoySetting = keep-decoy/
+  );
+});
+
 test('skill book ownership indicator defaults enabled and round-trips only in SkillDisplay', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));

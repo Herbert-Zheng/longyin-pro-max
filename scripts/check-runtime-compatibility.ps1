@@ -86,6 +86,7 @@ $requiredInteropMembers = [ordered]@{
         'ClearPlotItem',
         'FreshAuctionItem',
         'GenerateAuctionItem',
+        'FinishRecruitHero',
         'Update',
         'plotPanel',
         'plotItemGrid',
@@ -93,7 +94,15 @@ $requiredInteropMembers = [ordered]@{
         'nowEvent'
     )
     GameController = @('RefreshGovernStorage', 'worldData')
-    WorldData = @('governStorage')
+    WorldData = @('governStorage', 'RemoveTempHero', 'monthFreshBountyTime')
+    RecruitUIController = @('ShowRecruitUI', 'HideRecruitUI', 'recruitUIPanel', 'sureButton', 'cancelButton')
+    RecruitUIType = @('Normal', 'Hire')
+    HeroIconController = @('heroData')
+    HeroData = @('isTempHero')
+    BountyUIController = @('FreshBountyButtonClicked', 'FreshBounty', 'bountyUIPanel', 'targetBuildingData')
+    BountyType = @('ForceBounty', 'CommonBounty', 'GovernBounty', 'NpcBounty')
+    AreaBuildingData = @('Clone', 'buildingID', 'missionDatas', 'missionNumCount')
+    MissionData = @('missionBountyType')
     WorldEventController = @('GetWorldEventRandomDifficulty')
     WorldEventDataBase = @('name', 'eventData')
     EventData = @('eventName', 'eventItemList', 'difficulty', 'randomSeed')
@@ -168,6 +177,8 @@ if (-not $SkipRuntimeLog) {
             '[Compatibility] Summary:',
             '[Compatibility] Auction preview refresh: ENABLED',
             '[Compatibility] Government storage refresh: ENABLED',
+            '[Compatibility] Yellow Crane Tower candidate refresh: ENABLED',
+            '[Compatibility] Commission refresh: ENABLED',
             '[Compatibility] Treasure identify assist: ENABLED',
             '[Compatibility] Hero tag database: ENABLED'
         )

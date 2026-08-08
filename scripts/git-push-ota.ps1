@@ -624,6 +624,22 @@ if ($LASTEXITCODE -ne 0) {
   throw '拍卖预览刷新语义检查失败。'
 }
 
+$yellowCraneRefreshCheck = Join-Path $RepoRoot 'scripts\check-yellow-crane-refresh-semantics.ps1'
+Assert-FileExists -Path $yellowCraneRefreshCheck -Label '黄鹤楼候选人刷新语义检查脚本'
+Write-Step '执行黄鹤楼候选人刷新语义检查'
+& powershell -NoProfile -ExecutionPolicy Bypass -File $yellowCraneRefreshCheck
+if ($LASTEXITCODE -ne 0) {
+  throw '黄鹤楼候选人刷新语义检查失败。'
+}
+
+$bountyRefreshCheck = Join-Path $RepoRoot 'scripts\check-bounty-refresh-semantics.ps1'
+Assert-FileExists -Path $bountyRefreshCheck -Label '委托刷新语义检查脚本'
+Write-Step '执行委托刷新语义检查'
+& powershell -NoProfile -ExecutionPolicy Bypass -File $bountyRefreshCheck
+if ($LASTEXITCODE -ne 0) {
+  throw '委托刷新语义检查失败。'
+}
+
 if (-not (Test-Path $zipPath)) {
   throw "未找到 OTA ZIP：$zipPath"
 }

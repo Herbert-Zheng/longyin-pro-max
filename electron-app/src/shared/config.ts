@@ -84,6 +84,10 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   auctionPreviewRefreshHotkey: 'R',
   governmentStorageRefreshEnabled: true,
   governmentStorageRefreshHotkey: 'R',
+  yellowCraneCandidateRefreshEnabled: true,
+  forceBountyRefreshEnabled: true,
+  commonBountyRefreshEnabled: true,
+  governBountyRefreshEnabled: true,
   treasureIdentifyBestValueAssistEnabled: true,
   breakthroughRerollEnabled: true,
   craftRerollEnabled: true,
@@ -711,6 +715,14 @@ PreviewRefreshHotkey = ${settings.auctionPreviewRefreshHotkey}
 RefreshEnabled = ${boolText(settings.governmentStorageRefreshEnabled)}
 RefreshHotkey = ${settings.governmentStorageRefreshHotkey}
 
+[YellowCraneTower]
+CandidateRefreshEnabled = ${boolText(settings.yellowCraneCandidateRefreshEnabled)}
+
+[BountyRefresh]
+ForceEnabled = ${boolText(settings.forceBountyRefreshEnabled)}
+CommonEnabled = ${boolText(settings.commonBountyRefreshEnabled)}
+GovernEnabled = ${boolText(settings.governBountyRefreshEnabled)}
+
 [TreasureIdentify]
 BestValueAssistEnabled = ${boolText(settings.treasureIdentifyBestValueAssistEnabled)}
 
@@ -957,6 +969,10 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
       input.governmentStorageRefreshHotkey,
       DEFAULT_VISIBLE_SETTINGS.governmentStorageRefreshHotkey
     ),
+    yellowCraneCandidateRefreshEnabled: input.yellowCraneCandidateRefreshEnabled,
+    forceBountyRefreshEnabled: input.forceBountyRefreshEnabled,
+    commonBountyRefreshEnabled: input.commonBountyRefreshEnabled,
+    governBountyRefreshEnabled: input.governBountyRefreshEnabled,
     treasureIdentifyBestValueAssistEnabled: input.treasureIdentifyBestValueAssistEnabled,
     breakthroughRerollEnabled: input.breakthroughRerollEnabled,
     craftRerollEnabled: input.craftRerollEnabled,
@@ -1015,6 +1031,8 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
   const skillDisplaySection = getIniSectionBody(text, 'SkillDisplay');
   const auctionSection = getIniSectionBody(text, 'Auction');
   const governmentStorageSection = getIniSectionBody(text, 'GovernmentStorage');
+  const yellowCraneTowerSection = getIniSectionBody(text, 'YellowCraneTower');
+  const bountyRefreshSection = getIniSectionBody(text, 'BountyRefresh');
   const treasureIdentifySection = getIniSectionBody(text, 'TreasureIdentify');
   const breakthroughSection = getIniSectionBody(text, 'Breakthrough');
   const craftSection = getIniSectionBody(text, 'Craft');
@@ -1101,6 +1119,26 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       governmentStorageSection,
       'RefreshHotkey',
       DEFAULT_VISIBLE_SETTINGS.governmentStorageRefreshHotkey
+    ),
+    yellowCraneCandidateRefreshEnabled: readBool(
+      yellowCraneTowerSection,
+      'CandidateRefreshEnabled',
+      DEFAULT_VISIBLE_SETTINGS.yellowCraneCandidateRefreshEnabled
+    ),
+    forceBountyRefreshEnabled: readBool(
+      bountyRefreshSection,
+      'ForceEnabled',
+      DEFAULT_VISIBLE_SETTINGS.forceBountyRefreshEnabled
+    ),
+    commonBountyRefreshEnabled: readBool(
+      bountyRefreshSection,
+      'CommonEnabled',
+      DEFAULT_VISIBLE_SETTINGS.commonBountyRefreshEnabled
+    ),
+    governBountyRefreshEnabled: readBool(
+      bountyRefreshSection,
+      'GovernEnabled',
+      DEFAULT_VISIBLE_SETTINGS.governBountyRefreshEnabled
     ),
     treasureIdentifyBestValueAssistEnabled: readBool(
       treasureIdentifySection,
@@ -1607,6 +1645,30 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'GovernmentStorage',
     'RefreshHotkey',
     normalized.governmentStorageRefreshHotkey
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'YellowCraneTower',
+    'CandidateRefreshEnabled',
+    boolText(normalized.yellowCraneCandidateRefreshEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'BountyRefresh',
+    'ForceEnabled',
+    boolText(normalized.forceBountyRefreshEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'BountyRefresh',
+    'CommonEnabled',
+    boolText(normalized.commonBountyRefreshEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'BountyRefresh',
+    'GovernEnabled',
+    boolText(normalized.governBountyRefreshEnabled)
   );
   nextMain = removeIniSectionValue(nextMain, 'Auction', 'PreviewRefreshRequireAlt');
   nextMain = removeIniSectionCommentBlock(

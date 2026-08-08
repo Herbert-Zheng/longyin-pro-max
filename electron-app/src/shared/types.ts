@@ -281,6 +281,10 @@ export interface VisibleSettings {
   auctionPreviewRefreshHotkey: string;
   governmentStorageRefreshEnabled: boolean;
   governmentStorageRefreshHotkey: string;
+  yellowCraneCandidateRefreshEnabled: boolean;
+  forceBountyRefreshEnabled: boolean;
+  commonBountyRefreshEnabled: boolean;
+  governBountyRefreshEnabled: boolean;
   treasureIdentifyBestValueAssistEnabled: boolean;
   breakthroughRerollEnabled: boolean;
   craftRerollEnabled: boolean;

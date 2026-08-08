@@ -14,7 +14,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Pro Max", "1.35.0")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Pro Max", "1.36.0")]
 public sealed class LongYinProMaxPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -9587,7 +9587,8 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         try
         {
             var skillDetailVisible = __instance.skillDetail != null && __instance.skillDetail.activeInHierarchy;
-            if (!skillDetailVisible)
+            var bookDetailVisible = __instance.bookDetail != null && __instance.bookDetail.activeInHierarchy;
+            if (!skillDetailVisible && !bookDetailVisible)
             {
                 ResetSkillBookOwnershipAppliedLabel();
                 return;
@@ -9622,9 +9623,22 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
     private static int ResolveVisibleSkillDetailId(QuickDetail quickDetail)
     {
-        var hoveredIcon = TryFindSkillIconController(MouseController.hoveredObject);
-        var shownIcon = TryFindSkillIconController(quickDetail.nowShowObject);
-        var skillId = hoveredIcon?.skillLvData?.skillID ?? -1;
+        var hoveredObject = MouseController.hoveredObject;
+        var shownObject = quickDetail.nowShowObject;
+        var skillId = TryResolveSkillBookItemId(hoveredObject);
+        if (skillId <= 0)
+        {
+            skillId = TryResolveSkillBookItemId(shownObject);
+        }
+
+        if (skillId > 0)
+        {
+            return skillId;
+        }
+
+        var hoveredIcon = TryFindSkillIconController(hoveredObject);
+        var shownIcon = TryFindSkillIconController(shownObject);
+        skillId = hoveredIcon?.skillLvData?.skillID ?? -1;
         if (skillId <= 0)
         {
             skillId = shownIcon?.skillLvData?.skillID ?? -1;
@@ -9643,6 +9657,66 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
         skillId = TryResolveSkillIconListId(quickDetail, shownIcon);
         return skillId > 0 ? skillId : TryResolveSkillIdFromVisibleLabels(quickDetail);
+    }
+
+    private static int TryResolveSkillBookItemId(GameObject? target)
+    {
+        var itemIcon = TryFindItemIconController(target);
+        var itemData = itemIcon?.itemData;
+        if (itemData == null || itemData.type != ItemType.Book)
+        {
+            return -1;
+        }
+
+        return itemData.bookData?.skillID ?? -1;
+    }
+
+    private static ItemIconController? TryFindItemIconController(GameObject? target)
+    {
+        if (target == null)
+        {
+            return null;
+        }
+
+        ItemIconController? fallback = null;
+        for (Transform? current = target.transform; current != null; current = current.parent)
+        {
+            var components = current.gameObject.GetComponents<ItemIconController>();
+            for (var index = 0; index < components.Length; index++)
+            {
+                var component = components[index];
+                if (component == null)
+                {
+                    continue;
+                }
+
+                fallback ??= component;
+                if (component.itemData?.type == ItemType.Book &&
+                    (component.itemData.bookData?.skillID ?? -1) > 0)
+                {
+                    return component;
+                }
+            }
+        }
+
+        var descendants = target.GetComponentsInChildren<ItemIconController>(includeInactive: true);
+        for (var index = 0; index < descendants.Length; index++)
+        {
+            var component = descendants[index];
+            if (component == null)
+            {
+                continue;
+            }
+
+            fallback ??= component;
+            if (component.itemData?.type == ItemType.Book &&
+                (component.itemData.bookData?.skillID ?? -1) > 0)
+            {
+                return component;
+            }
+        }
+
+        return fallback;
     }
 
     private static SkillIconController? TryFindSkillIconController(GameObject? target)
@@ -9964,7 +10038,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         {
             updatedText = descriptionWithoutOwnership.Insert(
                 practiceStatusEnd,
-                $"　{Marker}{ownershipText}");
+                $"\n{Marker}{ownershipText}");
             return true;
         }
 
@@ -10014,19 +10088,28 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
     private static int FindSkillPracticeStatusInsertionIndex(string currentText)
     {
-        var learnedIndex = currentText.IndexOf("已修习", StringComparison.Ordinal);
-        var unlearnedIndex = currentText.IndexOf("未修习", StringComparison.Ordinal);
-        var statusIndex = learnedIndex < 0
-            ? unlearnedIndex
-            : unlearnedIndex < 0
-                ? learnedIndex
-                : Math.Min(learnedIndex, unlearnedIndex);
-        if (statusIndex < 0)
+        var statusTexts = new[] { "已修习", "未修习", "已习得", "未习得" };
+        var statusIndex = -1;
+        string? statusText = null;
+        for (var index = 0; index < statusTexts.Length; index++)
+        {
+            var candidateText = statusTexts[index];
+            var candidateIndex = currentText.IndexOf(candidateText, StringComparison.Ordinal);
+            if (candidateIndex < 0 || (statusIndex >= 0 && candidateIndex >= statusIndex))
+            {
+                continue;
+            }
+
+            statusIndex = candidateIndex;
+            statusText = candidateText;
+        }
+
+        if (statusIndex < 0 || statusText == null)
         {
             return -1;
         }
 
-        var insertionIndex = statusIndex + "已修习".Length;
+        var insertionIndex = statusIndex + statusText.Length;
         while (insertionIndex < currentText.Length)
         {
             if (currentText.IndexOf("[-]", insertionIndex, StringComparison.Ordinal) == insertionIndex)

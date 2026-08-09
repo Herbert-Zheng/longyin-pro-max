@@ -182,7 +182,7 @@ test('trade and craft settings expose dedicated government storage refresh contr
   assert.match(renderer, /快捷键只在官府仓库页面可见时生效/);
 });
 
-test('world exploration exposes button-only city affair refresh controls', () => {
+test('world exploration exposes city affair refresh controls and shortcuts', () => {
   const renderer = readSource('src/renderer/App.tsx');
 
   assert.match(renderer, /<Card title="城内事务刷新" eyebrow="City Affairs">/);
@@ -197,8 +197,17 @@ test('world exploration exposes button-only city affair refresh controls', () =>
       new RegExp(`label="${label}"[\\s\\S]{0,240}value=\\{settings\\.${setting}\\}[\\s\\S]{0,240}updateSetting\\('${setting}', value\\)`)
     );
   }
-  assert.match(renderer, /只控制对应界面中的刷新功能，不添加键盘快捷键/);
-  assert.doesNotMatch(renderer, /(?:yellowCraneCandidate|forceBounty|commonBounty|governBounty)RefreshHotkey/);
+  assert.match(renderer, /快捷键只在对应界面打开时生效/);
+  assert.match(
+    renderer,
+    /label="黄鹤楼刷新快捷键"[\s\S]{0,240}value=\{settings\.yellowCraneCandidateRefreshHotkey\}[\s\S]{0,240}updateSetting\('yellowCraneCandidateRefreshHotkey', value\)/
+  );
+  assert.match(
+    renderer,
+    /label="委托刷新快捷键"[\s\S]{0,240}value=\{settings\.bountyRefreshHotkey\}[\s\S]{0,240}updateSetting\('bountyRefreshHotkey', value\)/
+  );
+  assert.match(renderer, /默认 R；只在黄鹤楼候选人界面打开时生效/);
+  assert.match(renderer, /默认 R；只在已启用的门派、看板或官府委托界面打开时生效/);
 });
 
 test('growth settings expose the skill book ownership indicator and its inventory scope', () => {

@@ -14,7 +14,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Pro Max", "1.37.0")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Pro Max", "1.38.0")]
 public sealed class LongYinProMaxPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -135,9 +135,11 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static ConfigEntry<bool> _governmentStorageRefreshEnabled = null!;
     private static ConfigEntry<KeyCode> _governmentStorageRefreshHotkey = null!;
     private static ConfigEntry<bool> _yellowCraneCandidateRefreshEnabled = null!;
+    private static ConfigEntry<KeyCode> _yellowCraneCandidateRefreshHotkey = null!;
     private static ConfigEntry<bool> _forceBountyRefreshEnabled = null!;
     private static ConfigEntry<bool> _commonBountyRefreshEnabled = null!;
     private static ConfigEntry<bool> _governBountyRefreshEnabled = null!;
+    private static ConfigEntry<KeyCode> _bountyRefreshHotkey = null!;
     private static ConfigEntry<bool> _skillBookOwnershipIndicatorEnabled = null!;
     private static ConfigEntry<bool> _treasureIdentifyBestValueAssistEnabled = null!;
     private static ConfigEntry<bool> _breakthroughRerollEnabled = null!;
@@ -727,9 +729,11 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         _governmentStorageRefreshEnabled = Config.Bind("GovernmentStorage", "RefreshEnabled", true, "Adds a refresh button to the government storage page.");
         _governmentStorageRefreshHotkey = Config.Bind("GovernmentStorage", "RefreshHotkey", KeyCode.R, "Single-key shortcut that refreshes items only while the government storage page is visible.");
         _yellowCraneCandidateRefreshEnabled = Config.Bind("YellowCraneTower", "CandidateRefreshEnabled", true, "Adds an unlimited refresh button to Yellow Crane Tower candidate selection without repeating the time-consuming search event.");
+        _yellowCraneCandidateRefreshHotkey = Config.Bind("YellowCraneTower", "CandidateRefreshHotkey", KeyCode.R, "Single-key shortcut that refreshes candidates only while the Yellow Crane Tower candidate panel is ready.");
         _forceBountyRefreshEnabled = Config.Bind("BountyRefresh", "ForceEnabled", true, "Keeps the original refresh button available for sect commission lists and preserves the original refresh counter.");
         _commonBountyRefreshEnabled = Config.Bind("BountyRefresh", "CommonEnabled", true, "Keeps the original refresh button available for notice-board commission lists and preserves the original refresh counter.");
         _governBountyRefreshEnabled = Config.Bind("BountyRefresh", "GovernEnabled", true, "Keeps the original refresh button available for government commission lists and preserves the original refresh counter.");
+        _bountyRefreshHotkey = Config.Bind("BountyRefresh", "RefreshHotkey", KeyCode.R, "Single-key shortcut that refreshes the active enabled sect, notice-board, or government commission list.");
         _skillBookOwnershipIndicatorEnabled = Config.Bind("SkillDisplay", "BookOwnershipIndicatorEnabled", true, "Shows whether the hovered martial skill has a matching book in the player inventory, personal storage, or current sect book storage.");
         _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the treasure with the highest player-appraised value shown in parentheses. Confirmation remains manual.");
         _breakthroughRerollEnabled = Config.Bind("Breakthrough", "RerollEnabled", true, "Adds a button that rebuilds the current breakthrough choices without confirming a choice or consuming money, items, or time.");
@@ -1029,10 +1033,10 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         LoggerInstance.LogInfo(
             $"[Compatibility] Yellow Crane Tower candidate refresh: {(!_yellowCraneCandidateRefreshEnabled.Value ? "DISABLED BY CONFIG" : _yellowCraneCandidateRefreshHooksReady ? "ENABLED" : "DEGRADED")} " +
             "(FinishRecruitHero, RecruitUI show/hide, overlay click, update, and load hooks required).");
-        _bountyRefreshHooksReady = bountyFreshButtonPatched && bountyFreshPatched;
+        _bountyRefreshHooksReady = bountyFreshButtonPatched && bountyFreshPatched && gameControllerUpdatePatched;
         LoggerInstance.LogInfo(
             $"[Compatibility] Commission refresh: {(!(_forceBountyRefreshEnabled.Value || _commonBountyRefreshEnabled.Value || _governBountyRefreshEnabled.Value) ? "DISABLED BY CONFIG" : _bountyRefreshHooksReady ? "ENABLED" : "DEGRADED")} " +
-            "(original FreshBountyButtonClicked and FreshBounty hooks required).");
+            "(original FreshBountyButtonClicked, FreshBounty, and update hooks required).");
         _skillBookOwnershipHooksReady = skillBookOwnershipUpdatePatched;
         LoggerInstance.LogInfo(
             $"[Compatibility] Skill book ownership indicator: {(!_skillBookOwnershipIndicatorEnabled.Value ? "DISABLED BY CONFIG" : _skillBookOwnershipHooksReady ? "ENABLED" : "DEGRADED")} " +
@@ -1181,6 +1185,12 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         Log.LogInfo(
             $"Government storage refresh starts {(_governmentStorageRefreshEnabled.Value ? "ON" : "OFF")} " +
             $"with shortcut {_governmentStorageRefreshHotkey.Value} only while that page is visible.");
+        Log.LogInfo(
+            $"Yellow Crane Tower candidate refresh starts {(_yellowCraneCandidateRefreshEnabled.Value ? "ON" : "OFF")} " +
+            $"with shortcut {_yellowCraneCandidateRefreshHotkey.Value} only while the candidate panel is ready.");
+        Log.LogInfo(
+            $"Commission refresh starts {((_forceBountyRefreshEnabled.Value || _commonBountyRefreshEnabled.Value || _governBountyRefreshEnabled.Value) ? "ON" : "OFF")} " +
+            $"with shortcut {_bountyRefreshHotkey.Value} only while an enabled commission list is visible.");
         Log.LogInfo($"Skill book ownership indicator starts {(_skillBookOwnershipIndicatorEnabled.Value && _skillBookOwnershipHooksReady ? "ON" : "OFF")} for inventory, personal storage, and sect book storage.");
         Log.LogInfo($"Treasure identify best-value button starts {(_treasureIdentifyBestValueAssistEnabled.Value ? "ON" : "OFF")}; confirmation remains manual.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
@@ -6828,6 +6838,14 @@ public sealed class LongYinProMaxPlugin : BasePlugin
                 $"[YellowCraneTower] Candidate generation ready: {candidateCount}/{_yellowCraneCandidateRefreshHeroCount}.");
         }
 
+        if (_yellowCraneCandidateRefreshReady &&
+            !_yellowCraneCandidateRefreshBusy &&
+            Input.GetKeyDown(_yellowCraneCandidateRefreshHotkey.Value))
+        {
+            TryRefreshYellowCraneCandidates();
+            return;
+        }
+
         EnsureYellowCraneCandidateRefreshButton(controller);
         if (_yellowCraneCandidateRefreshButtonRoot != null)
         {
@@ -7152,6 +7170,39 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         _yellowCraneCandidateRefreshButton = null;
         _yellowCraneCandidateRefreshButtonLabel = null;
         _yellowCraneCandidateRefreshButtonHost = null;
+    }
+
+    private static void UpdateBountyRefreshAssist()
+    {
+        if (!_bountyRefreshHooksReady)
+        {
+            return;
+        }
+
+        var controller = BountyUIController.Instance;
+        var panel = controller?.bountyUIPanel;
+        if (controller == null ||
+            panel == null ||
+            !panel.activeInHierarchy ||
+            !TryResolveBountyType(controller, out var bountyType) ||
+            !IsBountyRefreshEnabled(bountyType))
+        {
+            return;
+        }
+
+        var freshButton = panel.transform.Find("FreshButton")?.GetComponent<Button>();
+        if (freshButton == null ||
+            freshButton.gameObject == null ||
+            !freshButton.gameObject.activeInHierarchy ||
+            !freshButton.interactable)
+        {
+            return;
+        }
+
+        if (Input.GetKeyDown(_bountyRefreshHotkey.Value))
+        {
+            controller.FreshBountyButtonClicked();
+        }
     }
 
     private static bool BountyFreshButtonClickedPrefix(BountyUIController __instance)
@@ -12473,6 +12524,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         UpdateTreasureTradeUiState();
         UpdateGovernmentStorageRefreshAssist();
         UpdateYellowCraneCandidateRefreshAssist();
+        UpdateBountyRefreshAssist();
         UpdateAuctionPreviewRefreshAssist();
         UpdateTreasureIdentifyBestValueAssist();
         UpdateBreakthroughRerollAssist();

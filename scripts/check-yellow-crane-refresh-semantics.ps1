@@ -44,7 +44,8 @@ $gameUpdateMethod = Get-CSharpMethodText 'GameControllerUpdatePostfix'
 
 Require-Pattern $source 'ConfigEntry<bool>\s+_yellowCraneCandidateRefreshEnabled\b' 'Yellow Crane candidate refresh must expose a persisted boolean switch.'
 Require-Pattern $source 'Config\.Bind\s*\(\s*"YellowCraneTower"\s*,\s*"CandidateRefreshEnabled"\s*,\s*true\b' 'Yellow Crane candidate refresh must be enabled by default.'
-Reject-Pattern $source '(?i)yellowCrane[^;\r\n]*(?:ConfigEntry<KeyCode>|Hotkey)|(?:Input\.GetKeyDown|Input\.GetKey)\([^\)]*yellowCrane' 'Yellow Crane candidate refresh must not expose or poll a hotkey.'
+Require-Pattern $source 'ConfigEntry<KeyCode>\s+_yellowCraneCandidateRefreshHotkey\b' 'Yellow Crane candidate refresh must expose a persisted hotkey.'
+Require-Pattern $source 'Config\.Bind\s*\(\s*"YellowCraneTower"\s*,\s*"CandidateRefreshHotkey"\s*,\s*KeyCode\.R\b' 'Yellow Crane candidate refresh hotkey must default to R.'
 
 Require-Pattern $source 'PatchMethod\(\s*typeof\(PlotController\),\s*(?:"FinishRecruitHero"|nameof\(PlotController\.FinishRecruitHero\))[\s\S]*?nameof\(FinishRecruitHeroPrefix\)' 'The feature must arm only from the original FinishRecruitHero flow.'
 Require-Pattern $source 'PatchMethod\(\s*typeof\(RecruitUIController\),\s*(?:"ShowRecruitUI"|nameof\(RecruitUIController\.ShowRecruitUI\))[\s\S]*?nameof\(RecruitUIControllerShowRecruitUIPostfix\)' 'Recruit UI show lifecycle must be observed.'
@@ -62,6 +63,9 @@ Require-Pattern $gameUpdateMethod 'UpdateYellowCraneCandidateRefreshAssist\(\);'
 Require-Pattern $updateMethod '_yellowCraneCandidateRefreshBusy[\s\S]*?Time\.frameCount\s*<=\s*_yellowCraneCandidateGenerationStartFrame\s*\|\|\s*candidateCount\s*!=\s*_yellowCraneCandidateRefreshHeroCount[\s\S]*?return[\s\S]*?_yellowCraneCandidateRefreshBusy\s*=\s*false' 'The button must remain busy for at least one frame and until the active candidate count exactly matches the expected count.'
 Reject-Pattern $updateMethod 'candidateCount\s*(?:>=|>|<)\s*_yellowCraneCandidateRefreshHeroCount' 'Candidate readiness must not accept excess stale icons or use a one-sided candidate-count comparison.'
 Require-Pattern $updateMethod '_yellowCraneCandidateRefreshEnabled\.Value[\s\S]*?activeInHierarchy' 'The candidate refresh button must be gated by both the setting and the visible recruit UI.'
+Require-Pattern $updateMethod '_yellowCraneCandidateRefreshEnabled\.Value[\s\S]*?_yellowCraneCandidateRefreshSessionActive[\s\S]*?panel\s*==\s*null\s*\|\|\s*!panel\.activeInHierarchy[\s\S]*?Input\.GetKeyDown\(\s*_yellowCraneCandidateRefreshHotkey\.Value\s*\)[\s\S]*?TryRefreshYellowCraneCandidates\(\)' 'The R hotkey must dispatch only after the Yellow Crane feature, session, and visible recruit panel gates pass.'
+Require-Pattern $updateMethod '_yellowCraneCandidateRefreshReady[\s\S]*?!_yellowCraneCandidateRefreshBusy[\s\S]*?Input\.GetKeyDown\(\s*_yellowCraneCandidateRefreshHotkey\.Value\s*\)' 'The Yellow Crane hotkey must not run while candidate generation is incomplete or already refreshing.'
+Reject-Pattern $gameUpdateMethod 'Input\.GetKeyDown\(\s*_yellowCraneCandidateRefreshHotkey\.Value\s*\)' 'GameController.Update must not poll the Yellow Crane hotkey globally outside the feature-specific visible-panel gate.'
 
 Require-Pattern $refreshMethod '_yellowCraneCandidateRefreshBusy[\s\S]*?_yellowCraneCandidateRefreshBusy\s*=\s*true' 'The refresh action must reject reentry and mark the operation busy.'
 Require-Pattern $refreshMethod 'DeactivateYellowCraneCandidateIcons\(\s*controller\s*\)[\s\S]*?worldData\.RemoveTempHero\(\s*hero\s*\)[\s\S]*?controller\.HideRecruitUI\(\)' 'Old candidate icons must be deactivated before delayed Unity destruction and before the replacement UI is opened.'
@@ -72,7 +76,6 @@ Reject-Pattern $refreshMethod 'GameController\.instance\.RemoveHero\(|\.RemoveHe
 Require-Pattern $refreshMethod 'var recruitType\s*=\s*_yellowCraneCandidateRefreshType[\s\S]*?var heroCount\s*=\s*_yellowCraneCandidateRefreshHeroCount[\s\S]*?var recruitLevel\s*=\s*_yellowCraneCandidateRefreshLevel[\s\S]*?_yellowCraneCandidateRefreshReopening\s*=\s*true[\s\S]*?HideRecruitUI\(\)[\s\S]*?ShowRecruitUI\(\s*recruitType\s*,\s*heroCount\s*,\s*recruitLevel\s*\)' 'Refresh must rebuild the UI with the exact cached type, candidate count, and level.'
 Require-Pattern $refreshMethod 'finally[\s\S]*?_yellowCraneCandidateRefreshReopening\s*=\s*false' 'The refresh reopening guard must always be cleared.'
 Require-Pattern $resetMethod '_yellowCraneCandidateGenerationStartFrame\s*=\s*-1' 'Closing or failing the recruit session must clear the generation-frame guard.'
-Reject-Pattern $source 'ConfigEntry<KeyCode>\s+_yellowCrane' 'No Yellow Crane hotkey configuration may be added.'
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }

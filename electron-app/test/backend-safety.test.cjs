@@ -887,21 +887,18 @@ test('government storage refresh is section-scoped and round-trips without touch
   );
 });
 
-test('city affair refresh controls default enabled without adding shortcut settings', async (t) => {
+test('city affair refresh controls default enabled with R shortcuts', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
   const settings = await readVisibleSettings(gameRoot);
 
   assert.equal(settings.yellowCraneCandidateRefreshEnabled, true);
+  assert.equal(settings.yellowCraneCandidateRefreshHotkey, 'R');
   assert.equal(settings.forceBountyRefreshEnabled, true);
   assert.equal(settings.commonBountyRefreshEnabled, true);
   assert.equal(settings.governBountyRefreshEnabled, true);
-  for (const key of Object.keys(settings)) {
-    if (/yellowCrane|Bounty/.test(key)) {
-      assert.doesNotMatch(key, /hotkey/i);
-    }
-  }
+  assert.equal(settings.bountyRefreshHotkey, 'R');
 });
 
 test('city affair refresh controls are section-scoped and preserve unknown keys on round-trip', async (t) => {
@@ -917,16 +914,20 @@ test('city affair refresh controls are section-scoped and preserve unknown keys 
       'ForceEnabled = decoy-force',
       'CommonEnabled = decoy-common',
       'GovernEnabled = decoy-govern',
+      'CandidateRefreshHotkey = DECOY_CANDIDATE_KEY',
+      'RefreshHotkey = DECOY_BOUNTY_KEY',
       'UnrelatedDecoySetting = keep-decoy',
       '',
       '[YellowCraneTower]',
       'CandidateRefreshEnabled = false',
+      'CandidateRefreshHotkey = T',
       'UnrelatedYellowCraneSetting = keep-yellow-crane',
       '',
       '[BountyRefresh]',
       'ForceEnabled = false',
       'CommonEnabled = true',
       'GovernEnabled = false',
+      'RefreshHotkey = F8',
       'UnrelatedBountySetting = keep-bounty',
       ''
     ].join('\r\n')
@@ -934,32 +935,40 @@ test('city affair refresh controls are section-scoped and preserve unknown keys 
 
   const current = await readVisibleSettings(gameRoot);
   assert.equal(current.yellowCraneCandidateRefreshEnabled, false);
+  assert.equal(current.yellowCraneCandidateRefreshHotkey, 'T');
   assert.equal(current.forceBountyRefreshEnabled, false);
   assert.equal(current.commonBountyRefreshEnabled, true);
   assert.equal(current.governBountyRefreshEnabled, false);
+  assert.equal(current.bountyRefreshHotkey, 'F8');
 
   const saved = await saveVisibleSettings(gameRoot, {
     ...current,
     yellowCraneCandidateRefreshEnabled: true,
+    yellowCraneCandidateRefreshHotkey: 'Y',
     forceBountyRefreshEnabled: true,
     commonBountyRefreshEnabled: false,
-    governBountyRefreshEnabled: true
+    governBountyRefreshEnabled: true,
+    bountyRefreshHotkey: 'F9'
   });
   const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
 
   assert.equal(saved.yellowCraneCandidateRefreshEnabled, true);
+  assert.equal(saved.yellowCraneCandidateRefreshHotkey, 'Y');
   assert.equal(saved.forceBountyRefreshEnabled, true);
   assert.equal(saved.commonBountyRefreshEnabled, false);
   assert.equal(saved.governBountyRefreshEnabled, true);
+  assert.equal(saved.bountyRefreshHotkey, 'F9');
   assert.match(text, /\[YellowCraneTower\][\s\S]*?^CandidateRefreshEnabled = true$/m);
+  assert.match(text, /\[YellowCraneTower\][\s\S]*?^CandidateRefreshHotkey = Y$/m);
   assert.match(text, /\[BountyRefresh\][\s\S]*?^ForceEnabled = true$/m);
   assert.match(text, /\[BountyRefresh\][\s\S]*?^CommonEnabled = false$/m);
   assert.match(text, /\[BountyRefresh\][\s\S]*?^GovernEnabled = true$/m);
+  assert.match(text, /\[BountyRefresh\][\s\S]*?^RefreshHotkey = F9$/m);
   assert.match(text, /^UnrelatedYellowCraneSetting = keep-yellow-crane$/m);
   assert.match(text, /^UnrelatedBountySetting = keep-bounty$/m);
   assert.match(
     text,
-    /\[WrongSection\]\r?\nCandidateRefreshEnabled = decoy-candidate\r?\nForceEnabled = decoy-force\r?\nCommonEnabled = decoy-common\r?\nGovernEnabled = decoy-govern\r?\nUnrelatedDecoySetting = keep-decoy/
+    /\[WrongSection\]\r?\nCandidateRefreshEnabled = decoy-candidate\r?\nForceEnabled = decoy-force\r?\nCommonEnabled = decoy-common\r?\nGovernEnabled = decoy-govern\r?\nCandidateRefreshHotkey = DECOY_CANDIDATE_KEY\r?\nRefreshHotkey = DECOY_BOUNTY_KEY\r?\nUnrelatedDecoySetting = keep-decoy/
   );
 });
 

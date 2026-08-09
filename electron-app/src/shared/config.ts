@@ -85,9 +85,11 @@ const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
   governmentStorageRefreshEnabled: true,
   governmentStorageRefreshHotkey: 'R',
   yellowCraneCandidateRefreshEnabled: true,
+  yellowCraneCandidateRefreshHotkey: 'R',
   forceBountyRefreshEnabled: true,
   commonBountyRefreshEnabled: true,
   governBountyRefreshEnabled: true,
+  bountyRefreshHotkey: 'R',
   treasureIdentifyBestValueAssistEnabled: true,
   breakthroughRerollEnabled: true,
   craftRerollEnabled: true,
@@ -717,11 +719,13 @@ RefreshHotkey = ${settings.governmentStorageRefreshHotkey}
 
 [YellowCraneTower]
 CandidateRefreshEnabled = ${boolText(settings.yellowCraneCandidateRefreshEnabled)}
+CandidateRefreshHotkey = ${settings.yellowCraneCandidateRefreshHotkey}
 
 [BountyRefresh]
 ForceEnabled = ${boolText(settings.forceBountyRefreshEnabled)}
 CommonEnabled = ${boolText(settings.commonBountyRefreshEnabled)}
 GovernEnabled = ${boolText(settings.governBountyRefreshEnabled)}
+RefreshHotkey = ${settings.bountyRefreshHotkey}
 
 [TreasureIdentify]
 BestValueAssistEnabled = ${boolText(settings.treasureIdentifyBestValueAssistEnabled)}
@@ -970,9 +974,14 @@ function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
       DEFAULT_VISIBLE_SETTINGS.governmentStorageRefreshHotkey
     ),
     yellowCraneCandidateRefreshEnabled: input.yellowCraneCandidateRefreshEnabled,
+    yellowCraneCandidateRefreshHotkey: normalizeHotkey(
+      input.yellowCraneCandidateRefreshHotkey,
+      DEFAULT_VISIBLE_SETTINGS.yellowCraneCandidateRefreshHotkey
+    ),
     forceBountyRefreshEnabled: input.forceBountyRefreshEnabled,
     commonBountyRefreshEnabled: input.commonBountyRefreshEnabled,
     governBountyRefreshEnabled: input.governBountyRefreshEnabled,
+    bountyRefreshHotkey: normalizeHotkey(input.bountyRefreshHotkey, DEFAULT_VISIBLE_SETTINGS.bountyRefreshHotkey),
     treasureIdentifyBestValueAssistEnabled: input.treasureIdentifyBestValueAssistEnabled,
     breakthroughRerollEnabled: input.breakthroughRerollEnabled,
     craftRerollEnabled: input.craftRerollEnabled,
@@ -1125,6 +1134,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       'CandidateRefreshEnabled',
       DEFAULT_VISIBLE_SETTINGS.yellowCraneCandidateRefreshEnabled
     ),
+    yellowCraneCandidateRefreshHotkey: readString(
+      yellowCraneTowerSection,
+      'CandidateRefreshHotkey',
+      DEFAULT_VISIBLE_SETTINGS.yellowCraneCandidateRefreshHotkey
+    ),
     forceBountyRefreshEnabled: readBool(
       bountyRefreshSection,
       'ForceEnabled',
@@ -1139,6 +1153,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       bountyRefreshSection,
       'GovernEnabled',
       DEFAULT_VISIBLE_SETTINGS.governBountyRefreshEnabled
+    ),
+    bountyRefreshHotkey: readString(
+      bountyRefreshSection,
+      'RefreshHotkey',
+      DEFAULT_VISIBLE_SETTINGS.bountyRefreshHotkey
     ),
     treasureIdentifyBestValueAssistEnabled: readBool(
       treasureIdentifySection,
@@ -1654,6 +1673,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   );
   nextMain = upsertIniSectionValue(
     nextMain,
+    'YellowCraneTower',
+    'CandidateRefreshHotkey',
+    normalized.yellowCraneCandidateRefreshHotkey
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
     'BountyRefresh',
     'ForceEnabled',
     boolText(normalized.forceBountyRefreshEnabled)
@@ -1669,6 +1694,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'BountyRefresh',
     'GovernEnabled',
     boolText(normalized.governBountyRefreshEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'BountyRefresh',
+    'RefreshHotkey',
+    normalized.bountyRefreshHotkey
   );
   nextMain = removeIniSectionValue(nextMain, 'Auction', 'PreviewRefreshRequireAlt');
   nextMain = removeIniSectionCommentBlock(

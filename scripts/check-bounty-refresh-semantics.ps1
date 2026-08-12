@@ -33,6 +33,7 @@ function Reject-Pattern {
 
 $clickPrefix = Get-CSharpMethodText 'BountyFreshButtonClickedPrefix'
 $freshPostfix = Get-CSharpMethodText 'BountyFreshPostfix'
+$freshButtonLookupMethod = Get-CSharpMethodText 'TryGetBountyFreshButton'
 $resolveTypeMethod = Get-CSharpMethodText 'TryResolveBountyType'
 $enabledMethod = Get-CSharpMethodText 'IsBountyRefreshEnabled'
 $updateMethod = Get-CSharpMethodText 'UpdateBountyRefreshAssist'
@@ -66,12 +67,14 @@ Require-Pattern $clickPrefix 'catch\s*\(Exception ex\)[\s\S]*?targetBuilding\.mi
 Require-Pattern $clickPrefix 'finally[\s\S]*?worldData\.monthFreshBountyTime\s*=\s*\w*[Cc]ount\w*[\s\S]*?_bountyRefreshReentry\s*=\s*false' 'The original monthly counter and recursive guard must always be restored.'
 
 Require-Pattern $freshPostfix 'TryResolveBountyType[\s\S]*?IsBountyRefreshEnabled\(\s*bountyType\s*\)' 'FreshBounty postfix must honor the independent category switches through the shared category gate.'
-Require-Pattern $freshPostfix 'bountyUIPanel\?\.transform\.Find\(\s*"FreshButton"\s*\)\?\.GetComponent<Button>\(\)[\s\S]*?interactable\s*=\s*true' 'The existing FreshButton must be forced interactable for enabled unlimited refresh categories.'
+Require-Pattern $freshButtonLookupMethod 'panel\.transform\.Find\(\s*"FreshButton"\s*\)\?\.GetComponent<Button>\(\)[\s\S]*?GetComponentsInChildren<Button>\(\s*includeInactive:\s*true\s*\)[\s\S]*?string\.Equals\(\s*button\.gameObject\.name\s*,\s*"FreshButton"\s*,\s*StringComparison\.Ordinal\s*\)' 'FreshButton lookup must support both the original direct child and an inactive recursively nested original button.'
+Require-Pattern $freshPostfix 'TryGetBountyFreshButton\(\s*__instance\s*\)[\s\S]*?freshButton\.gameObject\.SetActive\(\s*true\s*\)[\s\S]*?freshButton\.interactable\s*=\s*true' 'An existing FreshButton that vanilla left active=false/interactable=true must be resolved through the shared helper and restored visible and interactable.'
 Reject-Pattern $source '(?i)(?:BountyRefreshButtonName|CreateBountyRefreshButton|EnsureBountyRefreshButton|TryCreate[^\r\n]*Bounty)' 'Bounty refresh must not create a second custom button.'
 Require-Pattern $gameUpdateMethod 'UpdateBountyRefreshAssist\(\);' 'GameController.Update must delegate commission hotkey handling to its UI-scoped assist method.'
 Require-Pattern $updateMethod '_bountyRefreshHooksReady[\s\S]*?bountyUIPanel[\s\S]*?!panel\.activeInHierarchy[\s\S]*?Input\.GetKeyDown\(\s*_bountyRefreshHotkey\.Value\s*\)' 'The commission hotkey must be polled only after the hooks and visible bounty panel gates pass.'
 Require-Pattern $updateMethod 'TryResolveBountyType\(\s*controller\s*,\s*out var bountyType\s*\)[\s\S]*?IsBountyRefreshEnabled\(\s*bountyType\s*\)[\s\S]*?Input\.GetKeyDown\(\s*_bountyRefreshHotkey\.Value\s*\)' 'The commission hotkey must be polled only for a recognized category whose feature switch is enabled.'
-Require-Pattern $updateMethod 'transform\.Find\(\s*"FreshButton"\s*\)\?\.GetComponent<Button>\(\)[\s\S]*?!freshButton\.gameObject\.activeInHierarchy[\s\S]*?!freshButton\.interactable[\s\S]*?Input\.GetKeyDown\(\s*_bountyRefreshHotkey\.Value\s*\)' 'The commission hotkey must be polled only while the original visible and interactable FreshButton is available.'
+Require-Pattern $updateMethod 'TryGetBountyFreshButton\(\s*controller\s*\)[\s\S]*?freshButton\s*==\s*null\s*\|\|\s*freshButton\.gameObject\s*==\s*null[\s\S]*?return[\s\S]*?freshButton\.gameObject\.SetActive\(\s*true\s*\)[\s\S]*?freshButton\.interactable\s*=\s*true[\s\S]*?Input\.GetKeyDown\(\s*_bountyRefreshHotkey\.Value\s*\)' 'After the existing panel/category gates pass, hotkey handling must require a resolved original button, restore it visible and interactable, then poll R.'
+Reject-Pattern $updateMethod '!freshButton\.gameObject\.activeInHierarchy' 'The R hotkey must not be blocked merely because vanilla left the existing FreshButton inactive; the mod is responsible for restoring its visibility.'
 Require-Pattern $updateMethod 'Input\.GetKeyDown\(\s*_bountyRefreshHotkey\.Value\s*\)[\s\S]*?controller\.FreshBountyButtonClicked\(\)' 'The commission hotkey must reuse the original refresh-button click path.'
 Reject-Pattern $gameUpdateMethod 'Input\.GetKeyDown\(\s*_bountyRefreshHotkey\.Value\s*\)' 'GameController.Update must not poll the commission hotkey globally outside the feature-specific visible-panel gate.'
 

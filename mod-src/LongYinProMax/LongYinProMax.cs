@@ -14,7 +14,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Pro Max", "1.38.0")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Pro Max", "1.39.0")]
 public sealed class LongYinProMaxPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
@@ -6770,8 +6770,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
         var isOriginalYellowCraneOpen =
             _yellowCraneFinishRecruitFrame == Time.frameCount &&
-            _yellowCraneFinishRecruitType == __0 &&
-            Math.Abs(_yellowCraneFinishRecruitLevel - __2) < 0.01f;
+            _yellowCraneFinishRecruitType == __0;
         if (!_yellowCraneCandidateRefreshReopening && !isOriginalYellowCraneOpen)
         {
             return;
@@ -7190,19 +7189,52 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             return;
         }
 
-        var freshButton = panel.transform.Find("FreshButton")?.GetComponent<Button>();
-        if (freshButton == null ||
-            freshButton.gameObject == null ||
-            !freshButton.gameObject.activeInHierarchy ||
-            !freshButton.interactable)
+        var freshButton = TryGetBountyFreshButton(controller);
+        if (freshButton == null || freshButton.gameObject == null)
         {
             return;
         }
+
+        freshButton.gameObject.SetActive(true);
+        freshButton.interactable = true;
 
         if (Input.GetKeyDown(_bountyRefreshHotkey.Value))
         {
             controller.FreshBountyButtonClicked();
         }
+    }
+
+    private static Button? TryGetBountyFreshButton(BountyUIController controller)
+    {
+        var panel = controller?.bountyUIPanel;
+        if (panel == null)
+        {
+            return null;
+        }
+
+        var directButton = panel.transform.Find("FreshButton")?.GetComponent<Button>();
+        if (directButton != null)
+        {
+            return directButton;
+        }
+
+        var buttons = panel.GetComponentsInChildren<Button>(includeInactive: true);
+        if (buttons == null)
+        {
+            return null;
+        }
+
+        foreach (var button in buttons)
+        {
+            if (button != null &&
+                button.gameObject != null &&
+                string.Equals(button.gameObject.name, "FreshButton", StringComparison.Ordinal))
+            {
+                return button;
+            }
+        }
+
+        return null;
     }
 
     private static bool BountyFreshButtonClickedPrefix(BountyUIController __instance)
@@ -7295,9 +7327,10 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
         try
         {
-            var freshButton = __instance.bountyUIPanel?.transform.Find("FreshButton")?.GetComponent<Button>();
+            var freshButton = TryGetBountyFreshButton(__instance);
             if (freshButton != null)
             {
+                freshButton.gameObject.SetActive(true);
                 freshButton.interactable = true;
             }
         }

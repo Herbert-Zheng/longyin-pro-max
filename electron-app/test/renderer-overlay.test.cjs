@@ -5,9 +5,25 @@ const path = require('node:path');
 
 const projectRoot = path.resolve(__dirname, '..');
 const readSource = (relativePath) => fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
+const readRendererSource = () => {
+  const rendererRoot = path.join(projectRoot, 'src', 'renderer');
+  const sources = [];
+  const visit = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(entryPath);
+      } else if (/\.(?:ts|tsx)$/.test(entry.name)) {
+        sources.push(fs.readFileSync(entryPath, 'utf8'));
+      }
+    }
+  };
+  visit(rendererRoot);
+  return sources.join('\n').replace(/\bonSettingChange\b/g, 'updateSetting');
+};
 
 test('initial snapshot failure renders an actionable retry path', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
   assert.match(renderer, /setInitialLoadError\(err\.message\)/);
   assert.match(renderer, /启动器状态加载失败/);
   assert.match(renderer, /重试加载/);
@@ -15,7 +31,7 @@ test('initial snapshot failure renders an actionable retry path', () => {
 });
 
 test('save-and-launch transports settings and the current custom talent pack together', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
   const preload = readSource('src/preload.ts');
   const main = readSource('src/main.ts');
 
@@ -32,7 +48,7 @@ test('save-and-launch transports settings and the current custom talent pack tog
 test('overlay has explicit IPC controls and game-owned lifecycle cleanup', () => {
   const preload = readSource('src/preload.ts');
   const main = readSource('src/main.ts');
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
 
   assert.match(preload, /app:start-overlay/);
   assert.match(preload, /app:stop-overlay/);
@@ -67,7 +83,7 @@ test('OTA completion is only emitted after the restarted app consumes the update
 });
 
 test('renderer exposes commerce and assist controls with only the supported auction shortcut', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
   const controlBindings = [
     'treasureTradeHelperEnabled',
     'materialAutoBuyEnabled',
@@ -145,7 +161,7 @@ test('renderer exposes commerce and assist controls with only the supported auct
 });
 
 test('growth settings expose breakthrough reroll as a button-only toggle', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
 
   assert.match(
     renderer,
@@ -156,7 +172,7 @@ test('growth settings expose breakthrough reroll as a button-only toggle', () =>
 });
 
 test('trade and craft settings expose craft reroll as a button-only toggle', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
 
   assert.match(
     renderer,
@@ -167,7 +183,7 @@ test('trade and craft settings expose craft reroll as a button-only toggle', () 
 });
 
 test('trade and craft settings expose dedicated government storage refresh controls and scope copy', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
 
   assert.match(renderer, /<Card title="官府仓库刷新" eyebrow="Government Storage">/);
   assert.match(
@@ -183,7 +199,7 @@ test('trade and craft settings expose dedicated government storage refresh contr
 });
 
 test('world exploration exposes city affair refresh controls and shortcuts', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
 
   assert.match(renderer, /<Card title="城内事务刷新" eyebrow="City Affairs">/);
   for (const [label, setting] of [
@@ -211,7 +227,7 @@ test('world exploration exposes city affair refresh controls and shortcuts', () 
 });
 
 test('growth settings expose the skill book ownership indicator and its inventory scope', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
 
   assert.match(renderer, /<Card title="功法悬浮信息" eyebrow="Skill Display">/);
   assert.match(
@@ -223,14 +239,24 @@ test('growth settings expose the skill book ownership indicator and its inventor
 });
 
 test('launcher keeps primary actions visible and clearly marks unsaved settings', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
   const styles = readSource('src/renderer/styles.css');
   const main = readSource('src/main.ts');
   const html = readSource('index.html');
 
   assert.match(renderer, /const settingsDirty = JSON\.stringify\(settings\) !== savedSettingsText/);
   assert.match(renderer, /普通设置未保存/);
-  assert.match(renderer, /配置已保存/);
+  const { getConfigurationStatus } = loadLauncherState();
+  assert.equal(
+    getConfigurationStatus({
+      gameRoot: 'C:\\LongYin',
+      customTalentLoadError: null,
+      customTalentsReady: true,
+      settingsDirty: false,
+      customTalentDirty: false
+    }).detail,
+    '配置已保存'
+  );
   assert.match(renderer, /run\('启动游戏',[\s\S]{0,100}, false\)/);
   assert.match(renderer, /当前未保存修改仍会保留在界面中/);
   assert.match(styles, /\.workspace__hero\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?top:\s*16px;/);
@@ -249,11 +275,19 @@ test('launcher keeps primary actions visible and clearly marks unsaved settings'
 });
 
 test('configuration status distinguishes disconnected, loading, failed, dirty and saved states', () => {
-  const renderer = readSource('src/renderer/App.tsx');
-
-  for (const state of ['disconnected', 'loading', 'load-error', 'dirty', 'saved']) {
-    assert.match(renderer, new RegExp(`key: '${state}'`), `missing configuration state: ${state}`);
-  }
+  const renderer = readRendererSource();
+  const { getConfigurationStatus } = loadLauncherState();
+  const base = { gameRoot: 'C:\\LongYin', customTalentLoadError: null, customTalentsReady: true, settingsDirty: false, customTalentDirty: false };
+  assert.deepEqual(
+    [
+      getConfigurationStatus({ ...base, gameRoot: '' }).key,
+      getConfigurationStatus({ ...base, customTalentsReady: false }).key,
+      getConfigurationStatus({ ...base, customTalentLoadError: 'failed' }).key,
+      getConfigurationStatus({ ...base, settingsDirty: true }).key,
+      getConfigurationStatus(base).key
+    ],
+    ['disconnected', 'loading', 'load-error', 'dirty', 'saved']
+  );
 
   assert.match(renderer, /disabled=\{working !== null \|\| !gameRoot\}/);
   assert.match(renderer, /acceptVisibleSettingsIfUnchanged/);
@@ -264,7 +298,7 @@ test('configuration status distinguishes disconnected, loading, failed, dirty an
 });
 
 test('commerce settings use readable groups without legacy shortcut controls', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
 
   for (const title of ['珍宝交易', '材料扫货', '店铺与背包', '拍卖与珍宝鉴定']) {
     assert.match(renderer, new RegExp(`title="${title}"`));
@@ -279,7 +313,7 @@ test('commerce settings use readable groups without legacy shortcut controls', (
 });
 
 test('renderer settings pages use scoped, aligned tiles without stretching cards', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
   const styles = readSource('src/renderer/styles.css');
   const smoke = readSource('scripts/check-renderer-smoke.mjs');
 
@@ -296,7 +330,7 @@ test('renderer settings pages use scoped, aligned tiles without stretching cards
 });
 
 test('relationship controls expose the safe master switch and independent lover limit', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
 
   assert.match(renderer, /label="人物关系增强总开关"[\s\S]{0,220}settings\.relationshipFeaturesEnabled/);
   assert.match(renderer, /label="队友声望共享"[\s\S]{0,220}settings\.teamFameShareEnabled/);
@@ -310,7 +344,7 @@ test('relationship controls expose the safe master switch and independent lover 
 });
 
 test('systems page makes environment full width and health details collapsible', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
   const styles = readSource('src/renderer/styles.css');
 
   assert.match(renderer, /<div className="system-environment-card">[\s\S]*?<Card title="环境自检与目录"/);
@@ -322,7 +356,7 @@ test('systems page makes environment full width and health details collapsible',
 });
 
 test('custom talent selects show Chinese labels while preserving raw keys', () => {
-  const renderer = readSource('src/renderer/App.tsx');
+  const renderer = readRendererSource();
   const components = readSource('src/renderer/components.tsx');
   const customTalents = readSource('src/renderer/customTalents.ts');
 
@@ -337,4 +371,314 @@ test('custom talent selects show Chinese labels while preserving raw keys', () =
   assert.match(renderer, /效果 \{effectIndex \+ 1\}/);
   assert.match(renderer, /首个条件：\$\{formatCustomTalentConditionType/);
   assert.match(renderer, /首个效果：\$\{formatHeroSpeAddDataType/);
+});
+
+test('renderer status and error feedback expose live-region semantics after modularization', () => {
+  const renderer = readRendererSource();
+
+  assert.match(renderer, /(?:role="status"|aria-live="polite")/);
+  assert.match(renderer, /(?:role="alert"|aria-live="assertive")/);
+});
+
+test('destructive actions and launching stale configuration require confirmation', () => {
+  const renderer = readRendererSource();
+
+  assert.match(renderer, /role="alertdialog"/);
+  assert.match(renderer, /title:\s*'卸载当前模组？'/);
+  assert.match(renderer, /confirmLabel:\s*'确认卸载'/);
+  assert.match(renderer, /title:\s*'删除自定义天赋？'/);
+  assert.match(renderer, /title:\s*'使用已保存配置启动？'/);
+  assert.match(renderer, /confirmLabel:\s*'启动已保存配置'/);
+  assert.match(renderer, /if \(!settingsDirty && !customTalentDirty\)/);
+  assert.match(renderer, /autoFocus=\{props\.request\.tone === 'danger'\}/);
+  assert.match(renderer, /autoFocus=\{props\.request\.tone !== 'danger'\}/);
+});
+
+function loadLauncherState() {
+  return require('../dist/main/shared/launcher-state.js');
+}
+
+test('configuration status reports a disconnected game directory', () => {
+  const { getConfigurationStatus } = loadLauncherState();
+  assert.deepEqual(
+    getConfigurationStatus({
+      gameRoot: '',
+      customTalentLoadError: null,
+      customTalentsReady: false,
+      settingsDirty: false,
+      customTalentDirty: false
+    }),
+    { key: 'disconnected', label: '未连接', detail: '未连接游戏目录', tone: 'neutral' }
+  );
+});
+
+test('configuration status prioritizes a custom-talent load error over dirty state', () => {
+  const { getConfigurationStatus } = loadLauncherState();
+  assert.deepEqual(
+    getConfigurationStatus({
+      gameRoot: 'C:\\LongYin',
+      customTalentLoadError: '格式无效',
+      customTalentsReady: true,
+      settingsDirty: true,
+      customTalentDirty: true
+    }),
+    { key: 'load-error', label: '读取失败', detail: '自定义天赋读取失败', tone: 'warn' }
+  );
+});
+
+test('configuration status reports unsaved changes when either settings collection is dirty', () => {
+  const { getConfigurationStatus } = loadLauncherState();
+  assert.deepEqual(
+    getConfigurationStatus({
+      gameRoot: 'C:\\LongYin',
+      customTalentLoadError: null,
+      customTalentsReady: true,
+      settingsDirty: false,
+      customTalentDirty: true
+    }),
+    { key: 'dirty', label: '有未保存更改', detail: '配置有未保存更改', tone: 'warn' }
+  );
+});
+
+test('configuration status reports saved only after all configuration is ready and clean', () => {
+  const { getConfigurationStatus } = loadLauncherState();
+  assert.deepEqual(
+    getConfigurationStatus({
+      gameRoot: 'C:\\LongYin',
+      customTalentLoadError: null,
+      customTalentsReady: true,
+      settingsDirty: false,
+      customTalentDirty: false
+    }),
+    { key: 'saved', label: '已保存', detail: '配置已保存', tone: 'good' }
+  );
+});
+
+test('save-and-launch decision explains a custom-talent load failure', () => {
+  const { getSaveAndLaunchDisabledReason } = loadLauncherState();
+  assert.equal(
+    getSaveAndLaunchDisabledReason({
+      gameRoot: 'C:\\LongYin',
+      working: null,
+      launchBusy: false,
+      customTalentsReady: false,
+      customTalentLoadError: 'JSON 解析失败',
+      customTalentValidationErrors: [],
+      launchReady: true,
+      launchNote: '可以启动',
+      settingsDirty: false,
+      customTalentDirty: false
+    }),
+    '自定义天赋读取失败：JSON 解析失败'
+  );
+});
+
+test('save-and-launch decision exposes the first validation error', () => {
+  const { getSaveAndLaunchDisabledReason } = loadLauncherState();
+  assert.equal(
+    getSaveAndLaunchDisabledReason({
+      gameRoot: 'C:\\LongYin',
+      working: null,
+      launchBusy: false,
+      customTalentsReady: true,
+      customTalentLoadError: null,
+      customTalentValidationErrors: ['天赋名称不能为空', '第二个错误'],
+      launchReady: true,
+      launchNote: '可以启动',
+      settingsDirty: false,
+      customTalentDirty: true
+    }),
+    '自定义天赋尚未通过校验：天赋名称不能为空'
+  );
+});
+
+test('save-and-launch decision allows launch only when configuration and environment are ready', () => {
+  const { getSaveAndLaunchDisabledReason } = loadLauncherState();
+  assert.equal(
+    getSaveAndLaunchDisabledReason({
+      gameRoot: 'C:\\LongYin',
+      working: null,
+      launchBusy: false,
+      customTalentsReady: true,
+      customTalentLoadError: null,
+      customTalentValidationErrors: [],
+      launchReady: true,
+      launchNote: '可以启动',
+      settingsDirty: true,
+      customTalentDirty: false
+    }),
+    null
+  );
+});
+
+function loadVisibleSettings() {
+  return require('../dist/main/shared/visible-settings.js');
+}
+
+const EXPECTED_VISIBLE_SETTINGS = {
+  lockStamina: true,
+  revealAllOnStepTile: false,
+  expMultiplier: 1,
+  battleSkillExpMultiplier: 1,
+  creationPointMultiplier: 1,
+  horseBaseSpeedMultiplier: 1,
+  horseTurboSpeedMultiplier: 1,
+  horseTurboDurationMultiplier: 1,
+  horseTurboCooldownMultiplier: 1,
+  lockHorseTurboStamina: true,
+  horseStaminaMultiplier: 1,
+  carryWeightCap: 100000,
+  ignoreCarryWeight: false,
+  merchantCarryCash: 100000,
+  treasureTradeHelperEnabled: true,
+  treasureAutoTradeEnabled: true,
+  materialAutoBuyEnabled: true,
+  materialPurchaseMinRareLv: 0,
+  materialPurchaseMinItemLv: 0,
+  shopOwnershipEnabled: true,
+  skillBookOwnershipIndicatorEnabled: true,
+  auctionEventAlwaysRedEnabled: true,
+  auctionPreviewRefreshEnabled: true,
+  auctionPreviewRefreshHotkey: 'R',
+  governmentStorageRefreshEnabled: true,
+  governmentStorageRefreshHotkey: 'R',
+  yellowCraneCandidateRefreshEnabled: true,
+  yellowCraneCandidateRefreshHotkey: 'R',
+  forceBountyRefreshEnabled: true,
+  commonBountyRefreshEnabled: true,
+  governBountyRefreshEnabled: true,
+  bountyRefreshHotkey: 'R',
+  treasureIdentifyBestValueAssistEnabled: true,
+  breakthroughRerollEnabled: true,
+  craftRerollEnabled: true,
+  luckyHitChancePercent: 0,
+  relationshipFeaturesEnabled: false,
+  extraRelationshipGainChancePercent: 0,
+  teamAutoFavorEnabled: true,
+  teamAutoFavorPerDay: 5,
+  teamFameShareEnabled: true,
+  teamFameSharePercent: 30,
+  blockOverflowLoverHomeBattle: true,
+  sameSectAreaShareEnabled: true,
+  characterDataTestHotkeyEnabled: false,
+  maxLoverCount: 8,
+  debatePlayerDamageTakenMultiplier: 1,
+  debateEnemyDamageTakenMultiplier: 1,
+  craftRandomPickUpgrade: true,
+  craftTier1ExtraItems: 0,
+  craftTier2ExtraItems: 1,
+  craftTier3ExtraItems: 2,
+  craftTier4ExtraItems: 3,
+  craftTier5ExtraItems: 4,
+  drinkPlayerPowerCostMultiplier: 1,
+  drinkEnemyPowerCostMultiplier: 1,
+  dialogMonthlyLimitMultiplier: 3,
+  dialogFastForwardAssistEnabled: false,
+  dailySkillInsightChancePercent: 0,
+  dailySkillInsightExpPercent: 5,
+  dailySkillInsightUseRarityScaling: true,
+  dailySkillInsightRealtimeIntervalSeconds: 0,
+  skillTalentEnabled: true,
+  skillTalentLevelThreshold: 10,
+  skillTalentTierPointMultiplier: 2,
+  skillTalentPlayerOnly: true,
+  freezeDate: false,
+  freezeHotkey: 'F1',
+  outsideBattleSpeedHotkey: 'F11',
+  battleTurboEnabled: true,
+  battleTurboHotkey: 'F8'
+};
+
+test('visible settings defaults contain all 71 known fields and values', () => {
+  const { createDefaultVisibleSettings } = loadVisibleSettings();
+  const defaults = createDefaultVisibleSettings();
+  assert.equal(Object.keys(defaults).length, 71);
+  assert.deepEqual(defaults, EXPECTED_VISIBLE_SETTINGS);
+});
+
+test('visible settings defaults return a fresh mutable object for every caller', () => {
+  const { createDefaultVisibleSettings } = loadVisibleSettings();
+  const first = createDefaultVisibleSettings();
+  const second = createDefaultVisibleSettings();
+  first.freezeHotkey = 'F12';
+  assert.equal(second.freezeHotkey, 'F1');
+  assert.notEqual(first, second);
+});
+
+test('visible settings sanitization clamps representative numeric boundaries', () => {
+  const { createDefaultVisibleSettings, sanitizeVisibleSettings } = loadVisibleSettings();
+  const sanitized = sanitizeVisibleSettings({
+    ...createDefaultVisibleSettings(),
+    expMultiplier: 0,
+    materialPurchaseMinRareLv: 99,
+    materialPurchaseMinItemLv: -8,
+    luckyHitChancePercent: 101,
+    maxLoverCount: 0,
+    skillTalentTierPointMultiplier: 0
+  });
+  assert.deepEqual(
+    {
+      expMultiplier: sanitized.expMultiplier,
+      materialPurchaseMinRareLv: sanitized.materialPurchaseMinRareLv,
+      materialPurchaseMinItemLv: sanitized.materialPurchaseMinItemLv,
+      luckyHitChancePercent: sanitized.luckyHitChancePercent,
+      maxLoverCount: sanitized.maxLoverCount,
+      skillTalentTierPointMultiplier: sanitized.skillTalentTierPointMultiplier
+    },
+    {
+      expMultiplier: 1,
+      materialPurchaseMinRareLv: 5,
+      materialPurchaseMinItemLv: 0,
+      luckyHitChancePercent: 100,
+      maxLoverCount: 1,
+      skillTalentTierPointMultiplier: 0.1
+    }
+  );
+});
+
+test('visible settings sanitization restores blank hotkeys to their known defaults', () => {
+  const { createDefaultVisibleSettings, sanitizeVisibleSettings } = loadVisibleSettings();
+  const sanitized = sanitizeVisibleSettings({
+    ...createDefaultVisibleSettings(),
+    auctionPreviewRefreshHotkey: '  ',
+    governmentStorageRefreshHotkey: '',
+    yellowCraneCandidateRefreshHotkey: '\t',
+    bountyRefreshHotkey: '\n',
+    freezeHotkey: '',
+    outsideBattleSpeedHotkey: '   ',
+    battleTurboHotkey: ''
+  });
+  assert.deepEqual(
+    {
+      auctionPreviewRefreshHotkey: sanitized.auctionPreviewRefreshHotkey,
+      governmentStorageRefreshHotkey: sanitized.governmentStorageRefreshHotkey,
+      yellowCraneCandidateRefreshHotkey: sanitized.yellowCraneCandidateRefreshHotkey,
+      bountyRefreshHotkey: sanitized.bountyRefreshHotkey,
+      freezeHotkey: sanitized.freezeHotkey,
+      outsideBattleSpeedHotkey: sanitized.outsideBattleSpeedHotkey,
+      battleTurboHotkey: sanitized.battleTurboHotkey
+    },
+    {
+      auctionPreviewRefreshHotkey: 'R',
+      governmentStorageRefreshHotkey: 'R',
+      yellowCraneCandidateRefreshHotkey: 'R',
+      bountyRefreshHotkey: 'R',
+      freezeHotkey: 'F1',
+      outsideBattleSpeedHotkey: 'F11',
+      battleTurboHotkey: 'F8'
+    }
+  );
+});
+
+test('main, config and renderer consume the shared visible-settings defaults instead of redefining them', () => {
+  const main = readSource('src/main.ts');
+  const config = readSource('src/shared/config.ts');
+  const app = readSource('src/renderer/App.tsx');
+
+  assert.doesNotMatch(main, /const DEFAULT_VISIBLE_SETTINGS\b/);
+  assert.doesNotMatch(config, /const DEFAULT_VISIBLE_SETTINGS\b/);
+  assert.match(main, /createDefaultVisibleSettings/);
+  assert.match(config, /createDefaultVisibleSettings/);
+  assert.match(app, /useState<VisibleSettings>\(\(\) => createDefaultVisibleSettings\(\)\)/);
+  assert.match(app, /JSON\.stringify\(createDefaultVisibleSettings\(\)\)/);
 });

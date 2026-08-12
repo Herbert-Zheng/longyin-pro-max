@@ -90,7 +90,29 @@ test('renderer UI contract rejects collapsed-panel and tile-alignment regression
       effectOptionCount: 215,
       uniqueEffectLabelCount: 215,
       allEffectLabelsChinese: true
-    }
+    },
+    navigationPages: [
+      ['主页', '主页'],
+      ['更新记录', '更新记录'],
+      ['系统更改', '系统更改'],
+      ['成长与天赋', '成长与天赋'],
+      ['自定义天赋', '自定义天赋'],
+      ['探索与大地图', '探索与大地图'],
+      ['交易与制造', '交易与制造'],
+      ['社交与组队', '社交与组队'],
+      ['战斗相关', '战斗相关']
+    ].map(([label, title]) => ({ label, title, currentCount: 1, currentLabel: label, heading: title })),
+    responsive: {
+      hasExpectedViewport: true,
+      horizontalOverflow: 0,
+      primaryActionVisible: true,
+      saveActionVisible: true
+    },
+    pageTransition: { scrolledToTop: true, headingFocused: true },
+    materialAutoBuy: { disabledWhenOff: true, enabledWhenOn: true, valuesPreserved: true },
+    settingsSearch: { filteredToGovernmentStorage: true, restoredAllCards: true },
+    confirmDialog: { dangerInitiallyFocusesCancel: true },
+    accessibility: { unnamedControls: [], liveStatusPresent: true }
   };
 
   assert.doesNotThrow(() => assertRendererUiContracts(healthyUi));
@@ -113,5 +135,82 @@ test('renderer UI contract rejects collapsed-panel and tile-alignment regression
   assert.throws(
     () => assertRendererUiContracts({ ...healthyUi, settingsPages: [{ ...healthyUi.settingsPages[0], gridPresent: false, cardCount: 0, tileCount: 0 }] }),
     /cannot be measured/i
+  );
+});
+
+function interactiveHealthyUi() {
+  const page = (label) => ({ label, title: label, currentCount: 1, currentLabel: label, heading: label });
+  return {
+    heroSummaryGap: 12,
+    summaryStatusGap: 12,
+    systems: {
+      environmentFullWidth: true,
+      healthCollapsed: true,
+      healthSummaryText: '健康检查详情 全部通过',
+      overlayExplained: true,
+      controlCount: 3,
+      controlHeightSpread: 0
+    },
+    settingsPages: [{ label: '成长与天赋', gridPresent: true, cardCount: 1, tileCount: 1, cardsSelfAligned: true, tileHeightSpread: 0 }],
+    customTalents: {
+      conditionOptionCount: 2,
+      intelligenceUsesRawValue: true,
+      intelligenceLabel: '智力',
+      effectOptionCount: 215,
+      uniqueEffectLabelCount: 215,
+      allEffectLabelsChinese: true
+    },
+    navigationPages: ['主页', '更新记录', '系统更改', '成长与天赋', '自定义天赋', '探索与大地图', '交易与制造', '社交与组队', '战斗相关'].map(page),
+    responsive: { hasExpectedViewport: true, horizontalOverflow: 0, primaryActionVisible: true, saveActionVisible: true },
+    pageTransition: { scrolledToTop: true, headingFocused: true },
+    materialAutoBuy: { disabledWhenOff: true, enabledWhenOn: true, valuesPreserved: true },
+    settingsSearch: { filteredToGovernmentStorage: true, restoredAllCards: true },
+    confirmDialog: { dangerInitiallyFocusesCancel: true },
+    accessibility: { unnamedControls: [], liveStatusPresent: true }
+  };
+}
+
+test('renderer UI contract rejects an incomplete navigation pass', async () => {
+  const { assertRendererUiContracts } = await loadHarness();
+  const healthyUi = interactiveHealthyUi();
+  assert.throws(
+    () => assertRendererUiContracts({ ...healthyUi, navigationPages: healthyUi.navigationPages.slice(0, 8) }),
+    /9 navigation pages/i
+  );
+});
+
+test('renderer UI contract rejects horizontal overflow at the supported compact viewport', async () => {
+  const { assertRendererUiContracts } = await loadHarness();
+  const healthyUi = interactiveHealthyUi();
+  assert.throws(
+    () => assertRendererUiContracts({ ...healthyUi, responsive: { ...healthyUi.responsive, horizontalOverflow: 24 } }),
+    /overflow horizontally/i
+  );
+});
+
+test('renderer UI contract rejects page changes that lose heading focus', async () => {
+  const { assertRendererUiContracts } = await loadHarness();
+  const healthyUi = interactiveHealthyUi();
+  assert.throws(
+    () => assertRendererUiContracts({ ...healthyUi, pageTransition: { scrolledToTop: true, headingFocused: false } }),
+    /keyboard focus/i
+  );
+});
+
+test('renderer UI contract rejects visible controls without accessible names', async () => {
+  const { assertRendererUiContracts } = await loadHarness();
+  const healthyUi = interactiveHealthyUi();
+  assert.throws(
+    () => assertRendererUiContracts({ ...healthyUi, accessibility: { unnamedControls: ['button'], liveStatusPresent: true } }),
+    /accessible name/i
+  );
+});
+
+test('renderer UI contract rejects danger confirmation that initially focuses the destructive action', async () => {
+  const { assertRendererUiContracts } = await loadHarness();
+  const healthyUi = interactiveHealthyUi();
+  assert.throws(
+    () => assertRendererUiContracts({ ...healthyUi, confirmDialog: { ...healthyUi.confirmDialog, dangerInitiallyFocusesCancel: false } }),
+    /danger confirmation.*cancel/i
   );
 });

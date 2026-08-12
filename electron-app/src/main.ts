@@ -39,6 +39,7 @@ import {
   UpdateProgressEvent,
   VisibleSettings
 } from './shared/types';
+import { createDefaultVisibleSettings } from './shared/visible-settings';
 
 const execFileAsync = promisify(execFile);
 const LAUNCH_GRACE_MS = 30_000;
@@ -58,80 +59,6 @@ const OTA_UPDATER_PATH = IS_PACKAGED
   ? path.join(process.resourcesPath, 'updater', 'LongYinUpdater.exe')
   : path.resolve(APP_CONTENT_ROOT, 'updater-dist', 'LongYinUpdater.exe');
 const OVERLAY_EXE_NAME = 'LongYinOverlay.exe';
-
-const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
-  lockStamina: true,
-  revealAllOnStepTile: false,
-  expMultiplier: 1,
-  battleSkillExpMultiplier: 1,
-  creationPointMultiplier: 1,
-  horseBaseSpeedMultiplier: 1,
-  horseTurboSpeedMultiplier: 1,
-  horseTurboDurationMultiplier: 1,
-  horseTurboCooldownMultiplier: 1,
-  lockHorseTurboStamina: true,
-  horseStaminaMultiplier: 1,
-  carryWeightCap: 100000,
-  ignoreCarryWeight: false,
-  merchantCarryCash: 100000,
-  treasureTradeHelperEnabled: true,
-  treasureAutoTradeEnabled: true,
-  materialAutoBuyEnabled: true,
-  materialPurchaseMinRareLv: 0,
-  materialPurchaseMinItemLv: 0,
-  shopOwnershipEnabled: true,
-  skillBookOwnershipIndicatorEnabled: true,
-  auctionEventAlwaysRedEnabled: true,
-  auctionPreviewRefreshEnabled: true,
-  auctionPreviewRefreshHotkey: 'R',
-  governmentStorageRefreshEnabled: true,
-  governmentStorageRefreshHotkey: 'R',
-  yellowCraneCandidateRefreshEnabled: true,
-  yellowCraneCandidateRefreshHotkey: 'R',
-  forceBountyRefreshEnabled: true,
-  commonBountyRefreshEnabled: true,
-  governBountyRefreshEnabled: true,
-  bountyRefreshHotkey: 'R',
-  treasureIdentifyBestValueAssistEnabled: true,
-  breakthroughRerollEnabled: true,
-  craftRerollEnabled: true,
-  luckyHitChancePercent: 0,
-  relationshipFeaturesEnabled: false,
-  extraRelationshipGainChancePercent: 0,
-  teamAutoFavorEnabled: true,
-  teamAutoFavorPerDay: 5,
-  teamFameShareEnabled: true,
-  teamFameSharePercent: 30,
-  blockOverflowLoverHomeBattle: true,
-  sameSectAreaShareEnabled: true,
-  characterDataTestHotkeyEnabled: false,
-  maxLoverCount: 8,
-  debatePlayerDamageTakenMultiplier: 1,
-  debateEnemyDamageTakenMultiplier: 1,
-  craftRandomPickUpgrade: true,
-  craftTier1ExtraItems: 0,
-  craftTier2ExtraItems: 1,
-  craftTier3ExtraItems: 2,
-  craftTier4ExtraItems: 3,
-  craftTier5ExtraItems: 4,
-  drinkPlayerPowerCostMultiplier: 1,
-  drinkEnemyPowerCostMultiplier: 1,
-  dialogMonthlyLimitMultiplier: 3,
-  dialogFastForwardAssistEnabled: false,
-  dailySkillInsightChancePercent: 0,
-  dailySkillInsightExpPercent: 5,
-  dailySkillInsightUseRarityScaling: true,
-  dailySkillInsightRealtimeIntervalSeconds: 0,
-  skillTalentEnabled: true,
-  skillTalentLevelThreshold: 10,
-  skillTalentTierPointMultiplier: 2,
-  skillTalentPlayerOnly: true,
-  freezeDate: false,
-  freezeHotkey: 'F1',
-  outsideBattleSpeedHotkey: 'F11',
-  battleTurboEnabled: true,
-  battleTurboHotkey: 'F8'
-};
 
 type AppSettings = {
   gameRoot?: string;
@@ -600,7 +527,7 @@ async function buildSnapshot(status = '准备就绪'): Promise<GameSnapshot> {
   const gameRoot = cachedGameRoot ?? (await loadGameRoot());
   cachedGameRoot = gameRoot;
 
-  let visibleSettings = { ...DEFAULT_VISIBLE_SETTINGS };
+  let visibleSettings = createDefaultVisibleSettings();
   let gameInstalled = false;
   let health = createEmptyHealth(gameRoot ? '尚未检查安装状态。' : '未选择游戏目录。');
   const gameRunning = await isGameProcessRunning();

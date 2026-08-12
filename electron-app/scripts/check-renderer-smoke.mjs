@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+﻿import { spawn, spawnSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -161,6 +161,50 @@ export function assertRendererUiContracts(snapshot) {
   if (!snapshot.customTalents?.allEffectLabelsChinese) {
     throw new Error('Every custom talent effect option must have a visible Chinese label.');
   }
+  if (snapshot.navigationPages?.length !== 9) {
+    throw new Error(`All 9 navigation pages must be exercised (received ${snapshot.navigationPages?.length ?? 'missing'}).`);
+  }
+  for (const page of snapshot.navigationPages ?? []) {
+    if (page.currentCount !== 1 || page.currentLabel !== page.label) {
+      throw new Error(`${page.label} must be the only navigation item marked as the current page.`);
+    }
+    if (page.heading !== page.title) {
+      throw new Error(`${page.label} must render the expected main heading ${page.title} (received ${page.heading || 'missing'}).`);
+    }
+  }
+  if (!snapshot.responsive?.hasExpectedViewport) {
+    throw new Error('Responsive smoke contract must run at 1120×760.');
+  }
+  if (snapshot.responsive.horizontalOverflow > 1) {
+    throw new Error(`The 1120×760 layout must not overflow horizontally (${snapshot.responsive.horizontalOverflow}px overflow).`);
+  }
+  if (!snapshot.responsive.primaryActionVisible || !snapshot.responsive.saveActionVisible) {
+    throw new Error('The primary save-and-launch action and the save action must remain visible at 1120×760.');
+  }
+  if (!snapshot.pageTransition?.scrolledToTop || !snapshot.pageTransition?.headingFocused) {
+    throw new Error('Changing pages must scroll to the top and move keyboard focus to the page heading.');
+  }
+  if (!snapshot.materialAutoBuy?.disabledWhenOff) {
+    throw new Error('Material purchase threshold controls must be disabled while material auto-buy is off.');
+  }
+  if (!snapshot.materialAutoBuy?.enabledWhenOn) {
+    throw new Error('Material purchase threshold controls must be enabled when material auto-buy is on.');
+  }
+  if (!snapshot.materialAutoBuy?.valuesPreserved) {
+    throw new Error('Material purchase threshold values must survive disabling and re-enabling material auto-buy.');
+  }
+  if (!snapshot.settingsSearch?.filteredToGovernmentStorage || !snapshot.settingsSearch?.restoredAllCards) {
+    throw new Error('Settings search must isolate 官府仓库 controls and restore all 6 trade cards when cleared.');
+  }
+  if (!snapshot.confirmDialog?.dangerInitiallyFocusesCancel) {
+    throw new Error('Danger confirmation dialogs must initially focus the cancel action.');
+  }
+  if ((snapshot.accessibility?.unnamedControls ?? []).length > 0) {
+    throw new Error(`Every visible common control needs an accessible name: ${snapshot.accessibility.unnamedControls.join(', ')}`);
+  }
+  if (!snapshot.accessibility?.liveStatusPresent) {
+    throw new Error('The current launcher status must be exposed through a polite live region.');
+  }
 }
 
 async function clickNavigationItem(cdp, label) {
@@ -187,6 +231,251 @@ async function clickNavigationItem(cdp, label) {
     await wait(25);
   }
   throw new Error(`Renderer did not commit the requested navigation page: ${label}.`);
+}
+
+const NAVIGATION_PAGES = [
+  { label: '主页', title: '主页' },
+  { label: '更新记录', title: '更新记录' },
+  { label: '系统更改', title: '系统更改' },
+  { label: '成长与天赋', title: '成长与天赋' },
+  { label: '自定义天赋', title: '自定义天赋' },
+  { label: '探索与大地图', title: '探索与大地图' },
+  { label: '交易与制造', title: '交易与制造' },
+  { label: '社交与组队', title: '社交与组队' },
+  { label: '战斗相关', title: '战斗相关' }
+];
+
+async function waitForRendererPaint(cdp) {
+  await cdp.send('Runtime.evaluate', {
+    expression: `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`,
+    awaitPromise: true
+  });
+}
+
+async function readNavigationContracts(cdp) {
+  const pages = [];
+  for (const page of NAVIGATION_PAGES) {
+    await clickNavigationItem(cdp, page.label);
+    await waitForRendererPaint(cdp);
+    const evaluation = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const currentItems = [...document.querySelectorAll('[aria-current="page"]')];
+        const heading = document.querySelector('main h1, main [data-page-title], .workspace__hero-copy h1, .workspace__hero-copy h2');
+        return {
+          label: ${JSON.stringify(page.label)},
+          title: ${JSON.stringify(page.title)},
+          currentCount: currentItems.length,
+          currentLabel: currentItems[0]?.getAttribute('aria-label')?.trim() ??
+            currentItems[0]?.querySelector('[data-nav-label], strong')?.textContent?.trim() ??
+            currentItems[0]?.textContent?.trim().replace(/\\s+/g, ' ') ?? '',
+          heading: heading?.textContent?.trim() ?? ''
+        };
+      })()`,
+      returnByValue: true
+    });
+    pages.push(evaluation.result?.value);
+  }
+  return pages;
+}
+
+async function readResponsiveContract(cdp) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 1120,
+    height: 760,
+    deviceScaleFactor: 1,
+    mobile: false
+  });
+  await waitForRendererPaint(cdp);
+  const evaluation = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const visibleButton = (label) => {
+        const button = [...document.querySelectorAll('button')].find((node) => node.textContent?.trim().includes(label));
+        if (!button) return false;
+        const rect = button.getBoundingClientRect();
+        const style = getComputedStyle(button);
+        return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0 &&
+          rect.top >= 0 && rect.left >= 0 && rect.bottom <= innerHeight && rect.right <= innerWidth;
+      };
+      const root = document.documentElement;
+      return {
+        hasExpectedViewport: innerWidth === 1120 && innerHeight === 760,
+        horizontalOverflow: Math.max(0, root.scrollWidth - root.clientWidth),
+        primaryActionVisible: visibleButton('保存并启动'),
+        saveActionVisible: visibleButton('保存设置')
+      };
+    })()`,
+    returnByValue: true
+  });
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
+  await waitForRendererPaint(cdp);
+  return evaluation.result?.value;
+}
+
+async function readPageTransitionContract(cdp) {
+  await clickNavigationItem(cdp, '交易与制造');
+  await cdp.send('Runtime.evaluate', {
+    expression: `window.scrollTo(0, document.documentElement.scrollHeight)`
+  });
+  await waitForRendererPaint(cdp);
+  await clickNavigationItem(cdp, '战斗相关');
+  await waitForRendererPaint(cdp);
+  const evaluation = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const heading = document.querySelector('main h1, main [data-page-title], .workspace__hero-copy h1, .workspace__hero-copy h2');
+      return {
+        scrolledToTop: window.scrollY <= 1,
+        headingFocused: Boolean(heading && document.activeElement === heading)
+      };
+    })()`,
+    returnByValue: true
+  });
+  return evaluation.result?.value;
+}
+
+async function readMaterialAutoBuyContract(cdp) {
+  await clickNavigationItem(cdp, '交易与制造');
+  const evaluation = await cdp.send('Runtime.evaluate', {
+    expression: `(async () => {
+      const inputByLabel = (label) => [...document.querySelectorAll('label')]
+        .find((node) => node.querySelector('.field__label, .toggle__label')?.textContent?.trim() === label)
+        ?.querySelector('input');
+      const toggle = inputByLabel('启用材料一键扫货');
+      const rare = inputByLabel('扫货最低品级');
+      const level = inputByLabel('扫货最低等级');
+      if (!toggle || !rare || !level) throw new Error('Material auto-buy controls are missing.');
+      const setValue = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, String(value));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      if (!toggle.checked) toggle.click();
+      setValue(rare, 4);
+      setValue(level, 3);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      toggle.click();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const disabledWhenOff = rare.disabled && level.disabled;
+      const valuesWhileOff = [rare.value, level.value];
+      toggle.click();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return {
+        disabledWhenOff,
+        enabledWhenOn: !rare.disabled && !level.disabled,
+        valuesPreserved: rare.value === '4' && level.value === '3' && valuesWhileOff[0] === '4' && valuesWhileOff[1] === '3'
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true
+  });
+  if (evaluation.exceptionDetails) {
+    throw new Error('Could not exercise material auto-buy dependent controls.');
+  }
+  return evaluation.result?.value;
+}
+
+async function readSettingsSearchContract(cdp) {
+  await clickNavigationItem(cdp, '交易与制造');
+  const evaluation = await cdp.send('Runtime.evaluate', {
+    expression: `(async () => {
+      const input = document.querySelector('[role="search"] input');
+      if (!input) throw new Error('Settings search input is missing.');
+      const setQuery = async (value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      };
+      const visibleCards = () => [...document.querySelectorAll('[data-searchable-card]')]
+        .filter((card) => !card.hidden && getComputedStyle(card).display !== 'none');
+      await setQuery('官府仓库');
+      const filtered = visibleCards();
+      const filteredToGovernmentStorage = filtered.length === 1 &&
+        filtered[0].textContent.includes('官府仓库刷新') &&
+        filtered[0].textContent.includes('启用官府仓库刷新');
+      await setQuery('');
+      return {
+        filteredToGovernmentStorage,
+        restoredAllCards: visibleCards().length === 6
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true
+  });
+  if (evaluation.exceptionDetails) {
+    throw new Error('Could not exercise settings search filtering.');
+  }
+  return evaluation.result?.value;
+}
+
+async function readConfirmDialogContract(cdp) {
+  await clickNavigationItem(cdp, '主页');
+  const dangerEvaluation = await cdp.send('Runtime.evaluate', {
+    expression: `(async () => {
+      const uninstall = [...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === '卸载模组');
+      if (!uninstall || uninstall.disabled) throw new Error('Enabled uninstall action is missing.');
+      uninstall.click();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const dialog = document.querySelector('dialog.confirm-dialog[open]');
+      const cancel = [...(dialog?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.trim() === '取消');
+      const dangerInitiallyFocusesCancel = Boolean(cancel && document.activeElement === cancel);
+      cancel?.click();
+      return dangerInitiallyFocusesCancel;
+    })()`,
+    awaitPromise: true,
+    returnByValue: true
+  });
+  if (dangerEvaluation.exceptionDetails) {
+    throw new Error('Could not exercise the danger confirmation dialog.');
+  }
+  return {
+    dangerInitiallyFocusesCancel: dangerEvaluation.result?.value === true
+  };
+}
+async function readAccessibilityContract(cdp) {
+  const unnamedControls = [];
+  for (const page of NAVIGATION_PAGES) {
+    await clickNavigationItem(cdp, page.label);
+    await waitForRendererPaint(cdp);
+    const evaluation = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const text = (node) => node?.textContent?.trim().replace(/\\s+/g, ' ') ?? '';
+        const accessibleName = (control) => {
+          const ariaLabel = control.getAttribute('aria-label')?.trim();
+          if (ariaLabel) return ariaLabel;
+          const labelledBy = control.getAttribute('aria-labelledby')?.trim();
+          if (labelledBy) {
+            const label = labelledBy.split(/\\s+/).map((id) => text(document.getElementById(id))).filter(Boolean).join(' ');
+            if (label) return label;
+          }
+          const labels = [...(control.labels ?? [])].map(text).filter(Boolean).join(' ');
+          if (labels) return labels;
+          if (control.tagName === 'BUTTON' && text(control)) return text(control);
+          return control.getAttribute('title')?.trim() ?? '';
+        };
+        return [...document.querySelectorAll('button, input, select, textarea')]
+          .filter((control) => {
+            const rect = control.getBoundingClientRect();
+            const style = getComputedStyle(control);
+            return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+          })
+          .filter((control) => !accessibleName(control))
+          .map((control) => control.outerHTML.slice(0, 160));
+      })()`,
+      returnByValue: true
+    });
+    unnamedControls.push(...(evaluation.result?.value ?? []).map((control) => `${page.label}: ${control}`));
+  }
+  const statusEvaluation = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const status = document.querySelector('.status-strip, [data-status-region]');
+      return Boolean(status && (status.getAttribute('role') === 'status' || status.getAttribute('aria-live') === 'polite'));
+    })()`,
+    returnByValue: true
+  });
+  return {
+    unnamedControls,
+    liveStatusPresent: statusEvaluation.result?.value === true
+  };
 }
 
 async function readSettingsPageContract(cdp, label) {
@@ -325,11 +614,25 @@ async function readRendererUiContracts(cdp) {
     settingsPages.push(await readSettingsPageContract(cdp, label));
   }
   const customTalents = await readCustomTalentContract(cdp);
+  const navigationPages = await readNavigationContracts(cdp);
+  const responsive = await readResponsiveContract(cdp);
+  const pageTransition = await readPageTransitionContract(cdp);
+  const materialAutoBuy = await readMaterialAutoBuyContract(cdp);
+  const settingsSearch = await readSettingsSearchContract(cdp);
+  const confirmDialog = await readConfirmDialogContract(cdp);
+  const accessibility = await readAccessibilityContract(cdp);
   return {
     ...baseEvaluation.result?.value,
     systems: systemsEvaluation.result?.value,
     settingsPages,
-    customTalents
+    customTalents,
+    navigationPages,
+    responsive,
+    pageTransition,
+    materialAutoBuy,
+    settingsSearch,
+    confirmDialog,
+    accessibility
   };
 }
 

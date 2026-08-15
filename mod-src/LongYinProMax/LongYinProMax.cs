@@ -214,6 +214,12 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static bool _grantingTreasureChestBonusItems;
     private static bool _treasureChestChoiceClosingPlot;
     private static bool _dailySkillInsightBaselineReady;
+    private static bool _mogaoDiscipleForgetHooksReady;
+    private static int _mogaoPlayerOverrideDepth;
+    private static int _mogaoPlayerOverrideFrame = -1;
+    private static MogaoForgetMode _mogaoPendingTargetMode;
+    private static MogaoForgetMode _mogaoActiveMode;
+    private static HeroData? _mogaoForgetTarget;
     private static float _studySkillUnitDayBudget;
     private static float _studySkillExtraDayCarry;
     private static TimeData? _studySkillTaskStartDate;
@@ -404,6 +410,13 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         public string ShopName { get; init; } = string.Empty;
         public int AreaId { get; init; }
         public int BuildingId { get; init; }
+    }
+
+    private enum MogaoForgetMode
+    {
+        None,
+        Skill,
+        Talent
     }
 
     private enum MaterialAffixCombineMode
@@ -808,6 +821,31 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         PatchMethod(typeof(PlotController), nameof(PlotController.SetSkipPlot), new[] { typeof(bool) }, null, nameof(DialogFastForwardSetSkipPlotPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.ShowHeroInteractUI), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.ManageMeetNpcPlot), new[] { typeof(HeroData) }, null, nameof(DialogHeroContextPostfix));
+        var mogaoForgetPatches = new[]
+        {
+            PatchMethod(typeof(WorldData), nameof(WorldData.Player), Type.EmptyTypes, null, nameof(MogaoPlayerPostfix)),
+            PatchMethod(typeof(BuildingUIController), nameof(BuildingUIController.SpeRemoveSkill), Type.EmptyTypes, nameof(MogaoBuildingForgetPrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(BuildingUIController), nameof(BuildingUIController.SpeRemoveTag), Type.EmptyTypes, nameof(MogaoBuildingForgetPrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(BuildingUIController), nameof(BuildingUIController.GetSpeRemoveSkillCost), Type.EmptyTypes, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(BuildingUIController), nameof(BuildingUIController.GetSpeRemoveTagCost), Type.EmptyTypes, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveSkillChoose), Type.EmptyTypes, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveSkillChoosen), Type.EmptyTypes, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveSkillStart), Type.EmptyTypes, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveSkillFinish), new[] { typeof(string) }, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetFinishPostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveTagChoose), new[] { typeof(string) }, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveTagStart), new[] { typeof(string) }, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveTagFinish), new[] { typeof(string) }, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetFinishPostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(ChooseController), nameof(ChooseController.UnshowChoosePanel), Type.EmptyTypes, null, nameof(MogaoPickerCancelledPostfix))
+        };
+        _mogaoDiscipleForgetHooksReady = mogaoForgetPatches.All(patched => patched);
+        if (!_mogaoDiscipleForgetHooksReady)
+        {
+            ResetMogaoForgetState();
+        }
+
+        LoggerInstance.LogInfo(
+            $"[Compatibility] Mogao disciple forgetting: {(_mogaoDiscipleForgetHooksReady ? "ENABLED" : "DEGRADED")} " +
+            "(leader target picker and complete vanilla skill/talent forget flow required).");
         LoggerInstance.LogInfo("[Compatibility] Character-data test uses on-demand HeroDetailController reads; methods left unpatched.");
         PatchMethod(typeof(PlotController), nameof(PlotController.LoverInteractWithNPC), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.AskHeroToLover), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
@@ -1226,7 +1264,13 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         Log.LogInfo($"Outside-battle speed cycle hotkey is {_outsideBattleSpeedHotkey.Value}.");
     }
 
-    private bool PatchMethod(Type type, string methodName, Type[] parameterTypes, string? prefixName, string? postfixName)
+    private bool PatchMethod(
+        Type type,
+        string methodName,
+        Type[] parameterTypes,
+        string? prefixName,
+        string? postfixName,
+        string? finalizerName = null)
     {
         var target = FindCompatibleTargetMethod(type, methodName, parameterTypes);
 
@@ -1236,7 +1280,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             return false;
         }
 
-        return PatchResolvedMethod(target, prefixName, postfixName);
+        return PatchResolvedMethod(target, prefixName, postfixName, finalizerName);
     }
 
     private bool PatchFirstAvailableMethod(
@@ -1264,12 +1308,17 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         return false;
     }
 
-    private bool PatchResolvedMethod(MethodBase target, string? prefixName, string? postfixName)
+    private bool PatchResolvedMethod(
+        MethodBase target,
+        string? prefixName,
+        string? postfixName,
+        string? finalizerName = null)
     {
         const BindingFlags PatchFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
         var patchType = typeof(LongYinProMaxPlugin);
         var prefix = prefixName == null ? null : patchType.GetMethod(prefixName, PatchFlags);
         var postfix = postfixName == null ? null : patchType.GetMethod(postfixName, PatchFlags);
+        var finalizer = finalizerName == null ? null : patchType.GetMethod(finalizerName, PatchFlags);
 
         if (prefixName != null && prefix == null)
         {
@@ -1283,12 +1332,19 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             return false;
         }
 
+        if (finalizerName != null && finalizer == null)
+        {
+            RecordSkippedPatch(target.DeclaringType ?? typeof(object), target.Name, target.GetParameters().Select(parameter => parameter.ParameterType).ToArray(), $"finalizer {finalizerName} is unavailable");
+            return false;
+        }
+
         try
         {
             _harmony!.Patch(
                 target,
                 prefix: prefix == null ? null : new HarmonyMethod(prefix),
-                postfix: postfix == null ? null : new HarmonyMethod(postfix));
+                postfix: postfix == null ? null : new HarmonyMethod(postfix),
+                finalizer: finalizer == null ? null : new HarmonyMethod(finalizer));
             _patchedMethodCount++;
             Log.LogInfo($"Patched {target.DeclaringType?.Name}.{target.Name}({target.GetParameters().Length} params)");
             return true;
@@ -16428,6 +16484,309 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         }
 
         return speed * multiplier;
+    }
+
+    private static bool MogaoBuildingForgetPrefix(
+        BuildingUIController __instance,
+        MethodBase __originalMethod,
+        out bool __state)
+    {
+        __state = false;
+        if (!_mogaoDiscipleForgetHooksReady)
+        {
+            return true;
+        }
+
+        var mode = GetMogaoForgetMode(__originalMethod);
+        var player = TryGetPlayerHero();
+        if (mode == MogaoForgetMode.None || player == null || !IsPlayerSectLeader(player))
+        {
+            ResetMogaoForgetState();
+            return true;
+        }
+
+        if (_mogaoPendingTargetMode == mode)
+        {
+            if (!IsCurrentMogaoPickerCallback(__instance, __originalMethod.Name))
+            {
+                ResetMogaoForgetState();
+                return !TryShowMogaoTargetPicker(__instance, __originalMethod.Name, player, mode);
+            }
+
+            var selectedTarget = TryGetMogaoSelectedHero();
+            _mogaoPendingTargetMode = MogaoForgetMode.None;
+            if (selectedTarget != null && CanPlayerManageMogaoTarget(player, selectedTarget))
+            {
+                _mogaoActiveMode = mode;
+                _mogaoForgetTarget = selectedTarget;
+                PushPlayerLog($"掌门已选择由 {TryGetHeroName(selectedTarget)} 遗忘{GetMogaoForgetLabel(mode)}");
+                __state = BeginMogaoPlayerOverride(mode);
+                return true;
+            }
+
+            ResetMogaoForgetState();
+        }
+
+        return !TryShowMogaoTargetPicker(__instance, __originalMethod.Name, player, mode);
+    }
+
+    private static void MogaoForgetScopePrefix(MethodBase __originalMethod, out bool __state)
+    {
+        __state = BeginMogaoPlayerOverride(GetMogaoForgetMode(__originalMethod));
+    }
+
+    private static void MogaoForgetScopePostfix(bool __state)
+    {
+        EndMogaoPlayerOverride(__state);
+    }
+
+    private static void MogaoForgetFinishPostfix(bool __state)
+    {
+        EndMogaoPlayerOverride(__state);
+        ResetMogaoForgetState();
+    }
+
+    private static Exception? MogaoForgetScopeFinalizer(Exception? __exception, bool __state)
+    {
+        if (__exception != null)
+        {
+            EndMogaoPlayerOverride(__state);
+            ResetMogaoForgetState();
+        }
+
+        return __exception;
+    }
+
+    private static void MogaoPickerCancelledPostfix()
+    {
+        if (_mogaoPendingTargetMode != MogaoForgetMode.None)
+        {
+            ResetMogaoForgetState();
+        }
+    }
+
+    private static void MogaoPlayerPostfix(ref HeroData __result)
+    {
+        if (_mogaoPlayerOverrideDepth <= 0 || _mogaoForgetTarget == null)
+        {
+            return;
+        }
+
+        if (_mogaoPlayerOverrideFrame != Time.frameCount)
+        {
+            ResetMogaoForgetState();
+            return;
+        }
+
+        var actualPlayer = __result;
+        if (actualPlayer == null || !CanPlayerManageMogaoTarget(actualPlayer, _mogaoForgetTarget))
+        {
+            LoggerInstance.LogWarning("Mogao disciple forgetting stopped because the player is no longer the selected target's sect leader.");
+            ResetMogaoForgetState();
+            return;
+        }
+
+        __result = _mogaoForgetTarget;
+    }
+
+    private static bool TryShowMogaoTargetPicker(
+        BuildingUIController controller,
+        string callbackName,
+        HeroData player,
+        MogaoForgetMode mode)
+    {
+        try
+        {
+            var candidates = BuildMogaoForgetTargetList(player);
+            if (candidates.Count <= 1)
+            {
+                ResetMogaoForgetState();
+                return false;
+            }
+
+            var chooseController = ChooseController.Instance;
+            if (chooseController == null || controller?.gameObject == null)
+            {
+                ResetMogaoForgetState();
+                return false;
+            }
+
+            _mogaoForgetTarget = null;
+            _mogaoActiveMode = MogaoForgetMode.None;
+            _mogaoPendingTargetMode = mode;
+            chooseController.targetHero = null;
+            chooseController.ShowChoosePanel(
+                ChooseType.Hero,
+                candidates,
+                controller.gameObject,
+                callbackName,
+                string.Empty,
+                ChooseFilterType.None,
+                null!);
+            PushPlayerLog($"掌门：请选择要遗忘{GetMogaoForgetLabel(mode)}的同门弟子（也可选择自己）");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ResetMogaoForgetState();
+            LoggerInstance.LogWarning($"Mogao disciple target picker failed; vanilla self-only flow retained: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+    }
+
+    private static Il2CppSystem.Collections.Generic.List<HeroData> BuildMogaoForgetTargetList(HeroData player)
+    {
+        var candidates = new Il2CppSystem.Collections.Generic.List<HeroData>();
+        candidates.Add(player);
+        var seenHeroIds = new HashSet<int>();
+        var playerId = TryGetHeroId(player);
+        if (playerId.HasValue)
+        {
+            seenHeroIds.Add(playerId.Value);
+        }
+
+        var forceHeroes = player.GetForce(false)?.GetOwnHeros();
+        if (forceHeroes == null)
+        {
+            return candidates;
+        }
+
+        for (var index = 0; index < forceHeroes.Count; index++)
+        {
+            var hero = forceHeroes[index];
+            if (hero == null || hero == player || hero.dead || hero.inPrison ||
+                !CanPlayerManageMogaoTarget(player, hero))
+            {
+                continue;
+            }
+
+            var heroId = TryGetHeroId(hero);
+            if (!heroId.HasValue || seenHeroIds.Add(heroId.Value))
+            {
+                candidates.Add(hero);
+            }
+        }
+
+        return candidates;
+    }
+
+    private static HeroData? TryGetMogaoSelectedHero()
+    {
+        try
+        {
+            return ChooseController.Instance?.targetHero;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool IsCurrentMogaoPickerCallback(
+        BuildingUIController controller,
+        string callbackName)
+    {
+        try
+        {
+            var chooseController = ChooseController.Instance;
+            return chooseController != null &&
+                controller?.gameObject != null &&
+                chooseController.chooseType == ChooseType.Hero &&
+                chooseController.sendResultFucTarget == controller.gameObject &&
+                string.Equals(chooseController.sendResultFuc, callbackName, StringComparison.Ordinal) &&
+                string.IsNullOrEmpty(chooseController.sendResultParam);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool CanPlayerManageMogaoTarget(HeroData player, HeroData target)
+    {
+        if (player == target)
+        {
+            return true;
+        }
+
+        try
+        {
+            return IsPlayerSectLeader(player) &&
+                player.belongForceID >= 0 &&
+                target.belongForceID == player.belongForceID &&
+                !target.dead &&
+                !target.inPrison;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsPlayerSectLeader(HeroData player)
+    {
+        try
+        {
+            return player.PlayerLeadForce();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static MogaoForgetMode GetMogaoForgetMode(MethodBase? method)
+    {
+        var methodName = method?.Name ?? string.Empty;
+        if (methodName.IndexOf("RemoveSkill", StringComparison.Ordinal) >= 0)
+        {
+            return MogaoForgetMode.Skill;
+        }
+
+        return methodName.IndexOf("RemoveTag", StringComparison.Ordinal) >= 0
+            ? MogaoForgetMode.Talent
+            : MogaoForgetMode.None;
+    }
+
+    private static string GetMogaoForgetLabel(MogaoForgetMode mode)
+    {
+        return mode == MogaoForgetMode.Skill ? "武学" : "天赋";
+    }
+
+    private static bool BeginMogaoPlayerOverride(MogaoForgetMode mode)
+    {
+        if (!_mogaoDiscipleForgetHooksReady || mode == MogaoForgetMode.None ||
+            _mogaoForgetTarget == null || _mogaoActiveMode != mode)
+        {
+            return false;
+        }
+
+        _mogaoPlayerOverrideDepth++;
+        _mogaoPlayerOverrideFrame = Time.frameCount;
+        return true;
+    }
+
+    private static void EndMogaoPlayerOverride(bool scopeEntered)
+    {
+        if (!scopeEntered)
+        {
+            return;
+        }
+
+        _mogaoPlayerOverrideDepth = Math.Max(0, _mogaoPlayerOverrideDepth - 1);
+        if (_mogaoPlayerOverrideDepth == 0)
+        {
+            _mogaoPlayerOverrideFrame = -1;
+        }
+    }
+
+    private static void ResetMogaoForgetState()
+    {
+        _mogaoPendingTargetMode = MogaoForgetMode.None;
+        _mogaoActiveMode = MogaoForgetMode.None;
+        _mogaoForgetTarget = null;
+        _mogaoPlayerOverrideDepth = 0;
+        _mogaoPlayerOverrideFrame = -1;
     }
 
     private static HeroData? TryGetPlayerHero()

@@ -230,7 +230,7 @@ Require-ScopePattern $clickRouterMethod `
 # the direct-action assists, including government storage refresh, so unrelated menu
 # and material-overlay behavior is deliberately left untouched.
 Require-ScopePattern $clickRouterMethod `
-    'if\s*\(\s*\(\s*isAuctionRefresh\s*\|\|\s*isGovernmentStorageRefresh\s*\|\|\s*isIdentifyAssist(?:\s*\|\|\s*[A-Za-z_][A-Za-z0-9_]*)*\s*\)\s*&&\s*\(\s*eventData\s*==\s*null\s*\|\|\s*eventData\.button\s*!=\s*PointerEventData\.InputButton\.Left\s*\)\s*\)\s*\{?\s*return false\s*;' `
+    'if\s*\(\s*\(\s*isAuctionRefresh\s*\|\|\s*isGovernmentStorageRefresh\s*\|\|\s*isYellowCraneCandidateRefresh\s*\|\|\s*isIdentifyAssist(?:\s*\|\|\s*[A-Za-z_][A-Za-z0-9_]*)*\s*\)\s*&&\s*\(\s*eventData\s*==\s*null\s*\|\|\s*eventData\.button\s*!=\s*PointerEventData\.InputButton\.Left\s*\)\s*\)\s*\{?\s*return false\s*;' `
     'Direct-action overlay buttons must reject null PointerEventData, right clicks, and middle clicks before dispatch.'
 Reject-ScopePattern $clickRouterMethod `
     'eventData\s*==\s*null\s*\|\|\s*eventData\.button\s*==\s*PointerEventData\.InputButton\.Left' `

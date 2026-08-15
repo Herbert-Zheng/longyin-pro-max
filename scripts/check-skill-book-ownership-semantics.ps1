@@ -8,10 +8,9 @@ $resolvedSourcePath = (Resolve-Path -LiteralPath $SourcePath).Path
 $resolvedElectronRoot = (Resolve-Path -LiteralPath $ElectronRoot).Path
 $source = Get-Content -Raw -LiteralPath $resolvedSourcePath
 $typesSource = Get-Content -Raw -LiteralPath (Join-Path $resolvedElectronRoot 'shared\types.ts')
+$visibleSettingsSource = Get-Content -Raw -LiteralPath (Join-Path $resolvedElectronRoot 'shared\visible-settings.ts')
 $configSource = Get-Content -Raw -LiteralPath (Join-Path $resolvedElectronRoot 'shared\config.ts')
-$componentsSource = Get-Content -Raw -LiteralPath (Join-Path $resolvedElectronRoot 'renderer\components.tsx')
-$appSource = Get-Content -Raw -LiteralPath (Join-Path $resolvedElectronRoot 'renderer\App.tsx')
-$mainSource = Get-Content -Raw -LiteralPath (Join-Path $resolvedElectronRoot 'main.ts')
+$expTalentSource = Get-Content -Raw -LiteralPath (Join-Path $resolvedElectronRoot 'renderer\settings\ExpTalentSettingsPage.tsx')
 $failures = [System.Collections.Generic.List[string]]::new()
 
 function Get-CSharpMethodText {
@@ -77,14 +76,12 @@ Require-Pattern $ownershipMethod 'PlayerInventoryHasSkillBook\(player, skillId\)
 Require-Pattern $source '<color=#8FD17A>已拥有</color>' 'Owned skill books must be shown in green.'
 Require-Pattern $source '<color=#F08A6A>未拥有</color>' 'Missing skill books must be shown in red.'
 
-foreach ($electronSource in @($typesSource, $configSource, $componentsSource, $appSource, $mainSource)) {
-    Require-Pattern $electronSource '\bskillBookOwnershipIndicatorEnabled\b' 'Electron settings must carry the skill-book ownership switch through types, defaults, config, and UI.'
-}
 Require-Pattern $typesSource 'skillBookOwnershipIndicatorEnabled:\s*boolean;' 'The ownership switch must be a required VisibleSettings field so every process carries it explicitly.'
+Require-Pattern $visibleSettingsSource 'skillBookOwnershipIndicatorEnabled:\s*true' 'The shared visible-settings defaults must enable the ownership indicator.'
 Require-Pattern $configSource '\[SkillDisplay\][\s\S]*?BookOwnershipIndicatorEnabled\s*=\s*\$\{boolText\(settings\.skillBookOwnershipIndicatorEnabled\)\}' 'Electron must write the ownership switch into the SkillDisplay config section.'
 Require-Pattern $configSource 'getIniSectionBody\(text,\s*''SkillDisplay''\)[\s\S]*?readBool\(\s*skillDisplaySection,\s*''BookOwnershipIndicatorEnabled''' 'Electron must read the ownership switch from the SkillDisplay config section.'
 Require-Pattern $configSource 'upsertIniSectionValue\(\s*nextMain,\s*''SkillDisplay'',\s*''BookOwnershipIndicatorEnabled'',\s*boolText\(normalized\.skillBookOwnershipIndicatorEnabled\)' 'Electron must persist edits to the ownership switch.'
-Require-Pattern $appSource 'label="显示功法书拥有状态"[\s\S]*?updateSetting\(''skillBookOwnershipIndicatorEnabled'', value\)[\s\S]*?背包与仓库' 'Electron must expose a clearly described ownership checkbox.'
+Require-Pattern $expTalentSource 'label="显示功法书拥有状态"[\s\S]*?onSettingChange\(''skillBookOwnershipIndicatorEnabled'', value\)[\s\S]*?背包与仓库' 'Electron must expose a clearly described ownership checkbox.'
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }

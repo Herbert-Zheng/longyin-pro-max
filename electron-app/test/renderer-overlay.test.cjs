@@ -238,6 +238,18 @@ test('growth settings expose the skill book ownership indicator and its inventor
   assert.match(renderer, /已拥有显示绿色，未拥有显示红色/);
 });
 
+test('growth settings expose the Mogao sect-leader disciple forgetting toggle', () => {
+  const renderer = readRendererSource();
+
+  assert.match(renderer, /<Card title="莫高窟遗忘" eyebrow="Mogao">/);
+  assert.match(
+    renderer,
+    /label="掌门可为本门弟子遗忘武学与天赋"[\s\S]{0,280}value=\{settings\.mogaoDiscipleForgettingEnabled\}[\s\S]{0,280}updateSetting\('mogaoDiscipleForgettingEnabled', value\)/
+  );
+  assert.match(renderer, /非掌门仍只能为自己操作/);
+  assert.match(renderer, /保存后需重启游戏生效/);
+});
+
 test('launcher keeps primary actions visible and clearly marks unsaved settings', () => {
   const renderer = readRendererSource();
   const styles = readSource('src/renderer/styles.css');
@@ -537,6 +549,7 @@ const EXPECTED_VISIBLE_SETTINGS = {
   materialPurchaseMinItemLv: 0,
   shopOwnershipEnabled: true,
   skillBookOwnershipIndicatorEnabled: true,
+  mogaoDiscipleForgettingEnabled: true,
   auctionEventAlwaysRedEnabled: true,
   auctionPreviewRefreshEnabled: true,
   auctionPreviewRefreshHotkey: 'R',
@@ -589,10 +602,10 @@ const EXPECTED_VISIBLE_SETTINGS = {
   battleTurboHotkey: 'F8'
 };
 
-test('visible settings defaults contain all 71 known fields and values', () => {
+test('visible settings defaults contain all 72 known fields and values', () => {
   const { createDefaultVisibleSettings } = loadVisibleSettings();
   const defaults = createDefaultVisibleSettings();
-  assert.equal(Object.keys(defaults).length, 71);
+  assert.equal(Object.keys(defaults).length, 72);
   assert.deepEqual(defaults, EXPECTED_VISIBLE_SETTINGS);
 });
 

@@ -276,6 +276,7 @@ export interface VisibleSettings {
   materialPurchaseMinItemLv: number;
   shopOwnershipEnabled: boolean;
   skillBookOwnershipIndicatorEnabled: boolean;
+  mogaoDiscipleForgettingEnabled: boolean;
   auctionEventAlwaysRedEnabled: boolean;
   auctionPreviewRefreshEnabled: boolean;
   auctionPreviewRefreshHotkey: string;

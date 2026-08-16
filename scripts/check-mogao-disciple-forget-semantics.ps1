@@ -1,11 +1,17 @@
 param(
-    [string]$SourcePath = (Join-Path $PSScriptRoot '..\mod-src\LongYinProMax\LongYinProMax.cs')
+    [string]$SourcePath = (Join-Path $PSScriptRoot '..\mod-src\LongYinProMax\LongYinProMax.cs'),
+    [string]$ElectronRoot = (Join-Path $PSScriptRoot '..\electron-app\src')
 )
 
 $ErrorActionPreference = 'Stop'
 
 $resolvedSourcePath = (Resolve-Path -LiteralPath $SourcePath).Path
+$resolvedElectronRoot = (Resolve-Path -LiteralPath $ElectronRoot).Path
 $source = Get-Content -Raw -LiteralPath $resolvedSourcePath
+$typesSource = Get-Content -Raw -LiteralPath (Join-Path $resolvedElectronRoot 'shared\types.ts')
+$visibleSettingsSource = Get-Content -Raw -LiteralPath (Join-Path $resolvedElectronRoot 'shared\visible-settings.ts')
+$configSource = Get-Content -Raw -LiteralPath (Join-Path $resolvedElectronRoot 'shared\config.ts')
+$expTalentSource = Get-Content -Raw -LiteralPath (Join-Path $resolvedElectronRoot 'renderer\settings\ExpTalentSettingsPage.tsx')
 $failures = [System.Collections.Generic.List[string]]::new()
 
 function Get-CSharpMethodText {
@@ -70,6 +76,9 @@ $scopeBegin = Get-CSharpMethodText 'BeginMogaoPlayerOverride'
 $finishPostfix = Get-CSharpMethodText 'MogaoForgetFinishPostfix'
 $scopeFinalizer = Get-CSharpMethodText 'MogaoForgetScopeFinalizer'
 
+Require-Pattern $source 'ConfigEntry<bool>\s+_mogaoDiscipleForgettingEnabled\b' 'Mogao disciple forgetting must expose a persisted enabled switch.'
+Require-Pattern $source 'Config\.Bind\s*\(\s*"Mogao"\s*,\s*"DiscipleForgettingEnabled"\s*,\s*true\b' 'Mogao disciple forgetting must be enabled by default in the Mogao section.'
+
 $requiredPatchTargets = @(
     'WorldData\),\s*nameof\(WorldData\.Player\)',
     'BuildingUIController\),\s*nameof\(BuildingUIController\.SpeRemoveSkill\)',
@@ -92,7 +101,7 @@ foreach ($targetPattern in $requiredPatchTargets) {
 Require-Pattern $loadMethod '_mogaoDiscipleForgetHooksReady\s*=\s*mogaoForgetPatches\.All\(patched\s*=>\s*patched\)' 'The feature must require the complete hook set before enabling disciple targeting.'
 Require-Pattern $loadMethod 'if\s*\(\s*!_mogaoDiscipleForgetHooksReady\s*\)[\s\S]*?ResetMogaoForgetState\(\)' 'A partial hook set must reset and safely disable the target override.'
 
-Require-Pattern $buildingPrefix '!_mogaoDiscipleForgetHooksReady[\s\S]*?return\s+true' 'The building entry must preserve vanilla behavior when compatibility hooks are unavailable.'
+Require-Pattern $buildingPrefix '!_mogaoDiscipleForgettingEnabled\.Value\s*\|\|\s*!_mogaoDiscipleForgetHooksReady[\s\S]*?ResetMogaoForgetState\(\)[\s\S]*?return\s+true' 'The building entry must preserve vanilla behavior and clear state when the feature is disabled or compatibility hooks are unavailable.'
 Require-Pattern $buildingPrefix '!IsPlayerSectLeader\(player\)[\s\S]*?ResetMogaoForgetState\(\)[\s\S]*?return\s+true' 'A non-leader must remain on the vanilla self-only path and must not retain a disciple target.'
 Require-Pattern $buildingPrefix '!IsCurrentMogaoPickerCallback\(__instance,\s*__originalMethod\.Name\)[\s\S]*?ResetMogaoForgetState\(\)' 'A pending target must only be accepted from the exact active Mogao picker callback.'
 Require-Pattern $buildingPrefix 'CanPlayerManageMogaoTarget\(player,\s*selectedTarget\)[\s\S]*?_mogaoForgetTarget\s*=\s*selectedTarget[\s\S]*?BeginMogaoPlayerOverride' 'A picker result must be re-authorized before entering the vanilla forget flow.'
@@ -109,7 +118,7 @@ Require-Pattern $leaderMethod 'player\.PlayerLeadForce\(\)' 'Leader authorizatio
 Require-Pattern $authorizationMethod 'player\s*==\s*target[\s\S]*?return\s+true' 'The original player target must always remain valid.'
 Require-Pattern $authorizationMethod 'IsPlayerSectLeader\(player\)[\s\S]*?player\.belongForceID\s*>=\s*0[\s\S]*?target\.belongForceID\s*==\s*player\.belongForceID' 'Disciple authorization must require current leadership and exact same-sect membership.'
 
-Require-Pattern $scopeBegin '_mogaoActiveMode\s*!=\s*mode[\s\S]*?return\s+false[\s\S]*?_mogaoPlayerOverrideDepth\+\+' 'Only the matching active skill/talent flow may enter the player override scope.'
+Require-Pattern $scopeBegin '!_mogaoDiscipleForgettingEnabled\.Value[\s\S]*?_mogaoActiveMode\s*!=\s*mode[\s\S]*?return\s+false[\s\S]*?_mogaoPlayerOverrideDepth\+\+' 'Only an enabled, matching active skill/talent flow may enter the player override scope.'
 Require-Pattern $worldPlayerPostfix '_mogaoPlayerOverrideDepth\s*<=\s*0[\s\S]*?_mogaoForgetTarget\s*==\s*null[\s\S]*?return' 'WorldData.Player must remain untouched outside a narrow Mogao override scope.'
 Require-Pattern $worldPlayerPostfix '_mogaoPlayerOverrideFrame\s*!=\s*Time\.frameCount[\s\S]*?ResetMogaoForgetState\(\)' 'A leaked override scope must fully invalidate its target session outside the originating frame.'
 Require-Pattern $worldPlayerPostfix 'CanPlayerManageMogaoTarget\(actualPlayer,\s*_mogaoForgetTarget\)[\s\S]*?ResetMogaoForgetState\(\)[\s\S]*?__result\s*=\s*_mogaoForgetTarget' 'Every player substitution must re-check live leader and same-sect authorization.'
@@ -118,6 +127,13 @@ Require-Pattern $loadMethod 'nameof\(MogaoForgetScopeFinalizer\)' 'Every scoped 
 Require-Pattern $scopeFinalizer '__exception\s*!=\s*null[\s\S]*?EndMogaoPlayerOverride\(__state\)[\s\S]*?ResetMogaoForgetState\(\)[\s\S]*?return\s+__exception' 'The Harmony finalizer must fully clean leaked scopes while preserving the original exception.'
 
 Reject-Pattern $source '_mogaoForgetTarget\?\.LoseSkill|_mogaoForgetTarget\?\.RemoveTag|_mogaoForgetTarget\.LoseSkill|_mogaoForgetTarget\.RemoveTag' 'The mod must not reimplement removal; it must reuse the complete vanilla validation, cost, time, and mutation flow.'
+
+Require-Pattern $typesSource 'mogaoDiscipleForgettingEnabled:\s*boolean;' 'Electron settings must carry the Mogao disciple-forgetting switch.'
+Require-Pattern $visibleSettingsSource 'mogaoDiscipleForgettingEnabled:\s*true' 'Electron must enable the Mogao disciple-forgetting switch by default.'
+Require-Pattern $configSource '\[Mogao\][\s\S]*?DiscipleForgettingEnabled\s*=\s*\$\{boolText\(settings\.mogaoDiscipleForgettingEnabled\)\}' 'Electron must write the Mogao switch in generated configs.'
+Require-Pattern $configSource 'getIniSectionBody\(text,\s*''Mogao''\)[\s\S]*?readBool\(\s*mogaoSection,\s*''DiscipleForgettingEnabled''' 'Electron must read the Mogao switch only from its owning section.'
+Require-Pattern $configSource 'upsertIniSectionValue\(\s*nextMain,\s*''Mogao'',\s*''DiscipleForgettingEnabled'',\s*boolText\(normalized\.mogaoDiscipleForgettingEnabled\)' 'Electron must persist edits to the Mogao switch.'
+Require-Pattern $expTalentSource 'label="掌门可为本门弟子遗忘武学与天赋"[\s\S]*?onSettingChange\(''mogaoDiscipleForgettingEnabled'', value\)[\s\S]*?非掌门仍只能为自己操作' 'Electron must expose a clearly described Mogao disciple-forgetting checkbox.'
 
 if ($failures.Count -gt 0) {
     foreach ($failure in $failures) {

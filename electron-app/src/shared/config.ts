@@ -626,6 +626,9 @@ ShopOwnershipEnabled = ${boolText(settings.shopOwnershipEnabled)}
 [SkillDisplay]
 BookOwnershipIndicatorEnabled = ${boolText(settings.skillBookOwnershipIndicatorEnabled)}
 
+[Mogao]
+DiscipleForgettingEnabled = ${boolText(settings.mogaoDiscipleForgettingEnabled)}
+
 [Auction]
 EventAlwaysRedEnabled = ${boolText(settings.auctionEventAlwaysRedEnabled)}
 PreviewRefreshEnabled = ${boolText(settings.auctionPreviewRefreshEnabled)}
@@ -868,6 +871,7 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
   const systemsSection = getIniSectionBody(text, 'Systems') ?? getIniSectionBody(text, 'Time');
   const commerceSection = getIniSectionBody(text, 'Commerce');
   const skillDisplaySection = getIniSectionBody(text, 'SkillDisplay');
+  const mogaoSection = getIniSectionBody(text, 'Mogao');
   const auctionSection = getIniSectionBody(text, 'Auction');
   const governmentStorageSection = getIniSectionBody(text, 'GovernmentStorage');
   const yellowCraneTowerSection = getIniSectionBody(text, 'YellowCraneTower');
@@ -933,6 +937,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       skillDisplaySection,
       'BookOwnershipIndicatorEnabled',
       DEFAULT_VISIBLE_SETTINGS.skillBookOwnershipIndicatorEnabled
+    ),
+    mogaoDiscipleForgettingEnabled: readBool(
+      mogaoSection,
+      'DiscipleForgettingEnabled',
+      DEFAULT_VISIBLE_SETTINGS.mogaoDiscipleForgettingEnabled
     ),
     auctionEventAlwaysRedEnabled: readBool(
       auctionSection,
@@ -1464,6 +1473,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'SkillDisplay',
     'BookOwnershipIndicatorEnabled',
     boolText(normalized.skillBookOwnershipIndicatorEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Mogao',
+    'DiscipleForgettingEnabled',
+    boolText(normalized.mogaoDiscipleForgettingEnabled)
   );
   nextMain = upsertIniSectionValue(
     nextMain,

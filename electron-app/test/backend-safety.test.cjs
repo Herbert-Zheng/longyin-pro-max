@@ -1013,6 +1013,47 @@ test('skill book ownership indicator defaults enabled and round-trips only in Sk
   );
 });
 
+test('Mogao disciple forgetting defaults enabled and round-trips only in Mogao', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+
+  const defaults = await readVisibleSettings(gameRoot);
+  assert.equal(defaults.mogaoDiscipleForgettingEnabled, true);
+
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[WrongSection]',
+      'DiscipleForgettingEnabled = true',
+      'UnrelatedDecoySetting = keep-decoy',
+      '',
+      '[Mogao]',
+      'DiscipleForgettingEnabled = false',
+      'UnrelatedMogaoSetting = keep-mogao',
+      ''
+    ].join('\r\n')
+  );
+
+  const current = await readVisibleSettings(gameRoot);
+  assert.equal(current.mogaoDiscipleForgettingEnabled, false);
+
+  const saved = await saveVisibleSettings(gameRoot, {
+    ...current,
+    mogaoDiscipleForgettingEnabled: true
+  });
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.equal(saved.mogaoDiscipleForgettingEnabled, true);
+  assert.match(text, /\[Mogao\][\s\S]*?^DiscipleForgettingEnabled = true$/m);
+  assert.match(text, /^UnrelatedMogaoSetting = keep-mogao$/m);
+  assert.match(
+    text,
+    /\[WrongSection\]\r?\nDiscipleForgettingEnabled = true\r?\nUnrelatedDecoySetting = keep-decoy/
+  );
+});
+
 test('commerce and assist settings have safe defaults with only the supported auction shortcut', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));

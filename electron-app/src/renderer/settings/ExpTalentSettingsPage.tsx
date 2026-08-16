@@ -48,6 +48,17 @@ export function ExpTalentSettingsPage({ settings, onSettingChange }: SettingsPag
         </div>
       </Card>
 
+      <Card title="莫高窟遗忘" eyebrow="Mogao">
+        <div className="field-grid">
+          <CheckboxField
+            label="掌门可为本门弟子遗忘武学与天赋"
+            value={settings.mogaoDiscipleForgettingEnabled}
+            onChange={(value) => onSettingChange('mogaoDiscipleForgettingEnabled', value)}
+            hint="启用后，玩家担任掌门时可在莫高窟先选择本门弟子或自己，再按原版条件遗忘武学或天赋；非掌门仍只能为自己操作。保存后需重启游戏生效。"
+          />
+        </div>
+      </Card>
+
       <Card title="心悟机制" eyebrow="Insight">
         <div className="field-grid">
           <NumberField

@@ -141,6 +141,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static ConfigEntry<bool> _governBountyRefreshEnabled = null!;
     private static ConfigEntry<KeyCode> _bountyRefreshHotkey = null!;
     private static ConfigEntry<bool> _skillBookOwnershipIndicatorEnabled = null!;
+    private static ConfigEntry<bool> _mogaoDiscipleForgettingEnabled = null!;
     private static ConfigEntry<bool> _treasureIdentifyBestValueAssistEnabled = null!;
     private static ConfigEntry<bool> _breakthroughRerollEnabled = null!;
     private static ConfigEntry<bool> _craftRerollEnabled = null!;
@@ -748,6 +749,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         _governBountyRefreshEnabled = Config.Bind("BountyRefresh", "GovernEnabled", true, "Keeps the original refresh button available for government commission lists and preserves the original refresh counter.");
         _bountyRefreshHotkey = Config.Bind("BountyRefresh", "RefreshHotkey", KeyCode.R, "Single-key shortcut that refreshes the active enabled sect, notice-board, or government commission list.");
         _skillBookOwnershipIndicatorEnabled = Config.Bind("SkillDisplay", "BookOwnershipIndicatorEnabled", true, "Shows whether the hovered martial skill has a matching book in the player inventory, personal storage, or current sect book storage.");
+        _mogaoDiscipleForgettingEnabled = Config.Bind("Mogao", "DiscipleForgettingEnabled", true, "Allows the player, while serving as sect leader, to select a same-sect disciple for the vanilla Mogao martial-skill or talent forgetting flow.");
         _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the treasure with the highest player-appraised value shown in parentheses. Confirmation remains manual.");
         _breakthroughRerollEnabled = Config.Bind("Breakthrough", "RerollEnabled", true, "Adds a button that rebuilds the current breakthrough choices without confirming a choice or consuming money, items, or time.");
         _craftRerollEnabled = Config.Bind("Craft", "RerollEnabled", true, "Adds preview-only buttons that rebuild normal crafting or special-enhancement choices without confirming, consuming materials, spending money, or advancing time.");
@@ -844,7 +846,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         }
 
         LoggerInstance.LogInfo(
-            $"[Compatibility] Mogao disciple forgetting: {(_mogaoDiscipleForgetHooksReady ? "ENABLED" : "DEGRADED")} " +
+            $"[Compatibility] Mogao disciple forgetting: {(!_mogaoDiscipleForgettingEnabled.Value ? "DISABLED BY CONFIG" : _mogaoDiscipleForgetHooksReady ? "ENABLED" : "DEGRADED")} " +
             "(leader target picker and complete vanilla skill/talent forget flow required).");
         LoggerInstance.LogInfo("[Compatibility] Character-data test uses on-demand HeroDetailController reads; methods left unpatched.");
         PatchMethod(typeof(PlotController), nameof(PlotController.LoverInteractWithNPC), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
@@ -1230,6 +1232,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             $"Commission refresh starts {((_forceBountyRefreshEnabled.Value || _commonBountyRefreshEnabled.Value || _governBountyRefreshEnabled.Value) ? "ON" : "OFF")} " +
             $"with shortcut {_bountyRefreshHotkey.Value} only while an enabled commission list is visible.");
         Log.LogInfo($"Skill book ownership indicator starts {(_skillBookOwnershipIndicatorEnabled.Value && _skillBookOwnershipHooksReady ? "ON" : "OFF")} for inventory, personal storage, and sect book storage.");
+        Log.LogInfo($"Mogao sect-leader disciple forgetting starts {(_mogaoDiscipleForgettingEnabled.Value && _mogaoDiscipleForgetHooksReady ? "ON" : "OFF")}; non-leaders retain vanilla self-only behavior.");
         Log.LogInfo($"Treasure identify best-value button starts {(_treasureIdentifyBestValueAssistEnabled.Value ? "ON" : "OFF")}; confirmation remains manual.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
         Log.LogInfo($"Relationship and character-data features start {(_relationshipFeaturesEnabled.Value ? "ON" : "OFF")}; MaxLoverCount remains independent.");
@@ -16492,8 +16495,9 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         out bool __state)
     {
         __state = false;
-        if (!_mogaoDiscipleForgetHooksReady)
+        if (!_mogaoDiscipleForgettingEnabled.Value || !_mogaoDiscipleForgetHooksReady)
         {
+            ResetMogaoForgetState();
             return true;
         }
 
@@ -16755,7 +16759,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
     private static bool BeginMogaoPlayerOverride(MogaoForgetMode mode)
     {
-        if (!_mogaoDiscipleForgetHooksReady || mode == MogaoForgetMode.None ||
+        if (!_mogaoDiscipleForgettingEnabled.Value || !_mogaoDiscipleForgetHooksReady || mode == MogaoForgetMode.None ||
             _mogaoForgetTarget == null || _mogaoActiveMode != mode)
         {
             return false;

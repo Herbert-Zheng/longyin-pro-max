@@ -614,6 +614,9 @@ LockTurboStamina = ${boolText(settings.lockHorseTurboStamina)}
 CarryWeightCap = ${formatFloat(settings.carryWeightCap)}
 IgnoreCarryWeight = ${boolText(settings.ignoreCarryWeight)}
 
+[TreasurePavilion]
+CapacityMultiplier = ${formatFloat(settings.treasurePavilionCapacityMultiplier)}
+
 [Commerce]
 MerchantCarryCash = ${settings.merchantCarryCash}
 TreasureTradeHelperEnabled = ${boolText(settings.treasureTradeHelperEnabled)}
@@ -625,6 +628,9 @@ ShopOwnershipEnabled = ${boolText(settings.shopOwnershipEnabled)}
 
 [SkillDisplay]
 BookOwnershipIndicatorEnabled = ${boolText(settings.skillBookOwnershipIndicatorEnabled)}
+
+[BookWriter]
+ContinuousCombineEnabled = ${boolText(settings.continuousBookCombineEnabled)}
 
 [Mogao]
 DiscipleForgettingEnabled = ${boolText(settings.mogaoDiscipleForgettingEnabled)}
@@ -647,6 +653,12 @@ ForceEnabled = ${boolText(settings.forceBountyRefreshEnabled)}
 CommonEnabled = ${boolText(settings.commonBountyRefreshEnabled)}
 GovernEnabled = ${boolText(settings.governBountyRefreshEnabled)}
 RefreshHotkey = ${settings.bountyRefreshHotkey}
+
+[BountyReward]
+ContributionMultiplier = ${formatFloat(settings.bountyContributionMultiplier)}
+
+[Construction]
+BatchUpgradeEnabled = ${boolText(settings.batchAreaUpgradeEnabled)}
 
 [TreasureIdentify]
 BestValueAssistEnabled = ${boolText(settings.treasureIdentifyBestValueAssistEnabled)}
@@ -870,12 +882,16 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
   const debugSection = getIniSectionBody(text, 'Debug');
   const systemsSection = getIniSectionBody(text, 'Systems') ?? getIniSectionBody(text, 'Time');
   const commerceSection = getIniSectionBody(text, 'Commerce');
+  const treasurePavilionSection = getIniSectionBody(text, 'TreasurePavilion');
   const skillDisplaySection = getIniSectionBody(text, 'SkillDisplay');
+  const bookWriterSection = getIniSectionBody(text, 'BookWriter');
   const mogaoSection = getIniSectionBody(text, 'Mogao');
   const auctionSection = getIniSectionBody(text, 'Auction');
   const governmentStorageSection = getIniSectionBody(text, 'GovernmentStorage');
   const yellowCraneTowerSection = getIniSectionBody(text, 'YellowCraneTower');
   const bountyRefreshSection = getIniSectionBody(text, 'BountyRefresh');
+  const bountyRewardSection = getIniSectionBody(text, 'BountyReward');
+  const constructionSection = getIniSectionBody(text, 'Construction');
   const treasureIdentifySection = getIniSectionBody(text, 'TreasureIdentify');
   const breakthroughSection = getIniSectionBody(text, 'Breakthrough');
   const craftSection = getIniSectionBody(text, 'Craft');
@@ -902,6 +918,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
     horseStaminaMultiplier: DEFAULT_VISIBLE_SETTINGS.horseStaminaMultiplier,
     carryWeightCap: readFloat(text, 'CarryWeightCap', DEFAULT_VISIBLE_SETTINGS.carryWeightCap),
     ignoreCarryWeight: readBool(text, 'IgnoreCarryWeight', DEFAULT_VISIBLE_SETTINGS.ignoreCarryWeight),
+    treasurePavilionCapacityMultiplier: readFloat(
+      treasurePavilionSection,
+      'CapacityMultiplier',
+      DEFAULT_VISIBLE_SETTINGS.treasurePavilionCapacityMultiplier
+    ),
     merchantCarryCash: readInt(commerceSection, 'MerchantCarryCash', DEFAULT_VISIBLE_SETTINGS.merchantCarryCash),
     treasureTradeHelperEnabled: readBool(
       commerceSection,
@@ -937,6 +958,11 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       skillDisplaySection,
       'BookOwnershipIndicatorEnabled',
       DEFAULT_VISIBLE_SETTINGS.skillBookOwnershipIndicatorEnabled
+    ),
+    continuousBookCombineEnabled: readBool(
+      bookWriterSection,
+      'ContinuousCombineEnabled',
+      DEFAULT_VISIBLE_SETTINGS.continuousBookCombineEnabled
     ),
     mogaoDiscipleForgettingEnabled: readBool(
       mogaoSection,
@@ -997,6 +1023,16 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       bountyRefreshSection,
       'RefreshHotkey',
       DEFAULT_VISIBLE_SETTINGS.bountyRefreshHotkey
+    ),
+    bountyContributionMultiplier: readFloat(
+      bountyRewardSection,
+      'ContributionMultiplier',
+      DEFAULT_VISIBLE_SETTINGS.bountyContributionMultiplier
+    ),
+    batchAreaUpgradeEnabled: readBool(
+      constructionSection,
+      'BatchUpgradeEnabled',
+      DEFAULT_VISIBLE_SETTINGS.batchAreaUpgradeEnabled
     ),
     treasureIdentifyBestValueAssistEnabled: readBool(
       treasureIdentifySection,
@@ -1431,6 +1467,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   nextMain = upsertIniValue(nextMain, 'LockTurboStamina', boolText(normalized.lockHorseTurboStamina));
   nextMain = upsertIniValue(nextMain, 'CarryWeightCap', formatFloat(normalized.carryWeightCap));
   nextMain = upsertIniValue(nextMain, 'IgnoreCarryWeight', boolText(normalized.ignoreCarryWeight));
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'TreasurePavilion',
+    'CapacityMultiplier',
+    formatFloat(normalized.treasurePavilionCapacityMultiplier)
+  );
   nextMain = upsertIniSectionValue(nextMain, 'Commerce', 'MerchantCarryCash', String(normalized.merchantCarryCash));
   nextMain = upsertIniSectionValue(
     nextMain,
@@ -1473,6 +1515,12 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'SkillDisplay',
     'BookOwnershipIndicatorEnabled',
     boolText(normalized.skillBookOwnershipIndicatorEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'BookWriter',
+    'ContinuousCombineEnabled',
+    boolText(normalized.continuousBookCombineEnabled)
   );
   nextMain = upsertIniSectionValue(
     nextMain,
@@ -1545,6 +1593,18 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'BountyRefresh',
     'RefreshHotkey',
     normalized.bountyRefreshHotkey
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'BountyReward',
+    'ContributionMultiplier',
+    formatFloat(normalized.bountyContributionMultiplier)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Construction',
+    'BatchUpgradeEnabled',
+    boolText(normalized.batchAreaUpgradeEnabled)
   );
   nextMain = removeIniSectionValue(nextMain, 'Auction', 'PreviewRefreshRequireAlt');
   nextMain = removeIniSectionCommentBlock(

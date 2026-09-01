@@ -194,7 +194,7 @@ export function assertRendererUiContracts(snapshot) {
     throw new Error('Material purchase threshold values must survive disabling and re-enabling material auto-buy.');
   }
   if (!snapshot.settingsSearch?.filteredToGovernmentStorage || !snapshot.settingsSearch?.restoredAllCards) {
-    throw new Error('Settings search must isolate 官府仓库 controls and restore all 6 trade cards when cleared.');
+    throw new Error('Settings search must isolate 官府仓库 controls and restore all 7 trade cards when cleared.');
   }
   if (!snapshot.confirmDialog?.dangerInitiallyFocusesCancel) {
     throw new Error('Danger confirmation dialogs must initially focus the cancel action.');
@@ -395,7 +395,7 @@ async function readSettingsSearchContract(cdp) {
       await setQuery('');
       return {
         filteredToGovernmentStorage,
-        restoredAllCards: visibleCards().length === 6
+        restoredAllCards: visibleCards().length === 7
       };
     })()`,
     awaitPromise: true,

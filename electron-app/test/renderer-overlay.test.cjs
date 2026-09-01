@@ -198,9 +198,29 @@ test('trade and craft settings expose dedicated government storage refresh contr
   assert.match(renderer, /快捷键只在官府仓库页面可见时生效/);
 });
 
+test('trade and craft settings expose configurable treasure pavilion capacity', () => {
+  const renderer = readRendererSource();
+
+  assert.match(renderer, /<Card title="藏宝阁" eyebrow="Treasure Pavilion">/);
+  assert.match(
+    renderer,
+    /label="藏宝阁容量倍率"[\s\S]{0,300}value=\{settings\.treasurePavilionCapacityMultiplier\}[\s\S]{0,300}updateSetting\('treasurePavilionCapacityMultiplier', value\)/
+  );
+  assert.match(renderer, /物品总价值上限/);
+  assert.match(renderer, /1 倍为原版，默认 10 倍/);
+  assert.match(renderer, /原版上限由成就数计算/);
+  assert.match(renderer, /不改动藏宝阁物品、重量或存档中的原始数据/);
+});
+
 test('world exploration exposes city affair refresh controls and shortcuts', () => {
   const renderer = readRendererSource();
 
+  assert.match(renderer, /<Card title="委托奖励" eyebrow="Commission Rewards">/);
+  assert.match(
+    renderer,
+    /label="委托功绩倍率"[\s\S]{0,300}value=\{settings\.bountyContributionMultiplier\}[\s\S]{0,300}updateSetting\('bountyContributionMultiplier', value\)/
+  );
+  assert.match(renderer, /看板声望、NPC 好感和任何扣除均不受影响/);
   assert.match(renderer, /<Card title="城内事务刷新" eyebrow="City Affairs">/);
   for (const [label, setting] of [
     ['黄鹤楼候选人刷新', 'yellowCraneCandidateRefreshEnabled'],
@@ -226,6 +246,21 @@ test('world exploration exposes city affair refresh controls and shortcuts', () 
   assert.match(renderer, /默认 R；只在已启用的门派、看板或官府委托界面打开时生效/);
 });
 
+test('world exploration exposes the prioritized batch city and sect construction control', () => {
+  const renderer = readRendererSource();
+
+  assert.match(renderer, /<Card title="城市与门派建设" eyebrow="Construction">/);
+  assert.match(
+    renderer,
+    /label="一键升级全部建筑和道路"[\s\S]{0,260}value=\{settings\.batchAreaUpgradeEnabled\}[\s\S]{0,260}updateSetting\('batchAreaUpgradeEnabled', value\)/
+  );
+  assert.match(renderer, /官府或门派主楼/);
+  assert.match(renderer, /不能拆除的特殊建筑/);
+  assert.match(renderer, /普通建筑、道路/);
+  assert.match(renderer, /同一类按左上到右下选择/);
+  assert.match(renderer, /当前优先级全部无法继续选中升级后才处理下一类/);
+});
+
 test('growth settings expose the skill book ownership indicator and its inventory scope', () => {
   const renderer = readRendererSource();
 
@@ -234,8 +269,20 @@ test('growth settings expose the skill book ownership indicator and its inventor
     renderer,
     /label="显示功法书拥有状态"[\s\S]{0,240}value=\{settings\.skillBookOwnershipIndicatorEnabled\}[\s\S]{0,240}updateSetting\('skillBookOwnershipIndicatorEnabled', value\)/
   );
-  assert.match(renderer, /背包与仓库（个人仓库及门派藏书）/);
-  assert.match(renderer, /已拥有显示绿色，未拥有显示红色/);
+  assert.match(renderer, /背包、个人仓库、门派藏书与展览室/);
+  assert.match(renderer, /已拥有时显示最高品质，未拥有显示红色/);
+});
+
+test('growth settings expose continuous combine and explain its stop rule', () => {
+  const renderer = readRendererSource();
+
+  assert.match(
+    renderer,
+    /label="持续合成秘籍"[\s\S]{0,260}value=\{settings\.continuousBookCombineEnabled\}[\s\S]{0,260}updateSetting\('continuousBookCombineEnabled', value\)/
+  );
+  assert.match(renderer, /藏经阁或自宅的合成秘籍界面/);
+  assert.match(renderer, /勾选并初次确认后/);
+  assert.match(renderer, /下一次费用比初次正常费用更高时自动停止/);
 });
 
 test('growth settings expose the Mogao sect-leader disciple forgetting toggle', () => {
@@ -246,7 +293,11 @@ test('growth settings expose the Mogao sect-leader disciple forgetting toggle', 
     renderer,
     /label="掌门可为本门弟子遗忘武学与天赋"[\s\S]{0,280}value=\{settings\.mogaoDiscipleForgettingEnabled\}[\s\S]{0,280}updateSetting\('mogaoDiscipleForgettingEnabled', value\)/
   );
-  assert.match(renderer, /非掌门仍只能为自己操作/);
+  assert.match(renderer, /可遗忘0–10级武学/);
+  assert.match(renderer, /撤销该武学升级实际增加的属性/);
+  assert.doesNotMatch(renderer, /按等级扣回修炼属性\/潜力/);
+  assert.match(renderer, /满10级时扣回原版2\^品阶奖励，并按当前“突破成功额外天赋”配置扣回对应额外奖励（允许负数）/);
+  assert.match(renderer, /非掌门仍只能管理自己/);
   assert.match(renderer, /保存后需重启游戏生效/);
 });
 
@@ -541,6 +592,7 @@ const EXPECTED_VISIBLE_SETTINGS = {
   horseStaminaMultiplier: 1,
   carryWeightCap: 100000,
   ignoreCarryWeight: false,
+  treasurePavilionCapacityMultiplier: 10,
   merchantCarryCash: 100000,
   treasureTradeHelperEnabled: true,
   treasureAutoTradeEnabled: true,
@@ -549,6 +601,7 @@ const EXPECTED_VISIBLE_SETTINGS = {
   materialPurchaseMinItemLv: 0,
   shopOwnershipEnabled: true,
   skillBookOwnershipIndicatorEnabled: true,
+  continuousBookCombineEnabled: false,
   mogaoDiscipleForgettingEnabled: true,
   auctionEventAlwaysRedEnabled: true,
   auctionPreviewRefreshEnabled: true,
@@ -561,6 +614,8 @@ const EXPECTED_VISIBLE_SETTINGS = {
   commonBountyRefreshEnabled: true,
   governBountyRefreshEnabled: true,
   bountyRefreshHotkey: 'R',
+  bountyContributionMultiplier: 2,
+  batchAreaUpgradeEnabled: true,
   treasureIdentifyBestValueAssistEnabled: true,
   breakthroughRerollEnabled: true,
   craftRerollEnabled: true,
@@ -602,10 +657,10 @@ const EXPECTED_VISIBLE_SETTINGS = {
   battleTurboHotkey: 'F8'
 };
 
-test('visible settings defaults contain all 72 known fields and values', () => {
+test('visible settings defaults contain all 76 known fields and values', () => {
   const { createDefaultVisibleSettings } = loadVisibleSettings();
   const defaults = createDefaultVisibleSettings();
-  assert.equal(Object.keys(defaults).length, 72);
+  assert.equal(Object.keys(defaults).length, 76);
   assert.deepEqual(defaults, EXPECTED_VISIBLE_SETTINGS);
 });
 
@@ -625,6 +680,8 @@ test('visible settings sanitization clamps representative numeric boundaries', (
     expMultiplier: 0,
     materialPurchaseMinRareLv: 99,
     materialPurchaseMinItemLv: -8,
+    bountyContributionMultiplier: -4,
+    treasurePavilionCapacityMultiplier: 0,
     luckyHitChancePercent: 101,
     maxLoverCount: 0,
     skillTalentTierPointMultiplier: 0
@@ -634,6 +691,8 @@ test('visible settings sanitization clamps representative numeric boundaries', (
       expMultiplier: sanitized.expMultiplier,
       materialPurchaseMinRareLv: sanitized.materialPurchaseMinRareLv,
       materialPurchaseMinItemLv: sanitized.materialPurchaseMinItemLv,
+      bountyContributionMultiplier: sanitized.bountyContributionMultiplier,
+      treasurePavilionCapacityMultiplier: sanitized.treasurePavilionCapacityMultiplier,
       luckyHitChancePercent: sanitized.luckyHitChancePercent,
       maxLoverCount: sanitized.maxLoverCount,
       skillTalentTierPointMultiplier: sanitized.skillTalentTierPointMultiplier
@@ -642,6 +701,8 @@ test('visible settings sanitization clamps representative numeric boundaries', (
       expMultiplier: 1,
       materialPurchaseMinRareLv: 5,
       materialPurchaseMinItemLv: 0,
+      bountyContributionMultiplier: 0,
+      treasurePavilionCapacityMultiplier: 0.1,
       luckyHitChancePercent: 100,
       maxLoverCount: 1,
       skillTalentTierPointMultiplier: 0.1

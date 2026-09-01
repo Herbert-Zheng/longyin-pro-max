@@ -887,7 +887,48 @@ test('government storage refresh is section-scoped and round-trips without touch
   );
 });
 
-test('city affair refresh controls default enabled with R shortcuts', async (t) => {
+test('treasure pavilion capacity defaults to 10x and round-trips only in its own section', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+
+  const defaults = await readVisibleSettings(gameRoot);
+  assert.equal(defaults.treasurePavilionCapacityMultiplier, 10);
+
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[WrongSection]',
+      'CapacityMultiplier = 88',
+      'UnrelatedDecoySetting = keep-decoy',
+      '',
+      '[TreasurePavilion]',
+      'CapacityMultiplier = 3.5',
+      'UnrelatedTreasurePavilionSetting = keep-pavilion',
+      ''
+    ].join('\r\n')
+  );
+
+  const current = await readVisibleSettings(gameRoot);
+  assert.equal(current.treasurePavilionCapacityMultiplier, 3.5);
+
+  const saved = await saveVisibleSettings(gameRoot, {
+    ...current,
+    treasurePavilionCapacityMultiplier: 12.25
+  });
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.equal(saved.treasurePavilionCapacityMultiplier, 12.25);
+  assert.match(text, /\[TreasurePavilion\][\s\S]*?^CapacityMultiplier = 12\.25$/m);
+  assert.match(text, /^UnrelatedTreasurePavilionSetting = keep-pavilion$/m);
+  assert.match(
+    text,
+    /\[WrongSection\]\r?\nCapacityMultiplier = 88\r?\nUnrelatedDecoySetting = keep-decoy/
+  );
+});
+
+test('city affair controls default enabled with R shortcuts and 2x commission contribution', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
@@ -899,9 +940,10 @@ test('city affair refresh controls default enabled with R shortcuts', async (t) 
   assert.equal(settings.commonBountyRefreshEnabled, true);
   assert.equal(settings.governBountyRefreshEnabled, true);
   assert.equal(settings.bountyRefreshHotkey, 'R');
+  assert.equal(settings.bountyContributionMultiplier, 2);
 });
 
-test('city affair refresh controls are section-scoped and preserve unknown keys on round-trip', async (t) => {
+test('city affair controls are section-scoped and preserve unknown keys on round-trip', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
@@ -916,6 +958,7 @@ test('city affair refresh controls are section-scoped and preserve unknown keys 
       'GovernEnabled = decoy-govern',
       'CandidateRefreshHotkey = DECOY_CANDIDATE_KEY',
       'RefreshHotkey = DECOY_BOUNTY_KEY',
+      'ContributionMultiplier = 99',
       'UnrelatedDecoySetting = keep-decoy',
       '',
       '[YellowCraneTower]',
@@ -929,6 +972,10 @@ test('city affair refresh controls are section-scoped and preserve unknown keys 
       'GovernEnabled = false',
       'RefreshHotkey = F8',
       'UnrelatedBountySetting = keep-bounty',
+      '',
+      '[BountyReward]',
+      'ContributionMultiplier = 2.5',
+      'UnrelatedBountyRewardSetting = keep-bounty-reward',
       ''
     ].join('\r\n')
   );
@@ -940,6 +987,7 @@ test('city affair refresh controls are section-scoped and preserve unknown keys 
   assert.equal(current.commonBountyRefreshEnabled, true);
   assert.equal(current.governBountyRefreshEnabled, false);
   assert.equal(current.bountyRefreshHotkey, 'F8');
+  assert.equal(current.bountyContributionMultiplier, 2.5);
 
   const saved = await saveVisibleSettings(gameRoot, {
     ...current,
@@ -948,7 +996,8 @@ test('city affair refresh controls are section-scoped and preserve unknown keys 
     forceBountyRefreshEnabled: true,
     commonBountyRefreshEnabled: false,
     governBountyRefreshEnabled: true,
-    bountyRefreshHotkey: 'F9'
+    bountyRefreshHotkey: 'F9',
+    bountyContributionMultiplier: 3.75
   });
   const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
 
@@ -958,17 +1007,20 @@ test('city affair refresh controls are section-scoped and preserve unknown keys 
   assert.equal(saved.commonBountyRefreshEnabled, false);
   assert.equal(saved.governBountyRefreshEnabled, true);
   assert.equal(saved.bountyRefreshHotkey, 'F9');
+  assert.equal(saved.bountyContributionMultiplier, 3.75);
   assert.match(text, /\[YellowCraneTower\][\s\S]*?^CandidateRefreshEnabled = true$/m);
   assert.match(text, /\[YellowCraneTower\][\s\S]*?^CandidateRefreshHotkey = Y$/m);
   assert.match(text, /\[BountyRefresh\][\s\S]*?^ForceEnabled = true$/m);
   assert.match(text, /\[BountyRefresh\][\s\S]*?^CommonEnabled = false$/m);
   assert.match(text, /\[BountyRefresh\][\s\S]*?^GovernEnabled = true$/m);
   assert.match(text, /\[BountyRefresh\][\s\S]*?^RefreshHotkey = F9$/m);
+  assert.match(text, /\[BountyReward\][\s\S]*?^ContributionMultiplier = 3\.75$/m);
   assert.match(text, /^UnrelatedYellowCraneSetting = keep-yellow-crane$/m);
   assert.match(text, /^UnrelatedBountySetting = keep-bounty$/m);
+  assert.match(text, /^UnrelatedBountyRewardSetting = keep-bounty-reward$/m);
   assert.match(
     text,
-    /\[WrongSection\]\r?\nCandidateRefreshEnabled = decoy-candidate\r?\nForceEnabled = decoy-force\r?\nCommonEnabled = decoy-common\r?\nGovernEnabled = decoy-govern\r?\nCandidateRefreshHotkey = DECOY_CANDIDATE_KEY\r?\nRefreshHotkey = DECOY_BOUNTY_KEY\r?\nUnrelatedDecoySetting = keep-decoy/
+    /\[WrongSection\]\r?\nCandidateRefreshEnabled = decoy-candidate\r?\nForceEnabled = decoy-force\r?\nCommonEnabled = decoy-common\r?\nGovernEnabled = decoy-govern\r?\nCandidateRefreshHotkey = DECOY_CANDIDATE_KEY\r?\nRefreshHotkey = DECOY_BOUNTY_KEY\r?\nContributionMultiplier = 99\r?\nUnrelatedDecoySetting = keep-decoy/
   );
 });
 
@@ -1010,6 +1062,58 @@ test('skill book ownership indicator defaults enabled and round-trips only in Sk
   assert.match(
     text,
     /\[WrongSection\]\r?\nBookOwnershipIndicatorEnabled = true\r?\nUnrelatedDecoySetting = keep-decoy/
+  );
+});
+
+test('batch construction and continuous book combine controls are section-scoped and round-trip safely', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+
+  const defaults = await readVisibleSettings(gameRoot);
+  assert.equal(defaults.batchAreaUpgradeEnabled, true);
+  assert.equal(defaults.continuousBookCombineEnabled, false);
+
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[WrongSection]',
+      'BatchUpgradeEnabled = true',
+      'ContinuousCombineEnabled = false',
+      'UnrelatedDecoySetting = keep-decoy',
+      '',
+      '[Construction]',
+      'BatchUpgradeEnabled = false',
+      'UnrelatedConstructionSetting = keep-construction',
+      '',
+      '[BookWriter]',
+      'ContinuousCombineEnabled = true',
+      'UnrelatedBookWriterSetting = keep-book-writer',
+      ''
+    ].join('\r\n')
+  );
+
+  const current = await readVisibleSettings(gameRoot);
+  assert.equal(current.batchAreaUpgradeEnabled, false);
+  assert.equal(current.continuousBookCombineEnabled, true);
+
+  const saved = await saveVisibleSettings(gameRoot, {
+    ...current,
+    batchAreaUpgradeEnabled: true,
+    continuousBookCombineEnabled: false
+  });
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.equal(saved.batchAreaUpgradeEnabled, true);
+  assert.equal(saved.continuousBookCombineEnabled, false);
+  assert.match(text, /\[Construction\][\s\S]*?^BatchUpgradeEnabled = true$/m);
+  assert.match(text, /\[BookWriter\][\s\S]*?^ContinuousCombineEnabled = false$/m);
+  assert.match(text, /^UnrelatedConstructionSetting = keep-construction$/m);
+  assert.match(text, /^UnrelatedBookWriterSetting = keep-book-writer$/m);
+  assert.match(
+    text,
+    /\[WrongSection\]\r?\nBatchUpgradeEnabled = true\r?\nContinuousCombineEnabled = false\r?\nUnrelatedDecoySetting = keep-decoy/
   );
 });
 

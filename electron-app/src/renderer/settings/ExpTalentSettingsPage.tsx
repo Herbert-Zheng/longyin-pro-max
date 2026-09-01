@@ -43,7 +43,13 @@ export function ExpTalentSettingsPage({ settings, onSettingChange }: SettingsPag
             label="显示功法书拥有状态"
             value={settings.skillBookOwnershipIndicatorEnabled}
             onChange={(value) => onSettingChange('skillBookOwnershipIndicatorEnabled', value)}
-            hint="悬浮功法时合并检查背包与仓库（个人仓库及门派藏书）；已拥有显示绿色，未拥有显示红色。保存后需重启游戏生效。"
+            hint="悬浮功法时合并检查背包、个人仓库、门派藏书与展览室；已拥有时显示最高品质，未拥有显示红色。保存后需重启游戏生效。"
+          />
+          <CheckboxField
+            label="持续合成秘籍"
+            value={settings.continuousBookCombineEnabled}
+            onChange={(value) => onSettingChange('continuousBookCombineEnabled', value)}
+            hint="在藏经阁或自宅的合成秘籍界面显示持续合成选项。勾选并初次确认后，将继续合成同一功法的秘籍；全部合成完、资金或编纂条件不足，或下一次费用比初次正常费用更高时自动停止。"
           />
         </div>
       </Card>
@@ -54,7 +60,7 @@ export function ExpTalentSettingsPage({ settings, onSettingChange }: SettingsPag
             label="掌门可为本门弟子遗忘武学与天赋"
             value={settings.mogaoDiscipleForgettingEnabled}
             onChange={(value) => onSettingChange('mogaoDiscipleForgettingEnabled', value)}
-            hint="启用后，玩家担任掌门时可在莫高窟先选择本门弟子或自己，再按原版条件遗忘武学或天赋；非掌门仍只能为自己操作。保存后需重启游戏生效。"
+            hint="启用后，掌门可选择自己或本门弟子，并可遗忘0–10级武学：自己沿用原版耗时流程，弟子直接生效且不耗时；遗忘时只撤销该武学升级实际增加的属性，满10级时扣回原版2^品阶奖励，并按当前“突破成功额外天赋”配置扣回对应额外奖励（允许负数）。非掌门仍只能管理自己。保存后需重启游戏生效。"
           />
         </div>
       </Card>

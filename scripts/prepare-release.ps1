@@ -48,14 +48,14 @@ if ($headCommit -ne $originMainCommit) {
 }
 
 $packageJson = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot 'electron-app\package.json') | ConvertFrom-Json
-$packageLock = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot 'electron-app\package-lock.json') | ConvertFrom-Json
+$packageLock = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot 'electron-app\package-lock.json') | ConvertFrom-Json -AsHashtable
 $version = [string]$packageJson.version
 if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
   throw "package.json.version 必须符合 X.Y.Z：$version"
 }
 
-$lockRoot = $packageLock.packages.PSObject.Properties[''].Value
-if ([string]$packageLock.version -ne $version -or [string]$lockRoot.version -ne $version) {
+$lockRoot = $packageLock['packages']['']
+if ([string]$packageLock['version'] -ne $version -or [string]$lockRoot['version'] -ne $version) {
   throw "package.json 与 package-lock.json 版本不一致。"
 }
 

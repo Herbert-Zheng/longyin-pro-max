@@ -42,7 +42,7 @@ That proves the source data exists in asset tables. The key question for the mod
 
 ### 1. The game exposes runtime databases through `GameDataController`
 
-From the IL2CPP interop metadata in [Assembly-CSharp.dll](G:\Steam\steamapps\common\LongYinLiZhiZhuan\BepInEx\interop\Assembly-CSharp.dll), `GameDataController` owns in-memory database lists including:
+From the IL2CPP interop metadata in [Assembly-CSharp.dll](dist/BepInEx/interop/Assembly-CSharp.dll), `GameDataController` owns in-memory database lists including:
 
 - `heroTagDataBase`
 - `kungfuSkillDataBase`

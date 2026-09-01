@@ -21,6 +21,21 @@ export function TradeCraftSettingsPage({ settings, onSettingChange }: SettingsPa
         </div>
       </Card>
 
+      <Card title="藏宝阁" eyebrow="Treasure Pavilion">
+        <div className="field-grid">
+          <NumberField
+            label="藏宝阁容量倍率"
+            value={settings.treasurePavilionCapacityMultiplier}
+            onChange={(value) => onSettingChange('treasurePavilionCapacityMultiplier', value)}
+            min={0.1}
+            max={999}
+            step={0.5}
+            suffix="倍"
+            hint="调整郭淮处藏宝阁的物品总价值上限；1 倍为原版，默认 10 倍。原版上限由成就数计算，倍率只作用于实时计算结果，不改动藏宝阁物品、重量或存档中的原始数据；保存设置后需重启游戏生效。"
+          />
+        </div>
+      </Card>
+
       <Card title="材料扫货" eyebrow="Materials">
         <div className="field-grid">
           <CheckboxField

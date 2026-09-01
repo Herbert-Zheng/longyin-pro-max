@@ -117,7 +117,9 @@ $loverBattleRegistrationBlock = Get-CSharpBraceBlockText `
     -Scope $loadMethod `
     -StartPattern 'if\s*\(_relationshipFeaturesEnabled\.Value\s*&&\s*_blockOverflowLoverHomeBattle\.Value\)\s*' `
     -Label 'relationship master plus lover home-battle blocker registration gate'
-Reject-Pattern $loverBattleRegistrationBlock 'MaxLoverCountSyncPrefix|CheckChoiceMeetRequirePostfix|MeetLoverResultRequirePostfix' 'MaxLoverCount hooks must remain outside the lover home-battle registration gate.'
+Reject-Pattern $loverBattleRegistrationBlock 'MaxLoverCountSyncPrefix|CheckChoiceMeetRequirePostfix|LoverAchievementCheckPrefix|LoverAchievementCheckFinalizer' 'MaxLoverCount and lover-achievement hooks must remain outside the lover home-battle registration gate.'
+Require-Pattern $loadMethod 'nameof\(GameController\.CheckGameResultTrigger\)[\s\S]*?nameof\(LoverAchievementCheckPrefix\)[\s\S]*?nameof\(LoverAchievementCheckFinalizer\)' 'The vanilla lover-achievement threshold hook must be registered independently from optional relationship features.'
+Reject-Pattern $source 'MeetLoverResultRequirePostfix' 'The legacy lover-ending predicate postfix must not return.'
 
 $dedicatedLoverBattlePatchPatterns = @(
     'PatchMethod\(typeof\(PlotController\),\s*nameof\(PlotController\.PlotStartLoverResultFight\),',

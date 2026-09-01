@@ -14,13 +14,16 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[BepInPlugin("codex.longyin.staminalock", "LongYin Pro Max", "1.39.0")]
+[BepInPlugin("codex.longyin.staminalock", "LongYin Pro Max", "1.43.0")]
 public sealed class LongYinProMaxPlugin : BasePlugin
 {
     private const string TreasureChestChoiceParamPrefix = "codex_chest_choice:";
     private const string TreasureChestChoicePlotCallbackName = nameof(PlotController.ChangePlotDataBase);
     private const string LoverChoiceTextKeyword = "结缘";
     private const string LoverLimitReachedText = "情侣数已达上限";
+    private const int LoverAchievementId = 37;
+    private const int LoverEndingResultIndex = 9;
+    private const int VanillaLoverAchievementRelationshipCount = 4;
     private const int DailySkillInsightMaxLevel = 10;
     private const int LuckyMoneyMinPercent = 1;
     private const int LuckyMoneyMaxPercent = 30;
@@ -79,6 +82,8 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private const string BreakthroughRerollButtonName = "CodexBreakthroughRerollButton";
     private const string CraftRerollButtonName = "CodexCraftResultRerollButton";
     private const string SpeEnhanceRerollButtonName = "CodexSpeEnhanceRerollButton";
+    private const string BatchAreaUpgradeButtonName = "CodexBatchAreaUpgradeButton";
+    private const string ContinuousBookCombineButtonName = "CodexContinuousBookCombineButton";
     private const int ExternalOverlayProtocolVersion = 1;
     private const string ExternalOverlayStateFileName = "codex.longyin.overlay-state.json";
     private const string ExternalOverlayCommandFileName = "codex.longyin.overlay-command.json";
@@ -119,6 +124,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static ConfigEntry<bool> _lockHorseTurboStamina = null!;
     private static ConfigEntry<float> _carryWeightCap = null!;
     private static ConfigEntry<bool> _ignoreCarryWeight = null!;
+    private static ConfigEntry<float> _treasurePavilionCapacityMultiplier = null!;
     private static ConfigEntry<int> _merchantCarryCash = null!;
     private static ConfigEntry<bool> _treasureTradeHelperEnabled = null!;
     private static ConfigEntry<bool> _treasureAutoTradeEnabled = null!;
@@ -140,7 +146,10 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static ConfigEntry<bool> _commonBountyRefreshEnabled = null!;
     private static ConfigEntry<bool> _governBountyRefreshEnabled = null!;
     private static ConfigEntry<KeyCode> _bountyRefreshHotkey = null!;
+    private static ConfigEntry<float> _bountyContributionMultiplier = null!;
     private static ConfigEntry<bool> _skillBookOwnershipIndicatorEnabled = null!;
+    private static ConfigEntry<bool> _batchAreaUpgradeEnabled = null!;
+    private static ConfigEntry<bool> _continuousBookCombineEnabled = null!;
     private static ConfigEntry<bool> _mogaoDiscipleForgettingEnabled = null!;
     private static ConfigEntry<bool> _treasureIdentifyBestValueAssistEnabled = null!;
     private static ConfigEntry<bool> _breakthroughRerollEnabled = null!;
@@ -196,7 +205,9 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static readonly string[] DrinkPlayerFillAmountMemberNames = { "playerFillAmount" };
     private static readonly string[] DrinkEnemyFillAmountMemberNames = { "enemyFillAmount" };
     private static readonly System.Random Random = new();
-    private static bool _applyingLuckyMoneyRefund;
+    private static bool _applyingLuckyMoneyBonus;
+    private static int? _lastObservedPlayerMoney;
+    private static int _lastObservedPlayerMoneyHeroId = int.MinValue;
     private static bool _relationshipBonusHooksReady;
     private static bool _applyingDailySkillInsightExp;
     private static bool _applyingTeamAutoFavor;
@@ -220,7 +231,11 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static int _mogaoPlayerOverrideFrame = -1;
     private static MogaoForgetMode _mogaoPendingTargetMode;
     private static MogaoForgetMode _mogaoActiveMode;
+    private static HeroData? _mogaoPickerSelectedHero;
     private static HeroData? _mogaoForgetTarget;
+    private static BuildingUIController? _mogaoBuildingController;
+    private static bool _mogaoPickerSelectionInProgress;
+    private static bool _mogaoContinueOriginalEntry;
     private static float _studySkillUnitDayBudget;
     private static float _studySkillExtraDayCarry;
     private static TimeData? _studySkillTaskStartDate;
@@ -249,21 +264,14 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static float _nextCustomTalentEvaluationAt = -1f;
     private static bool _thresholdTalentRegistrationWarned;
     private static bool _maxLoverMemberUnavailableWarned;
+    private static bool _loverAchievementRepairCheckedForSession;
+    private static bool _loverAchievementRepairWarningLogged;
     private static string _heroTagDatabaseCompatibilityState = "PENDING";
     private static string _heroTagDatabaseCompatibilityDetail = "runtime game data has not been probed";
     private static MethodInfo? _heroChangeFameMethod;
     private Harmony? _harmony;
     private int _patchedMethodCount;
     private int _skippedMethodCount;
-
-    private sealed class MoneyChangeState
-    {
-        public bool IsEligible { get; init; }
-        public int RequestedDelta { get; init; }
-        public int? MoneyBefore { get; init; }
-        public bool IsSpend { get; init; }
-        public bool IsIncome { get; init; }
-    }
 
     private sealed class FameChangeState
     {
@@ -320,6 +328,15 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         public float InternalInjuryBefore { get; init; }
         public float PoisonInjuryBefore { get; init; }
         public bool IsHealingTile { get; init; }
+    }
+
+    private sealed class BountyContributionRewardState
+    {
+        public MissionData? Mission { get; init; }
+        public float OriginalReward { get; init; }
+        public float AppliedReward { get; init; }
+        public bool IsApplied { get; init; }
+        public bool IsRestored { get; set; }
     }
 
     private sealed class CustomTalentPackFile
@@ -418,6 +435,16 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         None,
         Skill,
         Talent
+    }
+
+    private sealed class MogaoSkillFinishState
+    {
+        public bool ScopeEntered { get; init; }
+        public HeroData? Target { get; init; }
+        public int SkillId { get; init; } = -1;
+        public float TalentPointReward { get; init; }
+        public float TalentPointsBefore { get; init; }
+        public bool RollbackApplied { get; set; }
     }
 
     private enum MaterialAffixCombineMode
@@ -543,12 +570,41 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     {
         public bool WasWorking { get; init; }
         public float WorkPercentBefore { get; init; }
+        public BookWriterType WriterType { get; init; }
         public ItemData? ResultItemBefore { get; init; }
         public HeroData? WriterHeroBefore { get; init; }
         public int ResultRareLv { get; init; }
         public int TargetSkillId { get; init; }
         public ItemData? TargetBookDataBefore { get; init; }
         public ItemData? CombineBookDataBefore { get; init; }
+    }
+
+    private sealed class AreaUpgradeCandidate
+    {
+        public AreaTileData Tile { get; init; } = null!;
+        public int Tier { get; init; }
+        public int Row { get; init; }
+        public int Column { get; init; }
+        public bool IsRoad { get; init; }
+    }
+
+    private sealed class ContinuousBookCombinePlan
+    {
+        public BookWriterData Writer { get; set; } = null!;
+        public ForceData TargetForce { get; init; } = null!;
+        public Il2CppSystem.Collections.Generic.List<BookWriterData> WriterList { get; set; } = null!;
+        public int WriterIndex { get; init; }
+        public int WriterHeroId { get; set; }
+        public int TargetSkillId { get; set; }
+        public int BaselineMoneyCost { get; set; }
+        public bool Pending { get; set; }
+    }
+
+    private sealed class BookWriterSureButtonState
+    {
+        public BookWriterData? Writer { get; init; }
+        public ContinuousBookCombinePlan? Plan { get; init; }
+        public bool WasWorking { get; init; }
     }
 
     private sealed class PlotItemGrantState
@@ -584,6 +640,10 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static bool _governmentStorageRefreshHooksReady;
     private static bool _governmentStorageActiveLookupFailureLogged;
     private static float _governmentStorageRefreshButtonReadyAt;
+    private static bool _treasurePavilionCapacityHooksReady;
+    private static int _lastTreasurePavilionVanillaCapacity = -1;
+    private static int _lastTreasurePavilionAppliedCapacity = -1;
+    private static float _lastTreasurePavilionCapacityMultiplier = float.NaN;
     private static RecruitUIController? _yellowCraneCandidateRefreshController;
     private static GameObject? _yellowCraneCandidateRefreshButtonRoot;
     private static Button? _yellowCraneCandidateRefreshButton;
@@ -603,12 +663,28 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static bool _yellowCraneCandidateRefreshReopening;
     private static bool _yellowCraneCandidateRefreshCreationFailed;
     private static bool _bountyRefreshHooksReady;
+    private static bool _bountyContributionRewardHookReady;
     private static bool _bountyRefreshReentry;
     private static bool _skillBookOwnershipHooksReady;
     private static UILabel? _skillBookOwnershipAppliedNguiLabel;
     private static Text? _skillBookOwnershipAppliedUnityLabel;
     private static int _skillBookOwnershipAppliedSkillId = -1;
     private static bool _skillBookOwnershipLookupFailureLogged;
+    private static GameObject? _batchAreaUpgradeButtonRoot;
+    private static Button? _batchAreaUpgradeButton;
+    private static Text? _batchAreaUpgradeButtonLabel;
+    private static bool _batchAreaUpgradeBusy;
+    private static AreaRoadData? _pendingBatchRoadUpgradeData;
+    private static int _pendingBatchRoadUpgradeTimeBefore;
+    private static int _pendingBatchRoadUpgradeLevelBefore;
+    private static int _pendingBatchRoadUpgradeReadyFrame = -1;
+    private static int _pendingBatchRoadUpgradeAttemptsRemaining;
+    private static int _pendingBatchAreaUpgradedCount;
+    private static GameObject? _continuousBookCombineButtonRoot;
+    private static Button? _continuousBookCombineButton;
+    private static Text? _continuousBookCombineButtonLabel;
+    private static readonly List<ContinuousBookCombinePlan> ContinuousBookCombinePlans = new();
+    private static bool _continuousBookCombineStarting;
     private static IdentifyMatchController? _identifyMatchController;
     private static GameObject? _identifyBestTreasureButtonRoot;
     private static Button? _identifyBestTreasureButton;
@@ -727,6 +803,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         _lockHorseTurboStamina = Config.Bind("WorldMapHorse", "LockTurboStamina", true, "Keeps world-map horse stamina available so turbo does not end early from stamina depletion.");
         _carryWeightCap = Config.Bind("Inventory", "CarryWeightCap", 100000f, "Minimum carry-weight cap applied to the player inventory. Set to 0 to disable.");
         _ignoreCarryWeight = Config.Bind("Inventory", "IgnoreCarryWeight", false, "When true, forces the player inventory's current carried weight to 0.");
+        _treasurePavilionCapacityMultiplier = Config.Bind("TreasurePavilion", "CapacityMultiplier", 10f, "Multiplies the treasure pavilion's achievement-based external-storage item-value capacity. Only the computed return value is changed; item weight and save data are not modified.");
         _merchantCarryCash = Config.Bind("Commerce", "MerchantCarryCash", 100000, "Minimum cash carried by NPC shop merchants while a Shop trade window is open. Set to 0 to disable.");
         _treasureTradeHelperEnabled = Config.Bind("Commerce", "TreasureTradeHelperEnabled", true, "Shows a treasure-cart summary with item count, purchase cost, expected resale value, and projected profit.");
         _treasureAutoTradeEnabled = Config.Bind("Commerce", "TreasureAutoTradeEnabled", true, "Automatically adds unidentified treasures estimated profitable from the player-appraised parenthesized value when a trade shop opens.");
@@ -748,8 +825,11 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         _commonBountyRefreshEnabled = Config.Bind("BountyRefresh", "CommonEnabled", true, "Keeps the original refresh button available for notice-board commission lists and preserves the original refresh counter.");
         _governBountyRefreshEnabled = Config.Bind("BountyRefresh", "GovernEnabled", true, "Keeps the original refresh button available for government commission lists and preserves the original refresh counter.");
         _bountyRefreshHotkey = Config.Bind("BountyRefresh", "RefreshHotkey", KeyCode.R, "Single-key shortcut that refreshes the active enabled sect, notice-board, or government commission list.");
-        _skillBookOwnershipIndicatorEnabled = Config.Bind("SkillDisplay", "BookOwnershipIndicatorEnabled", true, "Shows whether the hovered martial skill has a matching book in the player inventory, personal storage, or current sect book storage.");
-        _mogaoDiscipleForgettingEnabled = Config.Bind("Mogao", "DiscipleForgettingEnabled", true, "Allows the player, while serving as sect leader, to select a same-sect disciple for the vanilla Mogao martial-skill or talent forgetting flow.");
+        _bountyContributionMultiplier = Config.Bind("BountyReward", "ContributionMultiplier", 2f, "Multiplies positive sect and government contribution awarded by completed commissions. Notice-board fame and NPC favor are unchanged.");
+        _skillBookOwnershipIndicatorEnabled = Config.Bind("SkillDisplay", "BookOwnershipIndicatorEnabled", true, "Shows whether the hovered martial skill has a matching book in the player inventory, personal storage, current sect book storage, or exhibition room, including the highest owned quality.");
+        _batchAreaUpgradeEnabled = Config.Bind("Construction", "BatchUpgradeEnabled", true, "Adds a city/sect construction button that upgrades the main building first, then non-demolishable special buildings, ordinary buildings, and roads, ordered top-left to bottom-right within each tier.");
+        _continuousBookCombineEnabled = Config.Bind("BookWriter", "ContinuousCombineEnabled", false, "Shows an opt-in continuous-combine checkbox for combine-book writing. Repeats same-skill combines only while the next price does not exceed the initially confirmed normal price.");
+        _mogaoDiscipleForgettingEnabled = Config.Bind("Mogao", "DiscipleForgettingEnabled", true, "Allows a sect leader to manage same-sect disciples at Mogao: self-forgetting keeps the vanilla timed flow, while disciple forgetting applies immediately.");
         _treasureIdentifyBestValueAssistEnabled = Config.Bind("TreasureIdentify", "BestValueAssistEnabled", true, "Adds a button that selects the treasure with the highest player-appraised value shown in parentheses. Confirmation remains manual.");
         _breakthroughRerollEnabled = Config.Bind("Breakthrough", "RerollEnabled", true, "Adds a button that rebuilds the current breakthrough choices without confirming a choice or consuming money, items, or time.");
         _craftRerollEnabled = Config.Bind("Craft", "RerollEnabled", true, "Adds preview-only buttons that rebuild normal crafting or special-enhancement choices without confirming, consuming materials, spending money, or advancing time.");
@@ -828,16 +908,17 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             PatchMethod(typeof(WorldData), nameof(WorldData.Player), Type.EmptyTypes, null, nameof(MogaoPlayerPostfix)),
             PatchMethod(typeof(BuildingUIController), nameof(BuildingUIController.SpeRemoveSkill), Type.EmptyTypes, nameof(MogaoBuildingForgetPrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
             PatchMethod(typeof(BuildingUIController), nameof(BuildingUIController.SpeRemoveTag), Type.EmptyTypes, nameof(MogaoBuildingForgetPrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
-            PatchMethod(typeof(BuildingUIController), nameof(BuildingUIController.GetSpeRemoveSkillCost), Type.EmptyTypes, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
-            PatchMethod(typeof(BuildingUIController), nameof(BuildingUIController.GetSpeRemoveTagCost), Type.EmptyTypes, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
-            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveSkillChoose), Type.EmptyTypes, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(BuildingUIController), nameof(BuildingUIController.GetSpeRemoveSkillCost), Type.EmptyTypes, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetCostPostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(BuildingUIController), nameof(BuildingUIController.GetSpeRemoveTagCost), Type.EmptyTypes, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetCostPostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveSkillChoose), Type.EmptyTypes, nameof(MogaoSkillChoosePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
             PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveSkillChoosen), Type.EmptyTypes, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
-            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveSkillStart), Type.EmptyTypes, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
-            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveSkillFinish), new[] { typeof(string) }, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetFinishPostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveSkillStart), Type.EmptyTypes, nameof(MogaoSkillStartPrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveSkillFinish), new[] { typeof(string) }, nameof(MogaoSkillFinishPrefix), nameof(MogaoSkillFinishPostfix), nameof(MogaoSkillFinishFinalizer)),
             PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveTagChoose), new[] { typeof(string) }, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
-            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveTagStart), new[] { typeof(string) }, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
+            PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveTagStart), new[] { typeof(string) }, nameof(MogaoTagStartPrefix), nameof(MogaoForgetScopePostfix), nameof(MogaoForgetScopeFinalizer)),
             PatchMethod(typeof(PlotController), nameof(PlotController.SpeRemoveTagFinish), new[] { typeof(string) }, nameof(MogaoForgetScopePrefix), nameof(MogaoForgetFinishPostfix), nameof(MogaoForgetScopeFinalizer)),
-            PatchMethod(typeof(ChooseController), nameof(ChooseController.UnshowChoosePanel), Type.EmptyTypes, null, nameof(MogaoPickerCancelledPostfix))
+            PatchMethod(typeof(ChooseController), nameof(ChooseController.ChooseObj), new[] { typeof(GameObject) }, nameof(MogaoPickerChoosePrefix), nameof(MogaoPickerChoosePostfix), nameof(MogaoPickerChooseFinalizer)),
+            PatchMethod(typeof(ChooseController), nameof(ChooseController.UnshowChoosePanel), Type.EmptyTypes, nameof(MogaoPickerUnshowPrefix), nameof(MogaoPickerCancelledPostfix))
         };
         _mogaoDiscipleForgetHooksReady = mogaoForgetPatches.All(patched => patched);
         if (!_mogaoDiscipleForgetHooksReady)
@@ -847,7 +928,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
         LoggerInstance.LogInfo(
             $"[Compatibility] Mogao disciple forgetting: {(!_mogaoDiscipleForgettingEnabled.Value ? "DISABLED BY CONFIG" : _mogaoDiscipleForgetHooksReady ? "ENABLED" : "DEGRADED")} " +
-            "(leader target picker and complete vanilla skill/talent forget flow required).");
+            "(native target picker, timed self flow, and direct disciple flow required).");
         LoggerInstance.LogInfo("[Compatibility] Character-data test uses on-demand HeroDetailController reads; methods left unpatched.");
         PatchMethod(typeof(PlotController), nameof(PlotController.LoverInteractWithNPC), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.AskHeroToLover), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
@@ -856,7 +937,16 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         PatchMethod(typeof(PlotController), nameof(PlotController.FinishHeroToLover), Type.EmptyTypes, nameof(MaxLoverCountSyncPrefix), null);
         PatchMethod(typeof(PlotController), nameof(PlotController.CheckChoiceMeetRequire), new[] { typeof(Il2CppSystem.Collections.Generic.List<PlotChoiceRequirement>), typeof(bool) }, nameof(MaxLoverCountSyncPrefix), nameof(CheckChoiceMeetRequirePostfix));
         PatchMethod(typeof(PlotController), nameof(PlotController.CheckMeetRequire), new[] { typeof(ChoiceRequirementType), typeof(float), typeof(bool) }, nameof(MaxLoverCountSyncPrefix), null);
-        PatchMethod(typeof(GameController), nameof(GameController.MeetLoverResultRequire), Type.EmptyTypes, null, nameof(MeetLoverResultRequirePostfix));
+        var loverAchievementCheckPatched = PatchMethod(
+            typeof(GameController),
+            nameof(GameController.CheckGameResultTrigger),
+            Type.EmptyTypes,
+            nameof(LoverAchievementCheckPrefix),
+            null,
+            nameof(LoverAchievementCheckFinalizer));
+        LoggerInstance.LogInfo(
+            $"[Compatibility] Lover achievement threshold isolation: {(loverAchievementCheckPatched ? "ENABLED" : "DEGRADED")} " +
+            $"(native requirement fixed at {VanillaLoverAchievementRelationshipCount}; configured romance cap restored afterward)." );
         var loverBattlePlotStartPatched = false;
         var loverBattlePlotResultPatched = false;
         var battlePrepareDirectPatched = false;
@@ -884,7 +974,6 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             null);
         PatchMethod(typeof(HeroData), nameof(HeroData.AddSkillBookExp), new[] { typeof(float), typeof(KungfuSkillLvData), typeof(bool) }, nameof(AddSkillBookExpPrefix), null);
         PatchMethod(typeof(HeroData), nameof(HeroData.BattleChangeSkillFightExp), new[] { typeof(float), typeof(KungfuSkillLvData), typeof(bool) }, nameof(BattleChangeSkillFightExpPrefix), null);
-        PatchMethod(typeof(HeroData), nameof(HeroData.ChangeMoney), new[] { typeof(int), typeof(bool) }, nameof(ChangeMoneyPrefix), nameof(ChangeMoneyPostfix));
         var changeFavorPatched = false;
         if (_relationshipFeaturesEnabled.Value)
         {
@@ -919,6 +1008,12 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             nameof(RefreshHorseStatePostfix),
             out var horseRefreshSignature);
         PatchMethod(typeof(BuildingUIController), nameof(BuildingUIController.ShowBuildingShop), Type.EmptyTypes, null, nameof(ShowBuildingShopPostfix));
+        var treasurePavilionCapacityPatched = PatchMethod(
+            typeof(GameDataController),
+            nameof(GameDataController.GetExternalStorageMaxValue),
+            Type.EmptyTypes,
+            null,
+            nameof(TreasurePavilionCapacityGetMaxValuePostfix));
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListData), typeof(ItemListData), typeof(bool) }, null, nameof(ShowTradeUiBasicPostfix));
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListType), typeof(ItemListData), typeof(ItemListData) }, null, nameof(ShowTradeUiTypedPostfix));
         PatchMethod(typeof(TradeUIController), nameof(TradeUIController.ShowTradeUI), new[] { typeof(TradeUIType), typeof(ItemListData), typeof(ItemListData), typeof(int), typeof(int) }, null, nameof(ShowTradeUiLevelRangePostfix));
@@ -942,6 +1037,13 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             bountyFreshButtonPatched = PatchMethod(typeof(BountyUIController), nameof(BountyUIController.FreshBountyButtonClicked), Type.EmptyTypes, nameof(BountyFreshButtonClickedPrefix), null);
             bountyFreshPatched = PatchMethod(typeof(BountyUIController), nameof(BountyUIController.FreshBounty), Type.EmptyTypes, null, nameof(BountyFreshPostfix));
         }
+        _bountyContributionRewardHookReady = PatchMethod(
+            typeof(GameController),
+            nameof(GameController.FinishMission),
+            new[] { typeof(MissionData) },
+            nameof(BountyContributionRewardPrefix),
+            nameof(BountyContributionRewardPostfix),
+            nameof(BountyContributionRewardFinalizer));
         var skillBookOwnershipUpdatePatched = false;
         if (_skillBookOwnershipIndicatorEnabled.Value)
         {
@@ -1057,6 +1159,10 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         LoggerInstance.LogInfo(
             $"[Compatibility] Government storage refresh: {(_governmentStorageRefreshHooksReady ? "ENABLED" : "DISABLED")} " +
             "(ShowGovernStorage, HideTradeUI, overlay click, and update hooks required).");
+        _treasurePavilionCapacityHooksReady = treasurePavilionCapacityPatched;
+        LoggerInstance.LogInfo(
+            $"[Compatibility] Treasure pavilion capacity multiplier: {(_treasurePavilionCapacityHooksReady ? "ENABLED" : "DEGRADED")} " +
+            "(GameDataController.GetExternalStorageMaxValue hook required).");
         _yellowCraneCandidateRefreshHooksReady = yellowCraneFinishRecruitPatched &&
             yellowCraneRecruitShowPatched &&
             yellowCraneRecruitHidePatched &&
@@ -1077,6 +1183,9 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         LoggerInstance.LogInfo(
             $"[Compatibility] Commission refresh: {(!(_forceBountyRefreshEnabled.Value || _commonBountyRefreshEnabled.Value || _governBountyRefreshEnabled.Value) ? "DISABLED BY CONFIG" : _bountyRefreshHooksReady ? "ENABLED" : "DEGRADED")} " +
             "(original FreshBountyButtonClicked, FreshBounty, and update hooks required).");
+        LoggerInstance.LogInfo(
+            $"[Compatibility] Commission contribution multiplier: {(_bountyContributionRewardHookReady ? "ENABLED" : "DEGRADED")} " +
+            "(GameController.FinishMission hook required).");
         _skillBookOwnershipHooksReady = skillBookOwnershipUpdatePatched;
         LoggerInstance.LogInfo(
             $"[Compatibility] Skill book ownership indicator: {(!_skillBookOwnershipIndicatorEnabled.Value ? "DISABLED BY CONFIG" : _skillBookOwnershipHooksReady ? "ENABLED" : "DEGRADED")} " +
@@ -1209,6 +1318,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         Log.LogInfo($"World-map horse turbo stamina lock starts {(_lockHorseTurboStamina.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Carry-weight cap starts at {Math.Max(0f, _carryWeightCap.Value):0.###}.");
         Log.LogInfo($"Ignore carry weight starts {(_ignoreCarryWeight.Value ? "ON" : "OFF")}.");
+        Log.LogInfo($"Treasure pavilion capacity multiplier starts at x{FormatConfigFloat(GetTreasurePavilionCapacityMultiplier())}.");
         Log.LogInfo($"Merchant cash floor starts at {Math.Max(0, _merchantCarryCash.Value)}.");
         Log.LogInfo($"Treasure trade helper starts {(_treasureTradeHelperEnabled.Value ? "ON" : "OFF")}.");
         Log.LogInfo($"Treasure auto cart starts {(_treasureAutoTradeEnabled.Value ? "ON" : "OFF")}.");
@@ -1231,7 +1341,10 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         Log.LogInfo(
             $"Commission refresh starts {((_forceBountyRefreshEnabled.Value || _commonBountyRefreshEnabled.Value || _governBountyRefreshEnabled.Value) ? "ON" : "OFF")} " +
             $"with shortcut {_bountyRefreshHotkey.Value} only while an enabled commission list is visible.");
-        Log.LogInfo($"Skill book ownership indicator starts {(_skillBookOwnershipIndicatorEnabled.Value && _skillBookOwnershipHooksReady ? "ON" : "OFF")} for inventory, personal storage, and sect book storage.");
+        Log.LogInfo(
+            $"Commission contribution multiplier starts at x{FormatConfigFloat(GetBountyContributionMultiplier())}; " +
+            "sect and government contribution only.");
+        Log.LogInfo($"Skill book ownership indicator starts {(_skillBookOwnershipIndicatorEnabled.Value && _skillBookOwnershipHooksReady ? "ON" : "OFF")} for inventory, personal storage, sect book storage, and exhibition shelves; the highest quality is displayed.");
         Log.LogInfo($"Mogao sect-leader disciple forgetting starts {(_mogaoDiscipleForgettingEnabled.Value && _mogaoDiscipleForgetHooksReady ? "ON" : "OFF")}; non-leaders retain vanilla self-only behavior.");
         Log.LogInfo($"Treasure identify best-value button starts {(_treasureIdentifyBestValueAssistEnabled.Value ? "ON" : "OFF")}; confirmation remains manual.");
         Log.LogInfo($"Lucky money hit chance starts at {ClampPercent(_luckyMoneyHitChancePercent.Value)}%.");
@@ -2363,6 +2476,10 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             __instance == _craftRerollButton;
         var isSpeEnhanceReroll = string.Equals(buttonName, SpeEnhanceRerollButtonName, StringComparison.Ordinal) &&
             __instance == _speEnhanceRerollButton;
+        var isBatchAreaUpgrade = string.Equals(buttonName, BatchAreaUpgradeButtonName, StringComparison.Ordinal) &&
+            __instance == _batchAreaUpgradeButton;
+        var isContinuousBookCombine = string.Equals(buttonName, ContinuousBookCombineButtonName, StringComparison.Ordinal) &&
+            __instance == _continuousBookCombineButton;
         var isShopOwnershipBuy = string.Equals(buttonName, ShopOwnershipBuyButtonName, StringComparison.Ordinal);
         var isMaterialAutoBuy = string.Equals(buttonName, MaterialAutoBuyButtonName, StringComparison.Ordinal);
         var isMaterialFilterDropdown = string.Equals(buttonName, MaterialFilterDropdownButtonName, StringComparison.Ordinal);
@@ -2390,6 +2507,8 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             !isBreakthroughReroll &&
             !isCraftReroll &&
             !isSpeEnhanceReroll &&
+            !isBatchAreaUpgrade &&
+            !isContinuousBookCombine &&
             !isShopOwnershipBuy &&
             !isMaterialAutoBuy &&
             !isMaterialFilterDropdown &&
@@ -2413,7 +2532,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             return false;
         }
 
-        if ((isAuctionRefresh || isGovernmentStorageRefresh || isYellowCraneCandidateRefresh || isIdentifyAssist || isBreakthroughReroll || isCraftReroll || isSpeEnhanceReroll) &&
+        if ((isAuctionRefresh || isGovernmentStorageRefresh || isYellowCraneCandidateRefresh || isIdentifyAssist || isBreakthroughReroll || isCraftReroll || isSpeEnhanceReroll || isBatchAreaUpgrade || isContinuousBookCombine) &&
             (eventData == null || eventData.button != PointerEventData.InputButton.Left))
         {
             return false;
@@ -2475,6 +2594,17 @@ public sealed class LongYinProMaxPlugin : BasePlugin
                 {
                     TryRerollSpeEnhanceChoices();
                 }
+            }
+            else if (isBatchAreaUpgrade)
+            {
+                if (_batchAreaUpgradeEnabled.Value)
+                {
+                    TryBatchUpgradeCurrentArea();
+                }
+            }
+            else if (isContinuousBookCombine)
+            {
+                ToggleContinuousBookCombine();
             }
             else if (isShopOwnershipBuy)
             {
@@ -4778,6 +4908,8 @@ public sealed class LongYinProMaxPlugin : BasePlugin
                     string.Equals(buttonName, BreakthroughRerollButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, CraftRerollButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, SpeEnhanceRerollButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, BatchAreaUpgradeButtonName, StringComparison.Ordinal) ||
+                    string.Equals(buttonName, ContinuousBookCombineButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, ShopOwnershipBuyButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, MaterialAutoBuyButtonName, StringComparison.Ordinal) ||
                     string.Equals(buttonName, MaterialFilterDropdownButtonName, StringComparison.Ordinal) ||
@@ -5090,6 +5222,640 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             LoggerInstance.LogWarning($"Failed to create safe visual-only UI button {name}: {ex.Message}");
             return false;
         }
+    }
+
+    private static void TryUpdateBatchAreaUpgradeUi()
+    {
+        if (!_batchAreaUpgradeEnabled.Value)
+        {
+            DestroyBatchAreaUpgradeButton();
+            return;
+        }
+
+        AreaBuildController? buildController;
+        AreaController? areaController;
+        try
+        {
+            buildController = AreaBuildController.Instance;
+            areaController = AreaController.Instance;
+        }
+        catch
+        {
+            DestroyBatchAreaUpgradeButton();
+            return;
+        }
+
+        var originalButton = buildController?.buildModeButton;
+        var area = areaController?.areaData;
+        if (buildController == null || originalButton == null || area == null)
+        {
+            if (_batchAreaUpgradeButtonRoot != null)
+            {
+                _batchAreaUpgradeButtonRoot.SetActive(false);
+            }
+            return;
+        }
+
+        var hammerVisible = originalButton.activeInHierarchy;
+        var buildManagementVisible = hammerVisible && buildController.buildMode;
+        if (!buildManagementVisible)
+        {
+            if (_batchAreaUpgradeButtonRoot != null)
+            {
+                _batchAreaUpgradeButtonRoot.SetActive(false);
+            }
+            return;
+        }
+
+        if (!EnsureBatchAreaUpgradeButton(buildController))
+        {
+            return;
+        }
+
+        _batchAreaUpgradeButtonRoot?.SetActive(buildManagementVisible);
+        if (_batchAreaUpgradeButton != null)
+        {
+            _batchAreaUpgradeButton.interactable = !_batchAreaUpgradeBusy;
+        }
+    }
+
+    private static bool EnsureBatchAreaUpgradeButton(AreaBuildController buildController)
+    {
+        var originalButton = buildController.buildModeButton;
+        var parent = originalButton?.transform?.parent;
+        var hammerRect = originalButton?.GetComponent<RectTransform>();
+        if (originalButton == null || parent == null || hammerRect == null)
+        {
+            return false;
+        }
+
+        var buttonSize = new Vector2(150f, 44f);
+        var buttonPosition = hammerRect.anchoredPosition + new Vector2(
+            hammerRect.rect.width * (1f - hammerRect.pivot.x) +
+                buttonSize.x * hammerRect.pivot.x +
+                160f,
+            (hammerRect.rect.height - buttonSize.y) * (0.5f - hammerRect.pivot.y));
+
+        if (_batchAreaUpgradeButtonRoot != null &&
+            _batchAreaUpgradeButton != null &&
+            _batchAreaUpgradeButtonLabel != null &&
+            _batchAreaUpgradeButtonRoot.transform.parent == parent)
+        {
+            var buttonRect = _batchAreaUpgradeButtonRoot.GetComponent<RectTransform>();
+            if (buttonRect != null)
+            {
+                buttonRect.anchorMin = hammerRect.anchorMin;
+                buttonRect.anchorMax = hammerRect.anchorMax;
+                buttonRect.pivot = hammerRect.pivot;
+                buttonRect.anchoredPosition = buttonPosition;
+                buttonRect.sizeDelta = buttonSize;
+            }
+            return true;
+        }
+
+        DestroyBatchAreaUpgradeButton();
+        var templateText = FindUiTextTemplate(originalButton) ?? FindUiTextTemplate(parent.gameObject);
+        if (templateText == null)
+        {
+            return false;
+        }
+
+        var created = TryCreateSafeStyledButton(
+            BatchAreaUpgradeButtonName,
+            parent,
+            null,
+            templateText,
+            hammerRect.anchorMin,
+            hammerRect.anchorMax,
+            hammerRect.pivot,
+            buttonPosition,
+            buttonSize,
+            "全部升级",
+            out _batchAreaUpgradeButtonRoot,
+            out _batchAreaUpgradeButton,
+            out _batchAreaUpgradeButtonLabel);
+        if (created)
+        {
+            LoggerInstance.LogInfo(
+                $"[Construction] Compact batch upgrade button created to the right of hammer under {parent.gameObject.name}.");
+        }
+
+        return created;
+    }
+
+    private static void DestroyBatchAreaUpgradeButton()
+    {
+        if (_batchAreaUpgradeButtonRoot != null)
+        {
+            UnityEngine.Object.Destroy(_batchAreaUpgradeButtonRoot);
+        }
+
+        _batchAreaUpgradeButtonRoot = null;
+        _batchAreaUpgradeButton = null;
+        _batchAreaUpgradeButtonLabel = null;
+    }
+
+    private static void TryBatchUpgradeCurrentArea()
+    {
+        if (_batchAreaUpgradeBusy)
+        {
+            return;
+        }
+
+        var area = AreaController.Instance?.areaData;
+        var gameController = GameController.Instance;
+        if (area == null || gameController == null)
+        {
+            PushPlayerLog("【一键建设】：当前城市或门派建设数据尚未就绪。");
+            return;
+        }
+
+        var candidates = new List<AreaUpgradeCandidate>();
+        CollectAreaUpgradeCandidates(area, candidates);
+        AddNativeRoadUpgradeCandidate(area, gameController, candidates);
+
+        candidates.Sort(CompareAreaUpgradeCandidates);
+        var upgradedCount = 0;
+        _batchAreaUpgradeBusy = true;
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                if (TryUpgradeAreaCandidateLikeHammer(candidate))
+                {
+                    upgradedCount++;
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.LogWarning(
+                    $"[Construction] Skipped one batch candidate at ({candidate.Row},{candidate.Column}): {DescribeCompatibilityException(ex)}");
+            }
+        }
+
+        if (_pendingBatchRoadUpgradeData != null)
+        {
+            _pendingBatchAreaUpgradedCount = upgradedCount;
+            return;
+        }
+
+        FinishBatchAreaUpgrade(upgradedCount);
+    }
+
+    private static void FinishBatchAreaUpgrade(int upgradedCount)
+    {
+        _pendingBatchRoadUpgradeData = null;
+        _pendingBatchRoadUpgradeReadyFrame = -1;
+        _pendingBatchRoadUpgradeAttemptsRemaining = 0;
+        _pendingBatchAreaUpgradedCount = 0;
+        _batchAreaUpgradeBusy = false;
+        AreaController.Instance?.RefreshAreaBuildingChoiceInfo();
+        AreaController.Instance?.FreshAreaInfo(true);
+        PushPlayerLog(upgradedCount > 0
+            ? $"【一键建设】：已按优先级安排 {upgradedCount} 项建筑或道路升级。"
+            : "【一键建设】：当前没有可选中升级的建筑或道路。");
+    }
+
+    private static void CollectAreaUpgradeCandidates(
+        AreaData area,
+        List<AreaUpgradeCandidate> candidates)
+    {
+        var buildingTiles = area.areaTiles;
+        if (buildingTiles != null)
+        {
+            for (var tileIndex = 0; tileIndex < buildingTiles.Count; tileIndex++)
+            {
+                var tile = buildingTiles[tileIndex];
+                if (tile?.building == null)
+                {
+                    continue;
+                }
+
+                AddAreaUpgradeCandidate(candidates, new AreaUpgradeCandidate
+                {
+                    Tile = tile,
+                    Tier = GetAreaBatchUpgradeTier(tile),
+                    Row = tile.row,
+                    Column = tile.column,
+                    IsRoad = false
+                });
+            }
+        }
+
+        var roadTiles = area.roadTiles;
+        if (roadTiles == null)
+        {
+            return;
+        }
+
+        for (var tileIndex = 0; tileIndex < roadTiles.Count; tileIndex++)
+        {
+            var roadTileId = roadTiles[tileIndex];
+            var tile = ResolveAreaRoadTile(area, roadTileId);
+            if (tile == null || tile.tileType != AreaTileType.Road || tile.areaRoadData == null)
+            {
+                continue;
+            }
+
+            AddAreaUpgradeCandidate(candidates, new AreaUpgradeCandidate
+            {
+                Tile = tile,
+                Tier = 3,
+                Row = tile.row,
+                Column = tile.column,
+                IsRoad = true
+            });
+        }
+    }
+
+    private static void AddNativeRoadUpgradeCandidate(
+        AreaData area,
+        GameController gameController,
+        List<AreaUpgradeCandidate> candidates)
+    {
+        AreaTileData? targetRoadTile;
+        try
+        {
+            targetRoadTile = gameController.GetAreaRandomRoadTile(area);
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[Construction] Native road candidate selection failed for area {area.areaID}: {DescribeCompatibilityException(ex)}");
+            return;
+        }
+
+        if (targetRoadTile == null ||
+            targetRoadTile.tileType != AreaTileType.Road ||
+            targetRoadTile.areaRoadData == null)
+        {
+            return;
+        }
+
+        AddAreaUpgradeCandidate(candidates, new AreaUpgradeCandidate
+        {
+            Tile = targetRoadTile,
+            Tier = 3,
+            Row = targetRoadTile.row,
+            Column = targetRoadTile.column,
+            IsRoad = true
+        });
+    }
+
+    private static AreaTileData? ResolveAreaRoadTile(AreaData area, int roadTileId)
+    {
+        var areaTiles = area.areaTiles;
+        if (areaTiles == null || roadTileId < 0)
+        {
+            return null;
+        }
+
+        if (roadTileId < areaTiles.Count)
+        {
+            var indexedTile = areaTiles[roadTileId];
+            if (indexedTile != null && indexedTile.tileType == AreaTileType.Road)
+            {
+                return indexedTile;
+            }
+        }
+
+        var mapWidth = area.mapWidth;
+        if (mapWidth > 0)
+        {
+            try
+            {
+                var row = roadTileId / mapWidth;
+                var column = roadTileId % mapWidth;
+                var coordinateTile = area.GetTile(column, row);
+                if (coordinateTile != null && coordinateTile.tileType == AreaTileType.Road)
+                {
+                    return coordinateTile;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        for (var index = 0; index < areaTiles.Count; index++)
+        {
+            var tile = areaTiles[index];
+            if (tile == null || tile.tileType != AreaTileType.Road)
+            {
+                continue;
+            }
+
+            if (mapWidth > 0 && tile.row * mapWidth + tile.column == roadTileId)
+            {
+                return tile;
+            }
+        }
+
+        return null;
+    }
+
+    private static void AddAreaUpgradeCandidate(
+        List<AreaUpgradeCandidate> candidates,
+        AreaUpgradeCandidate candidate)
+    {
+        if (candidates.Any(existing =>
+                SameAreaTileIdentity(existing.Tile, candidate.Tile) ||
+                existing.IsRoad && candidate.IsRoad &&
+                SameAreaRoadIdentity(existing.Tile, candidate.Tile)))
+        {
+            return;
+        }
+
+        candidates.Add(candidate);
+    }
+
+    private static bool SameAreaRoadIdentity(AreaTileData? left, AreaTileData? right)
+    {
+        var leftRoad = left?.areaRoadData;
+        var rightRoad = right?.areaRoadData;
+        if (ReferenceEquals(leftRoad, rightRoad))
+        {
+            return leftRoad != null;
+        }
+
+        if (leftRoad == null || rightRoad == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var leftPointer = leftRoad.Pointer;
+            var rightPointer = rightRoad.Pointer;
+            if (leftPointer != IntPtr.Zero && leftPointer == rightPointer)
+            {
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return leftRoad.areaID == rightRoad.areaID;
+    }
+
+    private static bool SameAreaTileIdentity(AreaTileData? left, AreaTileData? right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return left != null;
+        }
+
+        if (left == null || right == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var leftPointer = left.Pointer;
+            var rightPointer = right.Pointer;
+            if (leftPointer != IntPtr.Zero && leftPointer == rightPointer)
+            {
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return left.areaID == right.areaID &&
+            left.row == right.row &&
+            left.column == right.column;
+    }
+
+    private static bool TryUpgradeAreaCandidateLikeHammer(AreaUpgradeCandidate candidate)
+    {
+        var buildController = AreaBuildController.Instance;
+        var areaController = AreaController.Instance;
+        var gameController = GameController.Instance;
+        if (buildController == null || areaController == null || gameController == null || candidate?.Tile == null)
+        {
+            return false;
+        }
+
+        if (candidate.IsRoad && candidate.Tile.tileType == AreaTileType.Road)
+        {
+            var targetRoadTile = candidate.Tile;
+            var areaRoadData = targetRoadTile.areaRoadData;
+            if (!CanUpgradeAreaRoad(areaRoadData))
+            {
+                return false;
+            }
+
+            var timeBefore = areaRoadData.upgradeTimeLeft;
+            var levelBefore = areaRoadData.roadLv;
+            var targetGrid = areaController.FindGrid(targetRoadTile);
+            if (targetGrid == null)
+            {
+                return false;
+            }
+
+            // Road upgrades are exposed by the native hammer choice menu rather
+            // than by a non-null AreaBuildingData. Invoking the native choice
+            // preserves the same validation, resource deduction, and scheduling
+            // path as a manual road click without passing an invalid null target.
+            buildController.SetBuildTarget(targetGrid);
+            QueuePendingNativeRoadUpgrade(areaRoadData, timeBefore, levelBefore);
+            return false;
+        }
+
+        var building = candidate.Tile.building;
+        if (building == null || !gameController.BuildingCanUpgrade(building))
+        {
+            return false;
+        }
+
+        var buildingTimeBefore = building.upgradeTimeLeft;
+        var buildingLevelBefore = building.lv;
+        buildController.PlayerUpgradeBuilding(building);
+        return building.upgradeTimeLeft != buildingTimeBefore || building.lv != buildingLevelBefore;
+    }
+
+    private static void QueuePendingNativeRoadUpgrade(
+        AreaRoadData roadData,
+        int timeBefore,
+        int levelBefore)
+    {
+        _pendingBatchRoadUpgradeData = roadData;
+        _pendingBatchRoadUpgradeTimeBefore = timeBefore;
+        _pendingBatchRoadUpgradeLevelBefore = levelBefore;
+        _pendingBatchRoadUpgradeReadyFrame = Time.frameCount + 1;
+        _pendingBatchRoadUpgradeAttemptsRemaining = 30;
+    }
+
+    private static void TryRunPendingBatchRoadUpgrade()
+    {
+        var roadData = _pendingBatchRoadUpgradeData;
+        if (roadData == null || Time.frameCount < _pendingBatchRoadUpgradeReadyFrame)
+        {
+            return;
+        }
+
+        if (roadData.upgradeTimeLeft != _pendingBatchRoadUpgradeTimeBefore ||
+            roadData.roadLv != _pendingBatchRoadUpgradeLevelBefore)
+        {
+            LoggerInstance.LogInfo(
+                $"[Construction] Native road upgrade started: area={roadData.areaID}, " +
+                $"level={_pendingBatchRoadUpgradeLevelBefore}->{roadData.roadLv}, " +
+                $"time={_pendingBatchRoadUpgradeTimeBefore}->{roadData.upgradeTimeLeft}.");
+            FinishBatchAreaUpgrade(_pendingBatchAreaUpgradedCount + 1);
+            return;
+        }
+
+        var buildController = AreaBuildController.Instance;
+        if (buildController != null && TryInvokeNativeRoadUpgradeChoice(buildController))
+        {
+            // The native choice can finish on the following Unity frame. Do not
+            // count a button invocation as a successful road transaction until
+            // the native road data actually changes.
+            _pendingBatchRoadUpgradeReadyFrame = Time.frameCount + 1;
+            _pendingBatchRoadUpgradeAttemptsRemaining--;
+            return;
+        }
+
+        _pendingBatchRoadUpgradeAttemptsRemaining--;
+        if (_pendingBatchRoadUpgradeAttemptsRemaining > 0)
+        {
+            return;
+        }
+
+        LoggerInstance.LogInfo(
+            "[Construction] Native road upgrade choice stayed unavailable or disabled; the batch left the road unchanged.");
+        FinishBatchAreaUpgrade(_pendingBatchAreaUpgradedCount);
+    }
+
+    private static bool TryInvokeNativeRoadUpgradeChoice(AreaBuildController buildController)
+    {
+        var choiceGrid = buildController?.buildChoiceGrid;
+        if (choiceGrid == null)
+        {
+            return false;
+        }
+
+        var buttons = choiceGrid.GetComponentsInChildren<Button>(includeInactive: true);
+        if (buttons == null)
+        {
+            return false;
+        }
+
+        foreach (var button in buttons)
+        {
+            if (button?.gameObject == null || !button.gameObject.activeInHierarchy || !button.interactable)
+            {
+                continue;
+            }
+
+            if ((_batchAreaUpgradeButton != null && button == _batchAreaUpgradeButton) ||
+                (_batchAreaUpgradeButtonRoot != null && button.gameObject == _batchAreaUpgradeButtonRoot))
+            {
+                continue;
+            }
+
+            var labels = button.gameObject.GetComponentsInChildren<Text>(includeInactive: true);
+            if (labels == null)
+            {
+                continue;
+            }
+
+            var isUpgradeChoice = false;
+            foreach (var label in labels)
+            {
+                var normalized = new string((label?.text ?? string.Empty)
+                    .Where(character => !char.IsWhiteSpace(character))
+                    .ToArray());
+                if (string.Equals(normalized, "升级", StringComparison.Ordinal))
+                {
+                    isUpgradeChoice = true;
+                    break;
+                }
+            }
+
+            if (!isUpgradeChoice)
+            {
+                continue;
+            }
+
+            // Invoke the original Unity event rather than guessing which
+            // GameObject the native callback expects. This is the same path a
+            // real pointer click takes, including any prefab-bound argument.
+            button.onClick.Invoke();
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool CanUpgradeAreaRoad(AreaRoadData? areaRoadData)
+    {
+        if (areaRoadData == null || areaRoadData.upgradeTimeLeft > 0 || areaRoadData.roadLv >= 10)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (areaRoadData.GetUpgradeTime() <= 0)
+            {
+                return false;
+            }
+
+            var upgradeCosts = areaRoadData.GetUpgradeCostResource();
+            return upgradeCosts != null && upgradeCosts.Count > 0;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[Construction] Could not read native road upgrade eligibility for area {areaRoadData.areaID}: {DescribeCompatibilityException(ex)}");
+            return false;
+        }
+    }
+
+    private static int GetAreaBatchUpgradeTier(AreaTileData tile)
+    {
+        var building = tile.building;
+        if (building == null)
+        {
+            return 3;
+        }
+
+        AreaBuildingDataBase? dataBase = null;
+        try
+        {
+            dataBase = building.DataBase();
+        }
+        catch
+        {
+        }
+
+        if (tile.tileType == AreaTileType.MainBuilding || dataBase?.forceCenter == true)
+        {
+            return 0;
+        }
+
+        if (building.noCancel)
+        {
+            return 1;
+        }
+
+        return 2;
+    }
+
+    private static int CompareAreaUpgradeCandidates(AreaUpgradeCandidate left, AreaUpgradeCandidate right)
+    {
+        var tierComparison = left.Tier.CompareTo(right.Tier);
+        if (tierComparison != 0)
+        {
+            return tierComparison;
+        }
+
+        var rowComparison = left.Row.CompareTo(right.Row);
+        return rowComparison != 0 ? rowComparison : left.Column.CompareTo(right.Column);
     }
 
     private static bool TryCreateTextTemplateButton(
@@ -5772,6 +6538,47 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         ApplyPlayerCarryWeightOverride("BuildingUI.ShowBuildingShop");
         ApplyMerchantCarryCash(TradeUIType.Shop, __instance?.targetBuildingData?.shopItemList, "BuildingUI.ShowBuildingShop");
         HandleTreasureTradeUiShown(TradeUIType.Shop, "BuildingUI.ShowBuildingShop");
+    }
+
+    private static void TreasurePavilionCapacityGetMaxValuePostfix(ref int __result)
+    {
+        if (!_treasurePavilionCapacityHooksReady)
+        {
+            return;
+        }
+
+        var vanillaCapacity = Math.Max(0, __result);
+        var multiplier = GetTreasurePavilionCapacityMultiplier();
+        var scaledCapacity = Math.Round(
+            vanillaCapacity * (double)multiplier,
+            MidpointRounding.AwayFromZero);
+        var appliedCapacity = (int)Math.Min(int.MaxValue, Math.Max(0d, scaledCapacity));
+        __result = appliedCapacity;
+
+        if (_lastTreasurePavilionVanillaCapacity == vanillaCapacity &&
+            _lastTreasurePavilionAppliedCapacity == appliedCapacity &&
+            Math.Abs(_lastTreasurePavilionCapacityMultiplier - multiplier) < 0.0001f)
+        {
+            return;
+        }
+
+        _lastTreasurePavilionVanillaCapacity = vanillaCapacity;
+        _lastTreasurePavilionAppliedCapacity = appliedCapacity;
+        _lastTreasurePavilionCapacityMultiplier = multiplier;
+        LoggerInstance.LogInfo(
+            $"[TreasurePavilion] Item-value capacity {vanillaCapacity} -> {appliedCapacity} " +
+            $"(x{FormatConfigFloat(multiplier)}; computed return value only, save data unchanged).");
+    }
+
+    private static float GetTreasurePavilionCapacityMultiplier()
+    {
+        var configured = _treasurePavilionCapacityMultiplier.Value;
+        if (float.IsNaN(configured) || float.IsInfinity(configured))
+        {
+            return 10f;
+        }
+
+        return Mathf.Clamp(configured, 0.1f, 999f);
     }
 
     private static void ShowTradeUiBasicPostfix(TradeUIType targetType, ItemListData leftItemList, ItemListData rightItemList, bool _useAreaItemPrice)
@@ -7228,6 +8035,82 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         _yellowCraneCandidateRefreshButton = null;
         _yellowCraneCandidateRefreshButtonLabel = null;
         _yellowCraneCandidateRefreshButtonHost = null;
+    }
+
+    private static void BountyContributionRewardPrefix(
+        MissionData targetMission,
+        out BountyContributionRewardState __state)
+    {
+        __state = new BountyContributionRewardState();
+        if (!_bountyContributionRewardHookReady ||
+            targetMission == null ||
+            targetMission.missionSourceType != MissionSourceType.Bounty ||
+            (targetMission.missionBountyType != BountyType.ForceBounty &&
+             targetMission.missionBountyType != BountyType.GovernBounty))
+        {
+            return;
+        }
+
+        var originalReward = targetMission.missionFameReward;
+        if (originalReward <= 0f || float.IsNaN(originalReward) || float.IsInfinity(originalReward))
+        {
+            return;
+        }
+
+        var multiplier = GetBountyContributionMultiplier();
+        if (Math.Abs(multiplier - 1f) < 0.0001f)
+        {
+            return;
+        }
+
+        var appliedReward = (float)Math.Min(float.MaxValue, originalReward * (double)multiplier);
+        __state = new BountyContributionRewardState
+        {
+            Mission = targetMission,
+            OriginalReward = originalReward,
+            AppliedReward = appliedReward,
+            IsApplied = true
+        };
+        targetMission.missionFameReward = appliedReward;
+
+        LoggerInstance.LogInfo(
+            $"[BountyReward] Scaled {targetMission.missionBountyType} contribution " +
+            $"{SafeFormatValue(originalReward)} -> {SafeFormatValue(appliedReward)} (x{FormatConfigFloat(multiplier)}).");
+    }
+
+    private static void BountyContributionRewardPostfix(BountyContributionRewardState __state)
+    {
+        RestoreBountyContributionReward(__state);
+    }
+
+    private static Exception? BountyContributionRewardFinalizer(
+        Exception? __exception,
+        BountyContributionRewardState __state)
+    {
+        RestoreBountyContributionReward(__state);
+        return __exception;
+    }
+
+    private static void RestoreBountyContributionReward(BountyContributionRewardState state)
+    {
+        if (!state.IsApplied || state.IsRestored || state.Mission == null)
+        {
+            return;
+        }
+
+        state.Mission.missionFameReward = state.OriginalReward;
+        state.IsRestored = true;
+    }
+
+    private static float GetBountyContributionMultiplier()
+    {
+        var configured = _bountyContributionMultiplier.Value;
+        if (float.IsNaN(configured) || float.IsInfinity(configured))
+        {
+            return 2f;
+        }
+
+        return Mathf.Clamp(configured, 0f, 999f);
     }
 
     private static void UpdateBountyRefreshAssist()
@@ -10076,18 +10959,32 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         ArmReadBookCountdownOverride("RealStartReadBook");
     }
 
-    private static bool BookWriterSureButtonPrefix(MethodBase __originalMethod, object[] __args)
+    private static bool BookWriterSureButtonPrefix(
+        MethodBase __originalMethod,
+        object[] __args,
+        out BookWriterSureButtonState __state)
     {
+        var writerUI = SafeGetBookWriterUI();
+        var writerList = writerUI?.targetBookWriterList;
+        var count = TryGetCollectionCount(writerList);
+        var activeWriter = writerUI != null && writerList != null && count > 0
+            ? ResolveActiveBookWriterData(writerUI, writerList, count)
+            : null;
+        __state = new BookWriterSureButtonState
+        {
+            Writer = activeWriter,
+            Plan = FindContinuousBookCombinePlan(activeWriter),
+            WasWorking = activeWriter?.workStarted ?? false
+        };
+
         ArmBookWriterTaskScaling("BookWriterUIController.SureButtonClicked");
+        if (!_continuousBookCombineStarting && !__state.WasWorking)
+        {
+            CaptureContinuousBookCombinePlan();
+        }
 
         if (_traceMode.Value)
         {
-            var writerUI = SafeGetBookWriterUI();
-            var writerList = writerUI?.targetBookWriterList;
-            var count = TryGetCollectionCount(writerList);
-            var activeWriter = writerUI != null && writerList != null && count > 0
-                ? ResolveActiveBookWriterData(writerUI, writerList, count)
-                : null;
             var resultItem = TryGetBookWriterResultItem(activeWriter);
             var sourceHero = activeWriter == null ? null : TryResolveBookWriterHero(activeWriter);
             LoggerInstance.LogInfo(
@@ -10097,8 +10994,918 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         return true;
     }
 
-    private static void BookWriterSureButtonPostfix()
+    private static void BookWriterSureButtonPostfix(BookWriterSureButtonState __state)
     {
+        if (__state.Writer != null &&
+            __state.WasWorking &&
+            __state.Plan != null &&
+            !__state.Writer.workStarted)
+        {
+            StopContinuousBookCombinePlan(
+                __state.Plan,
+                "player cancelled native task",
+                "【持续合成】：已取消并重置当前编纂槽。");
+            return;
+        }
+
+        RefreshContinuousBookCombineLabel();
+    }
+
+    private static Text? FindBookWriterTitleText(GameObject root)
+    {
+        if (root == null)
+        {
+            return null;
+        }
+
+        Text? inactiveMatch = null;
+        var texts = root.GetComponentsInChildren<Text>(true);
+        for (var index = 0; index < texts.Length; index++)
+        {
+            var candidate = texts[index];
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            var normalized = new string((candidate.text ?? string.Empty)
+                .Where(character => !char.IsWhiteSpace(character))
+                .ToArray());
+            if (!normalized.Contains("编纂秘籍", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (candidate.gameObject.activeInHierarchy)
+            {
+                return candidate;
+            }
+
+            inactiveMatch ??= candidate;
+        }
+
+        return inactiveMatch;
+    }
+
+    private static void TryUpdateContinuousBookCombineUi()
+    {
+        var writerUI = SafeGetBookWriterUI();
+        if (writerUI?.bookWriterUI == null || !writerUI.bookWriterUI.activeInHierarchy)
+        {
+            if (_continuousBookCombineButtonRoot != null)
+            {
+                _continuousBookCombineButtonRoot.SetActive(false);
+            }
+            return;
+        }
+
+        var writerList = writerUI.targetBookWriterList;
+        var count = TryGetCollectionCount(writerList);
+        var activeIndex = ResolveActiveBookWriterIndex(writerUI, writerList, count);
+        var activeWriter = activeIndex >= 0 ? TryGetIndexedValue(writerList, activeIndex) as BookWriterData : null;
+        if (activeWriter == null || activeWriter.bookWriterType != BookWriterType.Combine)
+        {
+            if (_continuousBookCombineButtonRoot != null)
+            {
+                _continuousBookCombineButtonRoot.SetActive(false);
+            }
+            return;
+        }
+
+        var titleText = FindBookWriterTitleText(writerUI.bookWriterUI);
+        var titleRect = titleText?.GetComponent<RectTransform>();
+        var hostRect = writerUI.bookWriterUI.GetComponent<RectTransform>();
+        if (titleText == null || titleRect == null || hostRect == null)
+        {
+            if (_continuousBookCombineButtonRoot != null)
+            {
+                _continuousBookCombineButtonRoot.SetActive(false);
+            }
+            return;
+        }
+
+        var bounds = RectTransformUtility.CalculateRelativeRectTransformBounds(hostRect, titleRect);
+        var titleScale = Mathf.Abs(titleRect.lossyScale.y / hostRect.lossyScale.y);
+        var renderedTitleHeight = Mathf.Max(bounds.size.y, titleText.preferredHeight * titleScale);
+        var buttonPosition = new Vector2(bounds.center.x, bounds.min.y - renderedTitleHeight - 8f);
+        var buttonSize = new Vector2(150f, 36f);
+
+        if (_continuousBookCombineButtonRoot == null ||
+            _continuousBookCombineButton == null ||
+            _continuousBookCombineButtonLabel == null ||
+            _continuousBookCombineButtonRoot.transform.parent != hostRect)
+        {
+            DestroyContinuousBookCombineButton();
+            if (!TryCreateSafeStyledButton(
+                     ContinuousBookCombineButtonName,
+                     hostRect,
+                     null,
+                     titleText,
+                     new Vector2(0.5f, 0.5f),
+                     new Vector2(0.5f, 0.5f),
+                     new Vector2(0.5f, 1f),
+                     buttonPosition,
+                     new Vector2(150f, 36f),
+                     "☐ 持续合成",
+                     out _continuousBookCombineButtonRoot,
+                    out _continuousBookCombineButton,
+                    out _continuousBookCombineButtonLabel))
+            {
+                return;
+            }
+
+            LoggerInstance.LogInfo(
+                "[BookWriter] Compact continuous combine option created below the 编纂秘籍 title.");
+        }
+        else
+        {
+            var buttonRect = _continuousBookCombineButtonRoot.GetComponent<RectTransform>();
+            if (buttonRect != null)
+            {
+                buttonRect.anchorMin = new Vector2(0.5f, 0.5f);
+                buttonRect.anchorMax = new Vector2(0.5f, 0.5f);
+                buttonRect.pivot = new Vector2(0.5f, 1f);
+                buttonRect.anchoredPosition = buttonPosition;
+                buttonRect.sizeDelta = buttonSize;
+            }
+        }
+
+        _continuousBookCombineButtonRoot.SetActive(true);
+        RefreshContinuousBookCombineLabel();
+    }
+
+    private static void DestroyContinuousBookCombineButton()
+    {
+        if (_continuousBookCombineButtonRoot != null)
+        {
+            UnityEngine.Object.Destroy(_continuousBookCombineButtonRoot);
+        }
+
+        _continuousBookCombineButtonRoot = null;
+        _continuousBookCombineButton = null;
+        _continuousBookCombineButtonLabel = null;
+    }
+
+    private static void RefreshContinuousBookCombineLabel()
+    {
+        if (_continuousBookCombineButtonLabel != null)
+        {
+            var hasActivePlan = false;
+            if (_continuousBookCombineEnabled.Value)
+            {
+                try
+                {
+                    var writerUI = SafeGetBookWriterUI();
+                    var writerList = writerUI?.targetBookWriterList;
+                    var count = TryGetCollectionCount(writerList);
+                    var activeWriter = writerUI == null || writerList == null || count <= 0
+                        ? null
+                        : ResolveActiveBookWriterData(writerUI, writerList, count);
+                    hasActivePlan = FindContinuousBookCombinePlan(activeWriter) != null;
+                }
+                catch
+                {
+                }
+            }
+
+            _continuousBookCombineButtonLabel.text = !_continuousBookCombineEnabled.Value
+                ? "☐ 持续合成"
+                : hasActivePlan
+                    ? "☑ 持续合成"
+                    : "☑ 持续待选";
+        }
+    }
+
+    private static void ToggleContinuousBookCombine()
+    {
+        _continuousBookCombineEnabled.Value = !_continuousBookCombineEnabled.Value;
+        RefreshContinuousBookCombineLabel();
+
+        var writerUI = SafeGetBookWriterUI();
+        var writerList = writerUI?.targetBookWriterList;
+        var count = TryGetCollectionCount(writerList);
+        var activeIndex = writerUI == null ? -1 : ResolveActiveBookWriterIndex(writerUI, writerList, count);
+        var activeWriter = activeIndex >= 0 ? TryGetIndexedValue(writerList, activeIndex) as BookWriterData : null;
+        if (_continuousBookCombineEnabled.Value)
+        {
+            CaptureContinuousBookCombinePlan();
+            PushPlayerLog("【持续合成】：已开启；仅在后续费用不高于本次正常费用时继续。");
+        }
+        else
+        {
+            RemoveContinuousBookCombinePlan(activeWriter, "toggle-off");
+            PushPlayerLog("【持续合成】：已关闭。");
+        }
+    }
+
+    private static void CaptureContinuousBookCombinePlan()
+    {
+        var writerUI = SafeGetBookWriterUI();
+        var writerList = writerUI?.targetBookWriterList;
+        var targetForce = writerUI?.targetForce;
+        var count = TryGetCollectionCount(writerList);
+        var writerIndex = writerUI == null ? -1 : ResolveActiveBookWriterIndex(writerUI, writerList, count);
+        var writer = writerIndex >= 0 ? TryGetIndexedValue(writerList, writerIndex) as BookWriterData : null;
+        if (writer == null || writerList == null || targetForce == null)
+        {
+            return;
+        }
+
+        if (!_continuousBookCombineEnabled.Value || writer.bookWriterType != BookWriterType.Combine)
+        {
+            RemoveContinuousBookCombinePlan(writer, "non-combine-start");
+            return;
+        }
+
+        var targetSkillId = writer.targetSkillData?.skillID ?? writer.targetBookData?.bookData?.skillID ?? 0;
+        if (targetSkillId <= 0 || writer.targetBookData == null || writer.combineBookData == null)
+        {
+            return;
+        }
+
+        var baselineMoneyCost = Math.Max(0, writer.GetMoneyCost());
+        var existing = FindContinuousBookCombinePlan(writer);
+        if (existing == null)
+        {
+            ContinuousBookCombinePlans.Add(new ContinuousBookCombinePlan
+            {
+                Writer = writer,
+                TargetForce = targetForce,
+                WriterList = writerList,
+                WriterIndex = writerIndex,
+                WriterHeroId = writer.bookWriterHeroID,
+                TargetSkillId = targetSkillId,
+                BaselineMoneyCost = baselineMoneyCost
+            });
+        }
+        else
+        {
+            existing.WriterHeroId = writer.bookWriterHeroID;
+            existing.TargetSkillId = targetSkillId;
+            existing.BaselineMoneyCost = baselineMoneyCost;
+            existing.Pending = false;
+        }
+
+        LoggerInstance.LogInfo(
+            $"[BookWriter] Continuous combine armed: writer={writerIndex}, skill={targetSkillId}, normalCost={baselineMoneyCost}.");
+        RefreshContinuousBookCombineLabel();
+    }
+
+    private static ContinuousBookCombinePlan? FindContinuousBookCombinePlan(BookWriterData? writer)
+    {
+        if (writer == null)
+        {
+            return null;
+        }
+
+        for (var index = 0; index < ContinuousBookCombinePlans.Count; index++)
+        {
+            var plan = ContinuousBookCombinePlans[index];
+            if (ReferenceEquals(plan.Writer, writer))
+            {
+                return plan;
+            }
+        }
+
+        return null;
+    }
+
+    private static void RemoveContinuousBookCombinePlan(BookWriterData? writer, string reason)
+    {
+        for (var index = ContinuousBookCombinePlans.Count - 1; index >= 0; index--)
+        {
+            var plan = ContinuousBookCombinePlans[index];
+            if (writer != null && !ReferenceEquals(plan.Writer, writer))
+            {
+                continue;
+            }
+
+            ContinuousBookCombinePlans.RemoveAt(index);
+            LoggerInstance.LogInfo(
+                $"[BookWriter] Continuous combine stopped: writer={plan.WriterIndex}, skill={plan.TargetSkillId}, reason={reason}.");
+        }
+    }
+
+    private static void StopContinuousBookCombinePlan(
+        ContinuousBookCombinePlan plan,
+        string reason,
+        string? playerMessage,
+        bool resetWriter = true)
+    {
+        plan.Pending = false;
+        if (resetWriter)
+        {
+            ResetContinuousBookCombineWriter(plan);
+        }
+
+        RemoveContinuousBookCombinePlan(plan.Writer, reason);
+        RefreshContinuousBookCombineLabel();
+
+        try
+        {
+            var writerUI = SafeGetBookWriterUI();
+            if (writerUI?.bookWriterUI != null && writerUI.bookWriterUI.activeInHierarchy)
+            {
+                writerUI.RefreshUI();
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[BookWriter] Continuous combine stopped but the visible editor could not be refreshed: {DescribeCompatibilityException(ex)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(playerMessage))
+        {
+            PushPlayerLog(playerMessage);
+        }
+    }
+
+    private static void QueueContinuousBookCombineAfterCompletion(BookWriterData writerData, ForceData targetForce, BookWriterCompletionState state)
+    {
+        if (!_continuousBookCombineEnabled.Value || writerData == null || targetForce == null || state == null || !state.WasWorking)
+        {
+            return;
+        }
+
+        if (state.WorkPercentBefore >= 0.999f)
+        {
+            return;
+        }
+
+        var workCompleted = !writerData.workStarted || writerData.workPercent >= 0.999f;
+        if (!workCompleted)
+        {
+            return;
+        }
+
+        var plan = FindContinuousBookCombinePlan(writerData);
+        if (plan == null)
+        {
+            return;
+        }
+
+        if (state.TargetSkillId > 0)
+        {
+            plan.TargetSkillId = state.TargetSkillId;
+        }
+        plan.Pending = true;
+    }
+
+    private static bool TryRestoreContinuousBookCombineWriter(ContinuousBookCombinePlan plan)
+    {
+        try
+        {
+            var writerList = plan.TargetForce.bookWriterList;
+            var count = TryGetCollectionCount(writerList);
+            if (writerList == null || plan.WriterIndex < 0 || plan.WriterIndex >= count)
+            {
+                return false;
+            }
+
+            var writer = TryGetIndexedValue(writerList, plan.WriterIndex) as BookWriterData;
+            var writerHero = plan.TargetForce.GetOwnHero(plan.WriterHeroId);
+            if (writer == null || writerHero == null)
+            {
+                return false;
+            }
+
+            writer.Reset();
+            writer.bookWriterHeroID = plan.WriterHeroId;
+            writer.bookWriterType = BookWriterType.Combine;
+            writer.targetSkillData = null!;
+            writer.workPercent = 0f;
+            writer.workStarted = false;
+            plan.Writer = writer;
+            plan.WriterList = writerList;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void TryRunPendingContinuousBookCombines()
+    {
+        if (_continuousBookCombineStarting || ContinuousBookCombinePlans.Count == 0)
+        {
+            return;
+        }
+
+        for (var planIndex = ContinuousBookCombinePlans.Count - 1; planIndex >= 0; planIndex--)
+        {
+            var plan = ContinuousBookCombinePlans[planIndex];
+            if (!plan.Pending)
+            {
+                continue;
+            }
+
+            plan.Pending = false;
+            if (!_continuousBookCombineEnabled.Value)
+            {
+                StopContinuousBookCombinePlan(plan, "feature disabled", null);
+                continue;
+            }
+
+            if (!TryRestoreContinuousBookCombineWriter(plan))
+            {
+                StopContinuousBookCombinePlan(
+                    plan,
+                    "writer slot or disciple could not be restored",
+                    "【持续合成】：无法恢复原编纂槽，已停止并重置。");
+                continue;
+            }
+
+            if (!TrySelectNextContinuousBookCombinePair(plan, out var nextMoneyCost))
+            {
+                StopContinuousBookCombinePlan(
+                    plan,
+                    "all matching books combined or no valid pair remains",
+                    "【持续合成】：同类秘籍不足，持续合成已停止并重置。");
+                continue;
+            }
+
+            if (nextMoneyCost > plan.BaselineMoneyCost)
+            {
+                StopContinuousBookCombinePlan(
+                    plan,
+                    $"next cost {nextMoneyCost} exceeds normal cost {plan.BaselineMoneyCost}",
+                    $"【持续合成】：下一次费用 {nextMoneyCost} 高于本次正常费用 {plan.BaselineMoneyCost}，已停止并重置。");
+                continue;
+            }
+
+            if (!plan.Writer.HaveMoney() || !plan.Writer.CanStartWork())
+            {
+                StopContinuousBookCombinePlan(
+                    plan,
+                    "native money or work requirement failed",
+                    "【持续合成】：资金或编纂条件不足，已停止并重置。");
+                continue;
+            }
+
+            var writerUI = SafeGetBookWriterUI();
+            if (writerUI == null)
+            {
+                plan.Pending = true;
+                continue;
+            }
+
+            var previousList = writerUI.targetBookWriterList;
+            var previousForce = writerUI.targetForce;
+            var previousActiveId = writerUI.activeID;
+            var selectedTargetBook = plan.Writer.targetBookData;
+            var selectedCombineBook = plan.Writer.combineBookData;
+            _continuousBookCombineStarting = true;
+            try
+            {
+                writerUI.targetBookWriterList = plan.WriterList;
+                writerUI.targetForce = plan.TargetForce;
+                writerUI.activeID = plan.WriterIndex;
+                writerUI.RefreshUI();
+                var sureButtonObject = TryFindBookWriterSureButtonObject(writerUI, plan.WriterIndex);
+                if (sureButtonObject == null)
+                {
+                    throw new InvalidOperationException($"Could not resolve the native start button for writer {plan.WriterIndex}.");
+                }
+
+                writerUI.SureButtonClicked(sureButtonObject);
+            }
+            catch (Exception ex)
+            {
+                StopContinuousBookCombinePlan(
+                    plan,
+                    $"native confirmation failed: {DescribeCompatibilityException(ex)}",
+                    "【持续合成】：原版确认失败，已停止并重置。");
+                LoggerInstance.LogWarning($"[BookWriter] Continuous combine confirmation failed safely: {DescribeCompatibilityException(ex)}");
+                continue;
+            }
+            finally
+            {
+                writerUI.targetBookWriterList = previousList;
+                writerUI.targetForce = previousForce;
+                writerUI.activeID = previousActiveId;
+                _continuousBookCombineStarting = false;
+            }
+
+            if (!plan.Writer.workStarted)
+            {
+                StopContinuousBookCombinePlan(
+                    plan,
+                    "native confirmation did not start work",
+                    "【持续合成】：原版未能开始合成，已停止并重置。");
+                continue;
+            }
+
+            var targetStillAvailable = IsContinuousBookCombineInputAvailable(plan, selectedTargetBook);
+            var combineStillAvailable = IsContinuousBookCombineInputAvailable(plan, selectedCombineBook);
+            if (targetStillAvailable || combineStillAvailable)
+            {
+                StopContinuousBookCombinePlan(
+                    plan,
+                    $"native transaction retained selected inputs: target={targetStillAvailable}, combine={combineStillAvailable}",
+                    "【持续合成】：检测到原版未正确扣除秘籍，已停止后续自动合成。",
+                    resetWriter: false);
+                LoggerInstance.LogWarning(
+                    $"[BookWriter] Native combine transaction started but retained selected input books; automatic continuation was stopped without cancelling the active native task.");
+                continue;
+            }
+
+            PushPlayerLog($"【持续合成】：已自动开始下一次合成，费用 {nextMoneyCost}。");
+        }
+    }
+
+    private static GameObject? TryFindBookWriterSureButtonObject(BookWriterUIController writerUI, int writerIndex)
+    {
+        Transform? writerRoot;
+        try
+        {
+            writerRoot = writerUI.GetWriterRoot(writerIndex);
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (writerRoot == null)
+        {
+            return null;
+        }
+
+        Button[]? buttons;
+        try
+        {
+            buttons = writerRoot.gameObject.GetComponentsInChildren<Button>(includeInactive: true);
+        }
+        catch
+        {
+            return null;
+        }
+
+        GameObject? fallback = null;
+        foreach (var button in buttons)
+        {
+            if (button?.gameObject == null)
+            {
+                continue;
+            }
+
+            if (int.TryParse(button.gameObject.name, out var parsedIndex) && parsedIndex == writerIndex)
+            {
+                return button.gameObject;
+            }
+
+            Text? label;
+            try
+            {
+                label = TryFindBookWriterButtonText(button.transform);
+            }
+            catch
+            {
+                continue;
+            }
+
+            var normalized = new string((label?.text ?? string.Empty)
+                .Where(character => !char.IsWhiteSpace(character))
+                .ToArray());
+            if (!normalized.Contains("开始", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            fallback ??= button.gameObject;
+        }
+
+        return fallback;
+    }
+
+    private static Text? TryFindBookWriterButtonText(Transform root)
+    {
+        if (root == null)
+        {
+            return null;
+        }
+
+        var direct = root.gameObject.GetComponent<Text>();
+        if (direct != null)
+        {
+            return direct;
+        }
+
+        for (var index = 0; index < root.childCount; index++)
+        {
+            var nested = TryFindBookWriterButtonText(root.GetChild(index));
+            if (nested != null)
+            {
+                return nested;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TrySelectNextContinuousBookCombinePair(ContinuousBookCombinePlan plan, out int nextMoneyCost)
+    {
+        nextMoneyCost = 0;
+        if (plan.TargetSkillId <= 0)
+        {
+            return false;
+        }
+
+        var candidates = new List<ItemData>();
+        CollectContinuousBookCombineCandidates(plan.TargetForce.bookStorage, plan.TargetSkillId, candidates);
+        CollectContinuousBookCombineCandidates(plan.TargetForce.forceStorage, plan.TargetSkillId, candidates);
+
+        var writerHero = plan.TargetForce.GetOwnHero(plan.WriterHeroId);
+        CollectContinuousBookCombineCandidates(writerHero?.itemListData, plan.TargetSkillId, candidates);
+        CollectContinuousBookCombineCandidates(writerHero?.selfStorage, plan.TargetSkillId, candidates);
+
+        var player = TryGetPlayerHero();
+        CollectContinuousBookCombineCandidates(player?.itemListData, plan.TargetSkillId, candidates);
+        CollectContinuousBookCombineCandidates(player?.selfStorage, plan.TargetSkillId, candidates);
+
+        try
+        {
+            var playerForce = player?.GetForce(false);
+            CollectContinuousBookCombineCandidates(playerForce?.bookStorage, plan.TargetSkillId, candidates);
+            CollectContinuousBookCombineCandidates(playerForce?.forceStorage, plan.TargetSkillId, candidates);
+        }
+        catch
+        {
+        }
+
+        if (candidates.Count < 2)
+        {
+            return false;
+        }
+
+        candidates.Sort((left, right) =>
+        {
+            var rare = left.rareLv.CompareTo(right.rareLv);
+            if (rare != 0)
+            {
+                return rare;
+            }
+            var itemLevel = left.itemLv.CompareTo(right.itemLv);
+            return itemLevel != 0 ? itemLevel : left.value.CompareTo(right.value);
+        });
+
+        var writer = plan.Writer;
+        var originalType = writer.bookWriterType;
+        var originalHeroId = writer.bookWriterHeroID;
+        var originalTarget = writer.targetBookData;
+        var originalCombine = writer.combineBookData;
+        var originalSkill = writer.targetSkillData;
+        for (var leftIndex = 0; leftIndex < candidates.Count; leftIndex++)
+        {
+            for (var rightIndex = leftIndex + 1; rightIndex < candidates.Count; rightIndex++)
+            {
+                if (SameContinuousBookCombineItem(candidates[leftIndex], candidates[rightIndex]))
+                {
+                    continue;
+                }
+
+                writer.bookWriterType = BookWriterType.Combine;
+                writer.bookWriterHeroID = plan.WriterHeroId;
+                writer.targetBookData = candidates[leftIndex];
+                writer.combineBookData = candidates[rightIndex];
+                writer.targetSkillData = originalSkill;
+                writer.workPercent = 0f;
+                writer.workStarted = false;
+                if (!writer.BookSelectFinished() || !writer.CanStartWork())
+                {
+                    continue;
+                }
+
+                nextMoneyCost = Math.Max(0, writer.GetMoneyCost());
+                return true;
+            }
+        }
+
+        writer.bookWriterType = originalType;
+        writer.bookWriterHeroID = originalHeroId;
+        writer.targetBookData = originalTarget;
+        writer.combineBookData = originalCombine;
+        writer.targetSkillData = originalSkill;
+        return false;
+    }
+
+    private static void CollectContinuousBookCombineCandidates(
+        ItemListData? source,
+        int targetSkillId,
+        List<ItemData> candidates)
+    {
+        if (source == null || targetSkillId <= 0)
+        {
+            return;
+        }
+
+        var allItems = source.allItem;
+        if (allItems != null)
+        {
+            for (var index = 0; index < allItems.Count; index++)
+            {
+                AddContinuousBookCombineCandidate(allItems[index], targetSkillId, candidates);
+            }
+        }
+
+        var itemTypeLists = source.itemTypeList;
+        if (itemTypeLists == null)
+        {
+            return;
+        }
+
+        for (var typeIndex = 0; typeIndex < itemTypeLists.Count; typeIndex++)
+        {
+            var typeItems = itemTypeLists[typeIndex];
+            if (typeItems == null)
+            {
+                continue;
+            }
+
+            for (var itemIndex = 0; itemIndex < typeItems.Count; itemIndex++)
+            {
+                AddContinuousBookCombineCandidate(typeItems[itemIndex], targetSkillId, candidates);
+            }
+        }
+    }
+
+    private static void AddContinuousBookCombineCandidate(
+        ItemData? item,
+        int targetSkillId,
+        List<ItemData> candidates)
+    {
+        if (item == null ||
+            item.type != ItemType.Book ||
+            item.bookData?.skillID != targetSkillId ||
+            candidates.Any(existing => SameContinuousBookCombineItem(existing, item)))
+        {
+            return;
+        }
+
+        candidates.Add(item);
+    }
+
+    private static bool SameContinuousBookCombineItem(ItemData? left, ItemData? right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return left != null;
+        }
+
+        if (left == null || right == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var leftPointer = left.Pointer;
+            var rightPointer = right.Pointer;
+            return leftPointer != IntPtr.Zero && leftPointer == rightPointer;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsContinuousBookCombineInputAvailable(
+        ContinuousBookCombinePlan plan,
+        ItemData? inputBook)
+    {
+        if (inputBook == null)
+        {
+            return false;
+        }
+
+        if (ContinuousBookCombineItemListContains(plan.TargetForce.bookStorage, inputBook) ||
+            ContinuousBookCombineItemListContains(plan.TargetForce.forceStorage, inputBook))
+        {
+            return true;
+        }
+
+        var writerHero = plan.TargetForce.GetOwnHero(plan.WriterHeroId);
+        if (ContinuousBookCombineItemListContains(writerHero?.itemListData, inputBook) ||
+            ContinuousBookCombineItemListContains(writerHero?.selfStorage, inputBook))
+        {
+            return true;
+        }
+
+        var player = TryGetPlayerHero();
+        if (ContinuousBookCombineItemListContains(player?.itemListData, inputBook) ||
+            ContinuousBookCombineItemListContains(player?.selfStorage, inputBook))
+        {
+            return true;
+        }
+
+        try
+        {
+            var playerForce = player?.GetForce(false);
+            return ContinuousBookCombineItemListContains(playerForce?.bookStorage, inputBook) ||
+                ContinuousBookCombineItemListContains(playerForce?.forceStorage, inputBook);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool ContinuousBookCombineItemListContains(ItemListData? source, ItemData inputBook)
+    {
+        if (source == null || inputBook == null)
+        {
+            return false;
+        }
+
+        var allItems = source.allItem;
+        if (allItems != null)
+        {
+            for (var index = 0; index < allItems.Count; index++)
+            {
+                if (SameContinuousBookCombineItem(allItems[index], inputBook))
+                {
+                    return true;
+                }
+            }
+        }
+
+        var itemTypeLists = source.itemTypeList;
+        if (itemTypeLists == null)
+        {
+            return false;
+        }
+
+        for (var typeIndex = 0; typeIndex < itemTypeLists.Count; typeIndex++)
+        {
+            var typeItems = itemTypeLists[typeIndex];
+            if (typeItems == null)
+            {
+                continue;
+            }
+
+            for (var itemIndex = 0; itemIndex < typeItems.Count; itemIndex++)
+            {
+                if (SameContinuousBookCombineItem(typeItems[itemIndex], inputBook))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static void ResetContinuousBookCombineWriter(ContinuousBookCombinePlan plan)
+    {
+        try
+        {
+            plan.Writer.Reset();
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[BookWriter] Native writer reset failed while stopping continuous combine: {DescribeCompatibilityException(ex)}");
+        }
+
+        try
+        {
+            plan.Writer.bookWriterHeroID = -1;
+            plan.Writer.targetBookData = null!;
+            plan.Writer.combineBookData = null!;
+            plan.Writer.targetSkillData = null!;
+            plan.Writer.workPercent = 0f;
+            plan.Writer.workStarted = false;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"[BookWriter] Writer fallback cleanup failed while stopping continuous combine: {DescribeCompatibilityException(ex)}");
+        }
+    }
+
+    private static int ResolveActiveBookWriterIndex(BookWriterUIController writerUI, object? writerList, int count)
+    {
+        if (writerUI == null || writerList == null || count <= 0)
+        {
+            return -1;
+        }
+
+        var activeIndex = writerUI.activeID;
+        if (activeIndex >= 0 && activeIndex < count)
+        {
+            return activeIndex;
+        }
+
+        for (var index = 0; index < count; index++)
+        {
+            if (TryGetIndexedValue(writerList, index) is BookWriterData writer && writer.workStarted)
+            {
+                return index;
+            }
+        }
+
+        return count > 0 ? 0 : -1;
     }
 
     private static void BookWriterTotalTimeCostPostfix(BookWriterData __instance, ref int __result)
@@ -10139,10 +11946,12 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         {
             WasWorking = targetBookWriter != null && targetBookWriter.workStarted,
             WorkPercentBefore = targetBookWriter?.workPercent ?? 0f,
+            WriterType = targetBookWriter?.bookWriterType ?? default,
             ResultItemBefore = resultItem,
             WriterHeroBefore = sourceHero,
             ResultRareLv = resultItem?.rareLv ?? 0,
-            TargetSkillId = targetBookWriter?.targetSkillData?.skillID ?? 0,
+            TargetSkillId = targetBookWriter?.targetSkillData?.skillID ??
+                targetBookWriter?.targetBookData?.bookData?.skillID ?? 0,
             TargetBookDataBefore = targetBookWriter?.targetBookData,
             CombineBookDataBefore = targetBookWriter?.combineBookData
         };
@@ -10163,6 +11972,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         }
 
         TryGrantBookWriterBonusCopies(targetBookWriter, targetForce, __state);
+        QueueContinuousBookCombineAfterCompletion(targetBookWriter, targetForce, __state);
     }
 
     private static void ArmBookWriterTaskScaling(string source)
@@ -10281,7 +12091,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
     private static void TryGrantBookWriterBonusCopies(BookWriterData? writerData, ForceData? targetForce, BookWriterCompletionState? state)
     {
-        if (writerData == null || state == null || _grantingBookWriterBonusItems)
+        if (writerData == null || state == null || _grantingBookWriterBonusItems || state.WriterType == BookWriterType.Combine)
         {
             return;
         }
@@ -10411,7 +12221,8 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         {
             var skillDetailVisible = __instance.skillDetail != null && __instance.skillDetail.activeInHierarchy;
             var bookDetailVisible = __instance.bookDetail != null && __instance.bookDetail.activeInHierarchy;
-            if (!skillDetailVisible && !bookDetailVisible)
+            var descriptionVisible = __instance.describeGrid != null && __instance.describeGrid.activeInHierarchy;
+            if (!skillDetailVisible && !bookDetailVisible && !descriptionVisible)
             {
                 ResetSkillBookOwnershipAppliedLabel();
                 return;
@@ -10968,23 +12779,26 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static string BuildSkillBookOwnershipLabel(int skillId)
     {
         var player = TryGetPlayerHero();
-        return PlayerOwnsSkillBook(player, skillId)
-            ? "<color=#8FD17A>已拥有</color>"
-            : "<color=#F08A6A>未拥有</color>";
+        var highestOwned = FindHighestOwnedSkillBook(player, skillId);
+        if (highestOwned == null)
+        {
+            return "<color=#F08A6A>未拥有</color>";
+        }
+
+        var qualityName = GetSkillBookQualityName(highestOwned);
+        return $"<color=#8FD17A>已拥有（最高：{qualityName}）</color>";
     }
 
-    private static bool PlayerOwnsSkillBook(HeroData? player, int skillId)
+    private static ItemData? FindHighestOwnedSkillBook(HeroData? player, int skillId)
     {
         if (player == null || skillId <= 0)
         {
-            return false;
+            return null;
         }
 
-        if (PlayerInventoryHasSkillBook(player, skillId) ||
-            ItemListHasSkillBook(player.selfStorage, skillId))
-        {
-            return true;
-        }
+        ItemData? highest = null;
+        highest = FindHighestSkillBookInItemList(player.itemListData, skillId, highest);
+        highest = FindHighestSkillBookInItemList(player.selfStorage, skillId, highest);
 
         ForceData? playerForce;
         try
@@ -10994,19 +12808,23 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         catch (Exception ex)
         {
             LogSkillBookOwnershipLookupFailure("resolving the player's current sect", ex);
-            return false;
+            return highest;
         }
 
         if (playerForce == null)
         {
-            return false;
+            return highest;
         }
+
+        highest = FindHighestSkillBookInItemList(playerForce.bookStorage, skillId, highest);
+        highest = FindHighestSkillBookInShowRoom(playerForce.showRoomItems, skillId, highest);
 
         try
         {
-            if (playerForce.BookStorageFindSkill(skillId) != null)
+            var nativeMatch = playerForce.BookStorageFindSkill(skillId);
+            if (nativeMatch != null && IsHigherQualitySkillBook(nativeMatch, highest))
             {
-                return true;
+                highest = nativeMatch;
             }
         }
         catch (Exception ex)
@@ -11014,51 +12832,101 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             LogSkillBookOwnershipLookupFailure("querying the current sect book storage", ex);
         }
 
-        return ItemListHasSkillBook(playerForce.bookStorage, skillId);
+        return highest;
     }
 
-    private static bool PlayerInventoryHasSkillBook(HeroData? player, int skillId)
-    {
-        var inventoryItems = player?.itemListData?.allItem;
-        if (inventoryItems == null || skillId <= 0)
-        {
-            return false;
-        }
-
-        for (var index = 0; index < inventoryItems.Count; index++)
-        {
-            var item = inventoryItems[index];
-            if (item != null &&
-                item.type == ItemType.Book &&
-                item.bookData?.skillID == skillId)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool ItemListHasSkillBook(ItemListData? itemList, int skillId)
+    private static ItemData? FindHighestSkillBookInItemList(ItemListData? itemList, int skillId, ItemData? currentHighest)
     {
         var items = itemList?.allItem;
         if (items == null || skillId <= 0)
         {
-            return false;
+            return currentHighest;
         }
 
         for (var index = 0; index < items.Count; index++)
         {
             var item = items[index];
-            if (item != null &&
-                item.type == ItemType.Book &&
-                item.bookData?.skillID == skillId)
+            if (item == null || item.type != ItemType.Book || item.bookData?.skillID != skillId)
             {
-                return true;
+                continue;
+            }
+
+            if (IsHigherQualitySkillBook(item, currentHighest))
+            {
+                currentHighest = item;
             }
         }
 
-        return false;
+        return currentHighest;
+    }
+
+    private static ItemData? FindHighestSkillBookInShowRoom(object? showRoomItems, int skillId, ItemData? currentHighest)
+    {
+        var shelfCount = TryGetCollectionCount(showRoomItems);
+        if (shelfCount <= 0 || skillId <= 0)
+        {
+            return currentHighest;
+        }
+
+        for (var shelfIndex = 0; shelfIndex < shelfCount; shelfIndex++)
+        {
+            var shelf = TryGetIndexedValue(showRoomItems, shelfIndex);
+            var itemCount = TryGetCollectionCount(shelf);
+            for (var itemIndex = 0; itemIndex < itemCount; itemIndex++)
+            {
+                if (TryGetIndexedValue(shelf, itemIndex) is not ItemData item ||
+                    item.type != ItemType.Book ||
+                    item.bookData?.skillID != skillId)
+                {
+                    continue;
+                }
+
+                if (IsHigherQualitySkillBook(item, currentHighest))
+                {
+                    currentHighest = item;
+                }
+            }
+        }
+
+        return currentHighest;
+    }
+
+    private static bool IsHigherQualitySkillBook(ItemData candidate, ItemData? currentHighest)
+    {
+        if (currentHighest == null)
+        {
+            return true;
+        }
+
+        if (candidate.rareLv != currentHighest.rareLv)
+        {
+            return candidate.rareLv > currentHighest.rareLv;
+        }
+
+        if (candidate.itemLv != currentHighest.itemLv)
+        {
+            return candidate.itemLv > currentHighest.itemLv;
+        }
+
+        return candidate.value > currentHighest.value;
+    }
+
+    private static string GetSkillBookQualityName(ItemData item)
+    {
+        try
+        {
+            var qualityName = item.GetBookRareLvName();
+            if (!string.IsNullOrWhiteSpace(qualityName))
+            {
+                return StripVisibleTextFormatting(qualityName).Trim();
+            }
+        }
+        catch (Exception ex)
+        {
+            LogSkillBookOwnershipLookupFailure("formatting the highest owned book quality", ex);
+        }
+
+        return $"{Math.Max(0, item.rareLv)}品";
     }
 
     private static void LogSkillBookOwnershipLookupFailure(string operation, Exception ex)
@@ -11583,44 +13451,49 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             $"recipients={recipients}, area={TryGetAreaName(__state.SourceHero)}, detail=[{string.Join(", ", recipientResults.ConvertAll(FormatTeachSkillRecipientSummary))}].");
     }
 
-    private static void ChangeMoneyPrefix(HeroData __instance, int num, out MoneyChangeState __state)
+    private static void TryObservePlayerMoneyChange()
     {
-        var isPlayerHero = IsPlayerHero(__instance);
-        __state = new MoneyChangeState
+        var player = TryGetPlayerHero();
+        var heroId = TryGetHeroId(player);
+        var currentMoney = TryGetHeroMoney(player);
+        if (player == null || !heroId.HasValue || !currentMoney.HasValue)
         {
-            IsEligible = !_applyingLuckyMoneyRefund && num != 0 && ClampPercent(_luckyMoneyHitChancePercent.Value) > 0 && isPlayerHero,
-            RequestedDelta = num,
-            MoneyBefore = TryGetHeroMoney(__instance),
-            IsSpend = num < 0,
-            IsIncome = num > 0
-        };
-    }
+            _lastObservedPlayerMoney = null;
+            _lastObservedPlayerMoneyHeroId = int.MinValue;
+            return;
+        }
 
-    private static void ChangeMoneyPostfix(HeroData __instance, int num, bool showInfo, MoneyChangeState __state)
-    {
-        if (!__state.IsEligible)
+        if (_lastObservedPlayerMoneyHeroId != heroId.Value || !_lastObservedPlayerMoney.HasValue)
+        {
+            _lastObservedPlayerMoneyHeroId = heroId.Value;
+            _lastObservedPlayerMoney = currentMoney.Value;
+            return;
+        }
+
+        var delta = currentMoney.Value - _lastObservedPlayerMoney.Value;
+        _lastObservedPlayerMoney = currentMoney.Value;
+        if (_applyingLuckyMoneyBonus || delta == 0)
         {
             return;
         }
 
         var hitChancePercent = ClampPercent(_luckyMoneyHitChancePercent.Value);
+        if (hitChancePercent <= 0)
+        {
+            return;
+        }
+
         var roll = Random.Next(1, 101);
         if (roll > hitChancePercent)
         {
             if (_traceMode.Value)
             {
-                LoggerInstance.LogInfo($"Lucky money miss: roll {roll} > {hitChancePercent} for delta {__state.RequestedDelta}.");
+                LoggerInstance.LogInfo($"Lucky money miss: roll {roll} > {hitChancePercent} for observed delta {delta}.");
             }
-
             return;
         }
 
-        var changedAmount = ResolveChangedAmount(__state.RequestedDelta, __state.MoneyBefore, TryGetHeroMoney(__instance), __state.IsSpend);
-        if (changedAmount <= 0)
-        {
-            return;
-        }
-
+        var changedAmount = Math.Abs(delta);
         var rebatePercent = Random.Next(LuckyMoneyMinPercent, LuckyMoneyMaxPercent + 1);
         var rebateAmount = Mathf.Clamp(Mathf.RoundToInt(changedAmount * (rebatePercent / 100f)), 1, changedAmount);
         if (rebateAmount <= 0)
@@ -11630,20 +13503,21 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
         try
         {
-            _applyingLuckyMoneyRefund = true;
-            __instance.ChangeMoney(rebateAmount, false);
+            _applyingLuckyMoneyBonus = true;
+            player.ChangeMoney(rebateAmount, false);
+            _lastObservedPlayerMoney = TryGetHeroMoney(player) ?? currentMoney.Value + rebateAmount;
         }
         finally
         {
-            _applyingLuckyMoneyRefund = false;
+            _applyingLuckyMoneyBonus = false;
         }
 
-        var popup = __state.IsSpend
+        var isSpend = delta < 0;
+        PushPlayerLog(isSpend
             ? $"感谢你长期光顾，现金回扣 {rebateAmount}"
-            : $"你这个东西比想象的好，多给你 {rebateAmount}";
-        PushPlayerLog(popup);
+            : $"你这个东西比想象的好，多给你 {rebateAmount}");
         LoggerInstance.LogInfo(
-            $"Lucky money bonus applied: kind={(__state.IsSpend ? "spend" : "income")}, base={changedAmount}, bonus={rebateAmount}, percent={rebatePercent}, chance={hitChancePercent}, roll={roll}.");
+            $"Lucky money bonus applied without patching ChangeMoney: kind={(isSpend ? "spend" : "income")}, base={changedAmount}, bonus={rebateAmount}, percent={rebatePercent}, chance={hitChancePercent}, roll={roll}.");
     }
 
     private static void ChangeFamePrefix(HeroData __instance, object? __0, out FameChangeState __state)
@@ -12137,6 +14011,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
     private static void ShowMainMenuPostfix()
     {
+        ResetLoverAchievementRepairState();
         ResetDeferredRelationshipBonusLogs("GameTitle.ShowMainMenu");
         ResetBreakthroughRerollState("GameTitle.ShowMainMenu");
         ResetCraftRerollState("GameTitle.ShowMainMenu");
@@ -12200,6 +14075,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
     private static void LoadRecentGamePrefix(SaveLoadMenuController __instance)
     {
+        ResetLoverAchievementRepairState();
         ResetDeferredRelationshipBonusLogs("SaveLoadMenu.LoadRecentGame");
         ResetBreakthroughRerollState("SaveLoadMenu.LoadRecentGame");
         ResetCraftRerollState("SaveLoadMenu.LoadRecentGame");
@@ -12226,6 +14102,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
     private static void LoadGamePrefix(int saveID)
     {
+        ResetLoverAchievementRepairState();
         ResetDeferredRelationshipBonusLogs("SaveLoadMenu.LoadGame");
         ResetBreakthroughRerollState("SaveLoadMenu.LoadGame");
         ResetCraftRerollState("SaveLoadMenu.LoadGame");
@@ -12604,11 +14481,17 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         try
         {
         ApplyConfiguredMaxLoverCount("GameController.Update");
+        TryObservePlayerMoneyChange();
+        RepairLoverAchievementProgressIfEndingTriggered();
         EnsureDailySkillInsightBaseline();
         TryRunRealtimeSkillInsight();
         TryEvaluateCustomTalents();
         TryEvaluateThresholdTalent();
         TryUpdateBookWriterScaling("GameController.Update");
+        TryUpdateContinuousBookCombineUi();
+        TryRunPendingContinuousBookCombines();
+        TryRunPendingBatchRoadUpgrade();
+        TryUpdateBatchAreaUpgradeUi();
         UpdateTreasureChestChoiceSession();
         UpdateDialogFastForwardAssist();
         KeepPlayerHorseTurboReady("Update");
@@ -14069,26 +15952,89 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         CacheActiveDialogHero(__0);
     }
 
-    private static void MeetLoverResultRequirePostfix(ref bool __result)
+    private static void LoverAchievementCheckPrefix(out bool __state)
     {
-        ApplyConfiguredMaxLoverCount("GameController.MeetLoverResultRequire");
-        if (__result)
+        RepairLoverAchievementProgressIfEndingTriggered();
+        __state = TrySetStaticMemberValue(
+            typeof(GlobalData),
+            "MaxLoverNum",
+            VanillaLoverAchievementRelationshipCount);
+        if (!__state && !_loverAchievementRepairWarningLogged)
+        {
+            LoggerInstance.LogWarning(
+                "[LoverAchievement] Could not isolate the vanilla lover threshold because GlobalData.MaxLoverNum is unavailable or read-only.");
+            _loverAchievementRepairWarningLogged = true;
+        }
+    }
+
+    private static Exception? LoverAchievementCheckFinalizer(Exception? __exception, bool __state)
+    {
+        if (__state)
+        {
+            ApplyConfiguredMaxLoverCount("GameController.CheckGameResultTrigger restore");
+        }
+
+        return __exception;
+    }
+
+    private static void ResetLoverAchievementRepairState()
+    {
+        _loverAchievementRepairCheckedForSession = false;
+        _loverAchievementRepairWarningLogged = false;
+    }
+
+    private static void RepairLoverAchievementProgressIfEndingTriggered()
+    {
+        if (_loverAchievementRepairCheckedForSession)
         {
             return;
         }
 
-        var player = TryGetPlayerHero();
-        if (player == null)
+        try
         {
-            return;
-        }
+            var worldData = GameController.Instance?.worldData;
+            var playerPrefs = GameDataController.playerPrefData?.playerPrefData;
+            if (worldData == null || playerPrefs == null)
+            {
+                return;
+            }
 
-        var configured = Math.Max(1, _maxLoverCount.Value);
-        var currentCount = GetPlayerLoverCount(player);
-        if (currentCount < configured)
+            _loverAchievementRepairCheckedForSession = true;
+            if (!worldData.HaveGameResultTriggered(LoverEndingResultIndex))
+            {
+                return;
+            }
+
+            var achievementKey = "ach" + LoverAchievementId;
+            var currentProgress = playerPrefs.ContainsKey(achievementKey)
+                ? playerPrefs.GetFloat(achievementKey)
+                : 0f;
+            if (currentProgress >= 1f)
+            {
+                return;
+            }
+
+            var gameDataController = GameDataController.Instance;
+            if (gameDataController == null)
+            {
+                _loverAchievementRepairCheckedForSession = false;
+                return;
+            }
+
+            gameDataController.ChangeAchStats(LoverAchievementId, 1f - currentProgress);
+            gameDataController.CheckAch(LoverAchievementId);
+            LoggerInstance.LogInfo(
+                $"[LoverAchievement] Reconciled achievement {LoverAchievementId} from ending result {LoverEndingResultIndex}: {currentProgress:0.###} -> 1.");
+        }
+        catch (Exception ex)
         {
-            __result = true;
-            LoggerInstance.LogInfo($"Lover limit override allowed romance result: current={currentCount}, configuredMax={configured}.");
+            if (!_loverAchievementRepairWarningLogged)
+            {
+                LoggerInstance.LogWarning($"[LoverAchievement] Existing-save reconciliation deferred: {ex.Message}");
+                _loverAchievementRepairWarningLogged = true;
+            }
+
+            _loverAchievementRepairCheckedForSession = false;
         }
     }
 
@@ -14789,12 +16735,14 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
         try
         {
-            _applyingLuckyMoneyRefund = true;
+            _applyingLuckyMoneyBonus = true;
             player.ChangeMoney(totalIntelligence, true);
+            _lastObservedPlayerMoney = TryGetHeroMoney(player);
+            _lastObservedPlayerMoneyHeroId = TryGetHeroId(player) ?? int.MinValue;
         }
         finally
         {
-            _applyingLuckyMoneyRefund = false;
+            _applyingLuckyMoneyBonus = false;
         }
 
         LoggerInstance.LogInfo(
@@ -16509,28 +18457,18 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             return true;
         }
 
-        if (_mogaoPendingTargetMode == mode)
+        if (_mogaoPickerSelectionInProgress && _mogaoPendingTargetMode == mode)
         {
-            if (!IsCurrentMogaoPickerCallback(__instance, __originalMethod.Name))
-            {
-                ResetMogaoForgetState();
-                return !TryShowMogaoTargetPicker(__instance, __originalMethod.Name, player, mode);
-            }
-
-            var selectedTarget = TryGetMogaoSelectedHero();
-            _mogaoPendingTargetMode = MogaoForgetMode.None;
-            if (selectedTarget != null && CanPlayerManageMogaoTarget(player, selectedTarget))
-            {
-                _mogaoActiveMode = mode;
-                _mogaoForgetTarget = selectedTarget;
-                PushPlayerLog($"掌门已选择由 {TryGetHeroName(selectedTarget)} 遗忘{GetMogaoForgetLabel(mode)}");
-                __state = BeginMogaoPlayerOverride(mode);
-                return true;
-            }
-
-            ResetMogaoForgetState();
+            return false;
         }
 
+        if (_mogaoContinueOriginalEntry && _mogaoActiveMode == mode && _mogaoForgetTarget != null)
+        {
+            __state = BeginMogaoPlayerOverride(mode);
+            return true;
+        }
+
+        ResetMogaoForgetState();
         return !TryShowMogaoTargetPicker(__instance, __originalMethod.Name, player, mode);
     }
 
@@ -16542,6 +18480,15 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     private static void MogaoForgetScopePostfix(bool __state)
     {
         EndMogaoPlayerOverride(__state);
+    }
+
+    private static void MogaoForgetCostPostfix(MethodBase __originalMethod, ref int __result, bool __state)
+    {
+        EndMogaoPlayerOverride(__state);
+        if (IsActiveMogaoDiscipleForget(GetMogaoForgetMode(__originalMethod), TryGetPlayerHero()))
+        {
+            __result = 0;
+        }
     }
 
     private static void MogaoForgetFinishPostfix(bool __state)
@@ -16561,9 +18508,79 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         return __exception;
     }
 
+    private static void MogaoPickerChoosePrefix(GameObject targetObj, out bool __state)
+    {
+        __state = _mogaoPendingTargetMode != MogaoForgetMode.None;
+        if (__state)
+        {
+            _mogaoPickerSelectedHero = TryGetMogaoPickerHero(targetObj);
+            _mogaoPickerSelectionInProgress = true;
+        }
+    }
+
+    private static void MogaoPickerChoosePostfix(bool __state)
+    {
+        if (!__state)
+        {
+            return;
+        }
+
+        try
+        {
+            var mode = _mogaoPendingTargetMode;
+            var selectedTarget = _mogaoPickerSelectedHero ?? TryGetMogaoSelectedHero();
+            var player = TryGetPlayerHero();
+            _mogaoPendingTargetMode = MogaoForgetMode.None;
+            if (mode == MogaoForgetMode.None || player == null || selectedTarget == null ||
+                !CanPlayerManageMogaoTarget(player, selectedTarget))
+            {
+                ResetMogaoForgetState();
+                return;
+            }
+
+            _mogaoActiveMode = mode;
+            _mogaoForgetTarget = selectedTarget;
+            var directText = selectedTarget == player ? "按原版耗时办理" : "为弟子直接办理";
+            PushPlayerLog($"掌门已选择 {TryGetHeroName(selectedTarget)} 遗忘{GetMogaoForgetLabel(mode)}（{directText}）");
+            if (!ContinueMogaoSelectedTargetFlow(mode))
+            {
+                ResetMogaoForgetState();
+            }
+        }
+        finally
+        {
+            _mogaoPickerSelectionInProgress = false;
+        }
+    }
+
+    private static Exception? MogaoPickerChooseFinalizer(Exception? __exception, bool __state)
+    {
+        if (__state && __exception != null)
+        {
+            _mogaoPickerSelectionInProgress = false;
+            ResetMogaoForgetState();
+        }
+
+        return __exception;
+    }
+
+    private static void MogaoPickerUnshowPrefix(ChooseController __instance)
+    {
+        if (!_mogaoPickerSelectionInProgress || _mogaoPendingTargetMode == MogaoForgetMode.None)
+        {
+            return;
+        }
+
+        var selectedHero = __instance.targetHero;
+        if (selectedHero != null)
+        {
+            _mogaoPickerSelectedHero = selectedHero;
+        }
+    }
+
     private static void MogaoPickerCancelledPostfix()
     {
-        if (_mogaoPendingTargetMode != MogaoForgetMode.None)
+        if (!_mogaoPickerSelectionInProgress && _mogaoPendingTargetMode != MogaoForgetMode.None)
         {
             ResetMogaoForgetState();
         }
@@ -16618,6 +18635,8 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             _mogaoForgetTarget = null;
             _mogaoActiveMode = MogaoForgetMode.None;
             _mogaoPendingTargetMode = mode;
+            _mogaoPickerSelectedHero = null;
+            _mogaoBuildingController = controller;
             chooseController.targetHero = null;
             chooseController.ShowChoosePanel(
                 ChooseType.Hero,
@@ -16635,6 +18654,40 @@ public sealed class LongYinProMaxPlugin : BasePlugin
             ResetMogaoForgetState();
             LoggerInstance.LogWarning($"Mogao disciple target picker failed; vanilla self-only flow retained: {DescribeCompatibilityException(ex)}");
             return false;
+        }
+    }
+
+    private static bool ContinueMogaoSelectedTargetFlow(MogaoForgetMode mode)
+    {
+        var controller = _mogaoBuildingController ?? BuildingUIController.Instance;
+        if (controller == null || mode == MogaoForgetMode.None)
+        {
+            return false;
+        }
+
+        try
+        {
+            _mogaoContinueOriginalEntry = true;
+            if (mode == MogaoForgetMode.Skill)
+            {
+                controller.SpeRemoveSkill();
+            }
+            else
+            {
+                controller.SpeRemoveTag();
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Mogao selected-target flow failed: {DescribeCompatibilityException(ex)}");
+            PushPlayerLog("遗忘流程启动失败，请重新尝试");
+            return false;
+        }
+        finally
+        {
+            _mogaoContinueOriginalEntry = false;
         }
     }
 
@@ -16686,23 +18739,18 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         }
     }
 
-    private static bool IsCurrentMogaoPickerCallback(
-        BuildingUIController controller,
-        string callbackName)
+    private static HeroData? TryGetMogaoPickerHero(GameObject targetObj)
     {
         try
         {
-            var chooseController = ChooseController.Instance;
-            return chooseController != null &&
-                controller?.gameObject != null &&
-                chooseController.chooseType == ChooseType.Hero &&
-                chooseController.sendResultFucTarget == controller.gameObject &&
-                string.Equals(chooseController.sendResultFuc, callbackName, StringComparison.Ordinal) &&
-                string.IsNullOrEmpty(chooseController.sendResultParam);
+            var icon = targetObj?.GetComponent<HeroIconController>() ??
+                targetObj?.GetComponentInParent<HeroIconController>() ??
+                targetObj?.GetComponentInChildren<HeroIconController>(includeInactive: true);
+            return icon?.heroData;
         }
         catch
         {
-            return false;
+            return null;
         }
     }
 
@@ -16757,6 +18805,360 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         return mode == MogaoForgetMode.Skill ? "武学" : "天赋";
     }
 
+    private static bool IsActiveMogaoDiscipleForget(MogaoForgetMode mode, HeroData? player)
+    {
+        return player != null &&
+            _mogaoActiveMode == mode &&
+            _mogaoForgetTarget != null &&
+            _mogaoForgetTarget != player &&
+            CanPlayerManageMogaoTarget(player, _mogaoForgetTarget);
+    }
+
+    private static bool MogaoSkillChoosePrefix(PlotController __instance, out bool __state)
+    {
+        var player = TryGetPlayerHero();
+        var target = _mogaoForgetTarget;
+        if (_mogaoActiveMode == MogaoForgetMode.Skill && player != null && target != null &&
+            CanPlayerManageMogaoTarget(player, target))
+        {
+            __state = false;
+            try
+            {
+                ShowMogaoSkillForgetChooser(__instance, target);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.LogWarning($"Mogao expanded skill chooser failed: {DescribeCompatibilityException(ex)}");
+                PushPlayerLog("非零武学列表打开失败，已恢复原版列表");
+                ResetMogaoForgetState();
+                return true;
+            }
+        }
+
+        __state = BeginMogaoPlayerOverride(MogaoForgetMode.Skill);
+        return true;
+    }
+
+    private static void ShowMogaoSkillForgetChooser(PlotController controller, HeroData target)
+    {
+        var chooseController = ChooseController.Instance ??
+            throw new InvalidOperationException("ChooseController unavailable.");
+        var parameters = new Il2CppSystem.Collections.Generic.List<Il2CppSystem.Object>();
+        parameters.Add(BoxMogaoChooseInt(target.heroID));
+        parameters.Add(null);
+        parameters.Add(BoxMogaoChooseInt(-1));
+        parameters.Add(BoxMogaoChooseInt(-1));
+        parameters.Add(BoxMogaoChooseInt(0));
+        parameters.Add(BoxMogaoChooseInt(10));
+        chooseController.ShowChoosePanel(
+            ChooseType.HeroSkill,
+            parameters,
+            controller.gameObject,
+            nameof(PlotController.SpeRemoveSkillChoosen),
+            null,
+            ChooseFilterType.None,
+            null,
+            null);
+    }
+
+    private static Il2CppSystem.Object BoxMogaoChooseInt(int value)
+    {
+        return new Il2CppSystem.Int32 { m_value = value }.BoxIl2CppObject();
+    }
+
+    private static bool MogaoSkillStartPrefix(PlotController __instance, out bool __state)
+    {
+        var player = TryGetPlayerHero();
+        if (IsActiveMogaoDiscipleForget(MogaoForgetMode.Skill, player))
+        {
+            __state = false;
+            TryStartMogaoDiscipleForget(__instance, MogaoForgetMode.Skill, string.Empty, player!);
+            return false;
+        }
+
+        __state = BeginMogaoPlayerOverride(MogaoForgetMode.Skill);
+        return true;
+    }
+
+    private static bool MogaoTagStartPrefix(PlotController __instance, string param, out bool __state)
+    {
+        var player = TryGetPlayerHero();
+        if (IsActiveMogaoDiscipleForget(MogaoForgetMode.Talent, player))
+        {
+            __state = false;
+            TryStartMogaoDiscipleForget(__instance, MogaoForgetMode.Talent, param, player!);
+            return false;
+        }
+
+        __state = BeginMogaoPlayerOverride(MogaoForgetMode.Talent);
+        return true;
+    }
+
+    private static bool TryStartMogaoDiscipleForget(
+        PlotController controller,
+        MogaoForgetMode mode,
+        string param,
+        HeroData player)
+    {
+        var target = _mogaoForgetTarget;
+        if (target == null || target == player || !CanPlayerManageMogaoTarget(player, target))
+        {
+            ResetMogaoForgetState();
+            PushPlayerLog("弟子遗忘操作已失效，请重新选择");
+            return false;
+        }
+
+        try
+        {
+            var applied = mode == MogaoForgetMode.Skill
+                ? ApplyMogaoDiscipleSkillForget(target, controller.plotInteractSkill)
+                : ApplyMogaoDiscipleTalentForget(target, param);
+            if (!applied)
+            {
+                PushPlayerLog($"{TryGetHeroName(target)} 没有可遗忘的{GetMogaoForgetLabel(mode)}");
+                return false;
+            }
+
+            controller.HideInteractUI();
+            PushPlayerLog($"{TryGetHeroName(target)} 已直接遗忘{GetMogaoForgetLabel(mode)}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning($"Mogao direct disciple forgetting failed: {DescribeCompatibilityException(ex)}");
+            PushPlayerLog("弟子遗忘操作失败，请重新尝试");
+            return false;
+        }
+        finally
+        {
+            ResetMogaoForgetState();
+        }
+    }
+
+    private static bool ApplyMogaoDiscipleTalentForget(HeroData target, string param)
+    {
+        if (!int.TryParse(param, out var tagId) || target.FindTag(tagId) == null)
+        {
+            return false;
+        }
+
+        target.RemoveTag(tagId, true);
+        return target.FindTag(tagId) == null;
+    }
+
+    private static bool ApplyMogaoDiscipleSkillForget(HeroData target, KungfuSkillLvData? selectedSkill)
+    {
+        if (selectedSkill == null)
+        {
+            return false;
+        }
+
+        var skill = target.FindSkill(selectedSkill.skillID);
+        if (skill == null)
+        {
+            return false;
+        }
+
+        var talentPointReward = GetMogaoSkillTalentPointReward(target, skill);
+        var talentPointsBefore = target.heroTagPoint;
+        target.LoseSkill(skill);
+        if (target.FindSkill(skill.skillID) != null)
+        {
+            return false;
+        }
+
+        RollbackMogaoSkillLevelReward(target, talentPointReward, talentPointsBefore);
+        return true;
+    }
+
+    private static void MogaoSkillFinishPrefix(string param, out MogaoSkillFinishState __state)
+    {
+        var target = _mogaoActiveMode == MogaoForgetMode.Skill && _mogaoForgetTarget != null
+            ? _mogaoForgetTarget
+            : TryGetPlayerHero();
+        var scopeEntered = BeginMogaoPlayerOverride(MogaoForgetMode.Skill);
+        KungfuSkillLvData? skill = null;
+        var skillId = -1;
+        if (target != null && int.TryParse(param, out skillId))
+        {
+            skill = target.FindSkill(skillId);
+        }
+
+        __state = new MogaoSkillFinishState
+        {
+            ScopeEntered = scopeEntered,
+            Target = target,
+            SkillId = skillId,
+            TalentPointReward = target == null ? 0f : GetMogaoSkillTalentPointReward(target, skill),
+            TalentPointsBefore = target == null ? 0f : target.heroTagPoint
+        };
+    }
+
+    private static void MogaoSkillFinishPostfix(MogaoSkillFinishState __state)
+    {
+        EndMogaoPlayerOverride(__state.ScopeEntered);
+        CompleteMogaoSkillRollback(__state);
+        ResetMogaoForgetState();
+    }
+
+    private static Exception? MogaoSkillFinishFinalizer(Exception? __exception, MogaoSkillFinishState __state)
+    {
+        if (__exception != null)
+        {
+            EndMogaoPlayerOverride(__state.ScopeEntered);
+            CompleteMogaoSkillRollback(__state);
+            ResetMogaoForgetState();
+        }
+
+        return __exception;
+    }
+
+    private static void CompleteMogaoSkillRollback(MogaoSkillFinishState state)
+    {
+        if (state.RollbackApplied || state.Target == null || state.SkillId < 0 ||
+            state.Target.FindSkill(state.SkillId) != null)
+        {
+            return;
+        }
+
+        RollbackMogaoSkillLevelReward(state.Target, state.TalentPointReward, state.TalentPointsBefore);
+        state.RollbackApplied = true;
+    }
+
+    private static float GetMogaoSkillTalentPointReward(HeroData target, KungfuSkillLvData? skill)
+    {
+        if (skill == null)
+        {
+            return 0f;
+        }
+
+        try
+        {
+            var skillData = skill.DataBase();
+            if (skillData == null)
+            {
+                return 0f;
+            }
+
+            var rareLv = skillData.rareLv;
+            var nativeReward = skill.lv >= 10 ? Mathf.Pow(2f, rareLv) : 0f;
+            var configuredReward = GetConfiguredSkillTalentGrantReward(target, skill, rareLv);
+            return nativeReward + configuredReward;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                $"Could not resolve completed martial-skill talent reward for {TryGetSkillName(skill)}: " +
+                DescribeCompatibilityException(ex));
+            return 0f;
+        }
+    }
+
+    private static float GetConfiguredSkillTalentGrantReward(
+        HeroData target,
+        KungfuSkillLvData skill,
+        int rareLv)
+    {
+        if (!TryGetSkillTalentGrantSettings(
+                out var enabled,
+                out var levelThreshold,
+                out var tierPointMultiplier,
+                out var playerOnly) ||
+            !enabled ||
+            levelThreshold <= 0 ||
+            skill.lv < levelThreshold)
+        {
+            return 0f;
+        }
+
+        if (playerOnly)
+        {
+            var targetId = TryGetHeroId(target);
+            var playerId = TryGetHeroId(TryGetPlayerHero());
+            if (!targetId.HasValue || !playerId.HasValue || targetId.Value != playerId.Value)
+            {
+                return 0f;
+            }
+        }
+
+        var skillTier = Math.Max(1, rareLv);
+        return Mathf.Max(
+            1f,
+            Mathf.Round(Mathf.Max(1f, skillTier * Mathf.Max(0f, tierPointMultiplier))));
+    }
+
+    private static bool TryGetSkillTalentGrantSettings(
+        out bool enabled,
+        out int levelThreshold,
+        out float tierPointMultiplier,
+        out bool playerOnly)
+    {
+        enabled = false;
+        levelThreshold = 0;
+        tierPointMultiplier = 0f;
+        playerOnly = true;
+
+        try
+        {
+            var pluginType = AppDomain.CurrentDomain.GetAssemblies()
+                .Select(assembly => assembly.GetType("LongYinSkillTalentGrantPlugin", false))
+                .FirstOrDefault(type => type != null);
+            if (pluginType == null)
+            {
+                return false;
+            }
+
+            var enabledValue = TryConvertToBool(GetLoadedPluginConfigValue(pluginType, "_enabled"));
+            var levelThresholdValue = TryConvertToInt(GetLoadedPluginConfigValue(pluginType, "_levelThreshold"));
+            var tierPointMultiplierValue = TryConvertToFloat(GetLoadedPluginConfigValue(pluginType, "_tierPointMultiplier"));
+            var playerOnlyValue = TryConvertToBool(GetLoadedPluginConfigValue(pluginType, "_playerOnly"));
+            if (!enabledValue.HasValue || !levelThresholdValue.HasValue ||
+                !tierPointMultiplierValue.HasValue || !playerOnlyValue.HasValue)
+            {
+                return false;
+            }
+
+            enabled = enabledValue.Value;
+            levelThreshold = levelThresholdValue.Value;
+            tierPointMultiplier = tierPointMultiplierValue.Value;
+            playerOnly = playerOnlyValue.Value;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LoggerInstance.LogWarning(
+                "Could not read LongYinSkillTalentGrant runtime settings: " +
+                DescribeCompatibilityException(ex));
+            return false;
+        }
+    }
+
+    private static object? GetLoadedPluginConfigValue(Type pluginType, string fieldName)
+    {
+        var configEntry = pluginType
+            .GetField(fieldName, BindingFlags.Static | BindingFlags.NonPublic)
+            ?.GetValue(null);
+        return configEntry == null
+            ? null
+            : configEntry.GetType()
+                .GetProperty("Value", BindingFlags.Instance | BindingFlags.Public)
+                ?.GetValue(configEntry);
+    }
+
+    private static void RollbackMogaoSkillLevelReward(
+        HeroData target,
+        float talentPointReward,
+        float talentPointsBefore)
+    {
+        if (talentPointReward <= 0f)
+        {
+            return;
+        }
+
+        target.heroTagPoint = talentPointsBefore - talentPointReward;
+    }
+
     private static bool BeginMogaoPlayerOverride(MogaoForgetMode mode)
     {
         if (!_mogaoDiscipleForgettingEnabled.Value || !_mogaoDiscipleForgetHooksReady || mode == MogaoForgetMode.None ||
@@ -16788,7 +19190,11 @@ public sealed class LongYinProMaxPlugin : BasePlugin
     {
         _mogaoPendingTargetMode = MogaoForgetMode.None;
         _mogaoActiveMode = MogaoForgetMode.None;
+        _mogaoPickerSelectedHero = null;
         _mogaoForgetTarget = null;
+        _mogaoBuildingController = null;
+        _mogaoPickerSelectionInProgress = false;
+        _mogaoContinueOriginalEntry = false;
         _mogaoPlayerOverrideDepth = 0;
         _mogaoPlayerOverrideFrame = -1;
     }
@@ -16959,23 +19365,6 @@ public sealed class LongYinProMaxPlugin : BasePlugin
         {
             LoggerInstance.LogInfo($"Horse turbo stamina refreshed from {source}.");
         }
-    }
-
-    private static int ResolveChangedAmount(int requestedDelta, int? moneyBefore, int? moneyAfter, bool isSpend)
-    {
-        var requestedAmount = Math.Abs(requestedDelta);
-        if (moneyBefore.HasValue && moneyAfter.HasValue)
-        {
-            var actualAmount = isSpend
-                ? Math.Max(0, moneyBefore.Value - moneyAfter.Value)
-                : Math.Max(0, moneyAfter.Value - moneyBefore.Value);
-            if (actualAmount > 0)
-            {
-                return actualAmount;
-            }
-        }
-
-        return requestedAmount;
     }
 
     private static int? TryGetHeroMoney(HeroData? hero)

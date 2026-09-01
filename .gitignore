@@ -27,6 +27,7 @@ mod-prototype/LongYinQuestSnapshot/test.txt
 .codex-temp/
 archive/
 _codex_staged_updates/
+_codex_temp/
 config.js
 mod-src/LongYinProMax/LongYinProMax.dll
 

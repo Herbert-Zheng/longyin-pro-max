@@ -26,6 +26,17 @@ export function WorldExploreSettingsPage({ settings, onSettingChange }: Settings
         </div>
       </Card>
 
+      <Card title="城市与门派建设" eyebrow="Construction">
+        <div className="field-grid field-grid--single">
+          <CheckboxField
+            label="一键升级全部建筑和道路"
+            value={settings.batchAreaUpgradeEnabled}
+            onChange={(value) => onSettingChange('batchAreaUpgradeEnabled', value)}
+            hint="在城市和门派建设界面增加一键升级按钮。依次处理官府或门派主楼、不能拆除的特殊建筑、普通建筑、道路；同一类按左上到右下选择，当前优先级全部无法继续选中升级后才处理下一类。"
+          />
+        </div>
+      </Card>
+
       <Card title="世界地图坐骑" eyebrow="World Map">
         <div className="field-grid">
           <CheckboxField
@@ -74,6 +85,21 @@ export function WorldExploreSettingsPage({ settings, onSettingChange }: Settings
             min={0.01}
             max={999}
             step={0.25}
+          />
+        </div>
+      </Card>
+
+      <Card title="委托奖励" eyebrow="Commission Rewards">
+        <div className="field-grid field-grid--single">
+          <NumberField
+            label="委托功绩倍率"
+            value={settings.bountyContributionMultiplier}
+            onChange={(value) => onSettingChange('bountyContributionMultiplier', value)}
+            min={0}
+            max={999}
+            step={0.25}
+            suffix="倍"
+            hint="完成门派或官府委托时，正数功绩奖励按此倍率计算，默认 2 倍；看板声望、NPC 好感和任何扣除均不受影响。"
           />
         </div>
       </Card>

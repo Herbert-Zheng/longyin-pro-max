@@ -48,92 +48,70 @@ function Require-Pattern {
     }
 }
 
-function Reject-Pattern {
-    param(
-        [Parameter(Mandatory)][AllowEmptyString()][string]$Scope,
-        [Parameter(Mandatory)][string]$Pattern,
-        [Parameter(Mandatory)][string]$FailureMessage
-    )
-
-    if ([System.Text.RegularExpressions.Regex]::IsMatch(
-        $Scope,
-        $Pattern,
-        [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
-        $failures.Add($FailureMessage)
-    }
-}
-
 $loadMethod = Get-CSharpMethodText 'Load'
 $buildingPrefix = Get-CSharpMethodText 'MogaoBuildingForgetPrefix'
 $pickerMethod = Get-CSharpMethodText 'TryShowMogaoTargetPicker'
+$pickerChoosePrefix = Get-CSharpMethodText 'MogaoPickerChoosePrefix'
+$pickerChoosePostfix = Get-CSharpMethodText 'MogaoPickerChoosePostfix'
+$pickerUnshowPrefix = Get-CSharpMethodText 'MogaoPickerUnshowPrefix'
+$pickerTargetMethod = Get-CSharpMethodText 'TryGetMogaoPickerHero'
+$pickerCancelledPostfix = Get-CSharpMethodText 'MogaoPickerCancelledPostfix'
 $candidateMethod = Get-CSharpMethodText 'BuildMogaoForgetTargetList'
 $authorizationMethod = Get-CSharpMethodText 'CanPlayerManageMogaoTarget'
 $leaderMethod = Get-CSharpMethodText 'IsPlayerSectLeader'
-$pickerCallbackMethod = Get-CSharpMethodText 'IsCurrentMogaoPickerCallback'
-$pickerCancelledPostfix = Get-CSharpMethodText 'MogaoPickerCancelledPostfix'
 $worldPlayerPostfix = Get-CSharpMethodText 'MogaoPlayerPostfix'
 $scopeBegin = Get-CSharpMethodText 'BeginMogaoPlayerOverride'
-$finishPostfix = Get-CSharpMethodText 'MogaoForgetFinishPostfix'
-$scopeFinalizer = Get-CSharpMethodText 'MogaoForgetScopeFinalizer'
+$resetMethod = Get-CSharpMethodText 'ResetMogaoForgetState'
 
 Require-Pattern $source 'ConfigEntry<bool>\s+_mogaoDiscipleForgettingEnabled\b' 'Mogao disciple forgetting must expose a persisted enabled switch.'
-Require-Pattern $source 'Config\.Bind\s*\(\s*"Mogao"\s*,\s*"DiscipleForgettingEnabled"\s*,\s*true\b' 'Mogao disciple forgetting must be enabled by default in the Mogao section.'
+Require-Pattern $source 'Config\.Bind\s*\(\s*"Mogao"\s*,\s*"DiscipleForgettingEnabled"\s*,\s*true\b' 'Mogao disciple forgetting must be enabled by default.'
 
 $requiredPatchTargets = @(
     'WorldData\),\s*nameof\(WorldData\.Player\)',
     'BuildingUIController\),\s*nameof\(BuildingUIController\.SpeRemoveSkill\)',
     'BuildingUIController\),\s*nameof\(BuildingUIController\.SpeRemoveTag\)',
-    'BuildingUIController\),\s*nameof\(BuildingUIController\.GetSpeRemoveSkillCost\)',
-    'BuildingUIController\),\s*nameof\(BuildingUIController\.GetSpeRemoveTagCost\)',
-    'PlotController\),\s*nameof\(PlotController\.SpeRemoveSkillChoose\)',
-    'PlotController\),\s*nameof\(PlotController\.SpeRemoveSkillChoosen\)',
     'PlotController\),\s*nameof\(PlotController\.SpeRemoveSkillStart\)',
     'PlotController\),\s*nameof\(PlotController\.SpeRemoveSkillFinish\)',
-    'PlotController\),\s*nameof\(PlotController\.SpeRemoveTagChoose\)',
     'PlotController\),\s*nameof\(PlotController\.SpeRemoveTagStart\)',
     'PlotController\),\s*nameof\(PlotController\.SpeRemoveTagFinish\)',
+    'ChooseController\),\s*nameof\(ChooseController\.ChooseObj\)',
     'ChooseController\),\s*nameof\(ChooseController\.UnshowChoosePanel\)'
 )
 foreach ($targetPattern in $requiredPatchTargets) {
-    Require-Pattern $loadMethod "PatchMethod\(typeof\($targetPattern" "Missing Mogao vanilla-flow patch registration: $targetPattern"
+    Require-Pattern $loadMethod "PatchMethod\(typeof\($targetPattern" "Missing Mogao patch registration: $targetPattern"
 }
 
-Require-Pattern $loadMethod '_mogaoDiscipleForgetHooksReady\s*=\s*mogaoForgetPatches\.All\(patched\s*=>\s*patched\)' 'The feature must require the complete hook set before enabling disciple targeting.'
-Require-Pattern $loadMethod 'if\s*\(\s*!_mogaoDiscipleForgetHooksReady\s*\)[\s\S]*?ResetMogaoForgetState\(\)' 'A partial hook set must reset and safely disable the target override.'
+Require-Pattern $loadMethod '_mogaoDiscipleForgetHooksReady\s*=\s*mogaoForgetPatches\.All\(patched\s*=>\s*patched\)' 'The feature must require its complete hook set.'
+Require-Pattern $buildingPrefix '!IsPlayerSectLeader\(player\)[\s\S]*?ResetMogaoForgetState\(\)[\s\S]*?return\s+true' 'Non-leaders must remain on the vanilla self-only path.'
+Require-Pattern $buildingPrefix '_mogaoPickerSelectionInProgress[\s\S]*?return\s+false' 'The broken building callback must be suppressed while the native picker is finalizing a selection.'
+Require-Pattern $buildingPrefix '_mogaoContinueOriginalEntry[\s\S]*?BeginMogaoPlayerOverride[\s\S]*?return\s+true' 'An explicitly continued selection must enter the original chooser under a narrow target scope.'
+Require-Pattern $buildingPrefix 'return\s+!TryShowMogaoTargetPicker' 'The first leader click must show the target picker and suppress the original entry only when it succeeds.'
 
-Require-Pattern $buildingPrefix '!_mogaoDiscipleForgettingEnabled\.Value\s*\|\|\s*!_mogaoDiscipleForgetHooksReady[\s\S]*?ResetMogaoForgetState\(\)[\s\S]*?return\s+true' 'The building entry must preserve vanilla behavior and clear state when the feature is disabled or compatibility hooks are unavailable.'
-Require-Pattern $buildingPrefix '!IsPlayerSectLeader\(player\)[\s\S]*?ResetMogaoForgetState\(\)[\s\S]*?return\s+true' 'A non-leader must remain on the vanilla self-only path and must not retain a disciple target.'
-Require-Pattern $buildingPrefix '!IsCurrentMogaoPickerCallback\(__instance,\s*__originalMethod\.Name\)[\s\S]*?ResetMogaoForgetState\(\)' 'A pending target must only be accepted from the exact active Mogao picker callback.'
-Require-Pattern $buildingPrefix 'CanPlayerManageMogaoTarget\(player,\s*selectedTarget\)[\s\S]*?_mogaoForgetTarget\s*=\s*selectedTarget[\s\S]*?BeginMogaoPlayerOverride' 'A picker result must be re-authorized before entering the vanilla forget flow.'
-Require-Pattern $buildingPrefix 'return\s+!TryShowMogaoTargetPicker' 'The first leader click must only suppress vanilla execution when the target picker was actually shown.'
+Require-Pattern $pickerMethod 'candidates\.Count\s*<=\s*1[\s\S]*?return\s+false' 'The picker must fall back to vanilla when there are no eligible disciples.'
+Require-Pattern $pickerMethod '_mogaoBuildingController\s*=\s*controller[\s\S]*?chooseController\.targetHero\s*=\s*null[\s\S]*?ChooseType\.Hero' 'The picker must retain its controller and clear stale hero selection.'
+Require-Pattern $pickerChoosePrefix '_mogaoPendingTargetMode\s*!=\s*MogaoForgetMode\.None[\s\S]*?_mogaoPickerSelectedHero\s*=\s*TryGetMogaoPickerHero\(targetObj\)[\s\S]*?_mogaoPickerSelectionInProgress\s*=\s*true' 'Native chooser selection must capture the hero directly from the clicked card before vanilla chooser cleanup.'
+Require-Pattern $pickerUnshowPrefix '_mogaoPickerSelectionInProgress[\s\S]*?__instance\.targetHero[\s\S]*?_mogaoPickerSelectedHero\s*=' 'The selected hero must be captured before the vanilla chooser closes and clears targetHero.'
+Require-Pattern $pickerTargetMethod 'GetComponent<HeroIconController>\(\)[\s\S]*?heroData' 'The clicked native hero card must resolve its HeroData through HeroIconController.'
+Require-Pattern $pickerChoosePostfix '_mogaoPickerSelectedHero\s*\?\?\s*TryGetMogaoSelectedHero\(\)[\s\S]*?CanPlayerManageMogaoTarget[\s\S]*?_mogaoForgetTarget\s*=\s*selectedTarget[\s\S]*?ContinueMogaoSelectedTargetFlow' 'The native chooser result must use the pre-close capture, then be re-authorized and explicitly continued.'
+Require-Pattern $pickerCancelledPostfix '!_mogaoPickerSelectionInProgress[\s\S]*?ResetMogaoForgetState\(\)' 'Cancelling the picker must clear pending state without erasing an in-flight selection.'
 
-Require-Pattern $pickerMethod 'candidates\.Count\s*<=\s*1[\s\S]*?return\s+false' 'The picker must fall back to vanilla self-only behavior when there are no eligible disciples.'
-Require-Pattern $pickerMethod 'chooseController\.targetHero\s*=\s*null[\s\S]*?ChooseType\.Hero[\s\S]*?callbackName[\s\S]*?ChooseFilterType\.None' 'The leader picker must clear stale selection and use the native hero chooser callback.'
-Require-Pattern $pickerCallbackMethod 'chooseController\.chooseType\s*==\s*ChooseType\.Hero[\s\S]*?chooseController\.sendResultFucTarget\s*==\s*controller\.gameObject[\s\S]*?string\.Equals\(chooseController\.sendResultFuc,\s*callbackName' 'Picker callback validation must bind the result to the exact Mogao chooser target and callback.'
-Require-Pattern $pickerCancelledPostfix '_mogaoPendingTargetMode\s*!=\s*MogaoForgetMode\.None[\s\S]*?ResetMogaoForgetState\(\)' 'Cancelling the native hero chooser must invalidate the pending Mogao session.'
-Require-Pattern $candidateMethod 'candidates\.Add\(player\)[\s\S]*?player\.GetForce\(false\)\?\.GetOwnHeros\(\)' 'The target list must preserve self-forgetting and source disciples from the player sect roster.'
-Require-Pattern $candidateMethod 'hero\.dead\s*\|\|\s*hero\.inPrison[\s\S]*?!CanPlayerManageMogaoTarget' 'Dead, imprisoned, or unauthorized roster entries must not be selectable.'
+Require-Pattern $candidateMethod 'candidates\.Add\(player\)[\s\S]*?player\.GetForce\(false\)\?\.GetOwnHeros\(\)' 'The target list must include self and source disciples from the player sect.'
+Require-Pattern $candidateMethod 'hero\.dead\s*\|\|\s*hero\.inPrison[\s\S]*?!CanPlayerManageMogaoTarget' 'Dead, imprisoned, and unauthorized disciples must be excluded.'
+Require-Pattern $leaderMethod 'player\.PlayerLeadForce\(\)' 'Leader authorization must use the game-native leadership check.'
+Require-Pattern $authorizationMethod 'player\s*==\s*target[\s\S]*?return\s+true' 'Self must always remain manageable.'
+Require-Pattern $authorizationMethod 'IsPlayerSectLeader\(player\)[\s\S]*?target\.belongForceID\s*==\s*player\.belongForceID' 'Disciple management must require current leadership and same-sect membership.'
 
-Require-Pattern $leaderMethod 'player\.PlayerLeadForce\(\)' 'Leader authorization must use the game-native PlayerLeadForce check.'
-Require-Pattern $authorizationMethod 'player\s*==\s*target[\s\S]*?return\s+true' 'The original player target must always remain valid.'
-Require-Pattern $authorizationMethod 'IsPlayerSectLeader\(player\)[\s\S]*?player\.belongForceID\s*>=\s*0[\s\S]*?target\.belongForceID\s*==\s*player\.belongForceID' 'Disciple authorization must require current leadership and exact same-sect membership.'
+Require-Pattern $scopeBegin '_mogaoActiveMode\s*!=\s*mode[\s\S]*?return\s+false[\s\S]*?_mogaoPlayerOverrideDepth\+\+' 'Only a matching active flow may enter the player override scope.'
+Require-Pattern $worldPlayerPostfix '_mogaoPlayerOverrideDepth\s*<=\s*0[\s\S]*?_mogaoForgetTarget\s*==\s*null[\s\S]*?return' 'WorldData.Player must remain untouched outside a narrow Mogao scope.'
+Require-Pattern $worldPlayerPostfix '_mogaoPlayerOverrideFrame\s*!=\s*Time\.frameCount[\s\S]*?ResetMogaoForgetState\(\)' 'A leaked player override must expire outside its originating frame.'
+Require-Pattern $resetMethod '_mogaoPendingTargetMode\s*=\s*MogaoForgetMode\.None[\s\S]*?_mogaoPickerSelectedHero\s*=\s*null[\s\S]*?_mogaoBuildingController\s*=\s*null[\s\S]*?_mogaoPlayerOverrideDepth\s*=\s*0' 'Reset must clear picker, captured target, controller, and override state.'
 
-Require-Pattern $scopeBegin '!_mogaoDiscipleForgettingEnabled\.Value[\s\S]*?_mogaoActiveMode\s*!=\s*mode[\s\S]*?return\s+false[\s\S]*?_mogaoPlayerOverrideDepth\+\+' 'Only an enabled, matching active skill/talent flow may enter the player override scope.'
-Require-Pattern $worldPlayerPostfix '_mogaoPlayerOverrideDepth\s*<=\s*0[\s\S]*?_mogaoForgetTarget\s*==\s*null[\s\S]*?return' 'WorldData.Player must remain untouched outside a narrow Mogao override scope.'
-Require-Pattern $worldPlayerPostfix '_mogaoPlayerOverrideFrame\s*!=\s*Time\.frameCount[\s\S]*?ResetMogaoForgetState\(\)' 'A leaked override scope must fully invalidate its target session outside the originating frame.'
-Require-Pattern $worldPlayerPostfix 'CanPlayerManageMogaoTarget\(actualPlayer,\s*_mogaoForgetTarget\)[\s\S]*?ResetMogaoForgetState\(\)[\s\S]*?__result\s*=\s*_mogaoForgetTarget' 'Every player substitution must re-check live leader and same-sect authorization.'
-Require-Pattern $finishPostfix 'EndMogaoPlayerOverride\(__state\)[\s\S]*?ResetMogaoForgetState\(\)' 'Completing either vanilla forget flow must clear the selected disciple session.'
-Require-Pattern $loadMethod 'nameof\(MogaoForgetScopeFinalizer\)' 'Every scoped vanilla Mogao hook must register exception-safe cleanup.'
-Require-Pattern $scopeFinalizer '__exception\s*!=\s*null[\s\S]*?EndMogaoPlayerOverride\(__state\)[\s\S]*?ResetMogaoForgetState\(\)[\s\S]*?return\s+__exception' 'The Harmony finalizer must fully clean leaked scopes while preserving the original exception.'
-
-Reject-Pattern $source '_mogaoForgetTarget\?\.LoseSkill|_mogaoForgetTarget\?\.RemoveTag|_mogaoForgetTarget\.LoseSkill|_mogaoForgetTarget\.RemoveTag' 'The mod must not reimplement removal; it must reuse the complete vanilla validation, cost, time, and mutation flow.'
-
-Require-Pattern $typesSource 'mogaoDiscipleForgettingEnabled:\s*boolean;' 'Electron settings must carry the Mogao disciple-forgetting switch.'
-Require-Pattern $visibleSettingsSource 'mogaoDiscipleForgettingEnabled:\s*true' 'Electron must enable the Mogao disciple-forgetting switch by default.'
-Require-Pattern $configSource '\[Mogao\][\s\S]*?DiscipleForgettingEnabled\s*=\s*\$\{boolText\(settings\.mogaoDiscipleForgettingEnabled\)\}' 'Electron must write the Mogao switch in generated configs.'
-Require-Pattern $configSource 'getIniSectionBody\(text,\s*''Mogao''\)[\s\S]*?readBool\(\s*mogaoSection,\s*''DiscipleForgettingEnabled''' 'Electron must read the Mogao switch only from its owning section.'
-Require-Pattern $configSource 'upsertIniSectionValue\(\s*nextMain,\s*''Mogao'',\s*''DiscipleForgettingEnabled'',\s*boolText\(normalized\.mogaoDiscipleForgettingEnabled\)' 'Electron must persist edits to the Mogao switch.'
-Require-Pattern $expTalentSource 'label="掌门可为本门弟子遗忘武学与天赋"[\s\S]*?onSettingChange\(''mogaoDiscipleForgettingEnabled'', value\)[\s\S]*?非掌门仍只能为自己操作' 'Electron must expose a clearly described Mogao disciple-forgetting checkbox.'
+Require-Pattern $typesSource 'mogaoDiscipleForgettingEnabled:\s*boolean;' 'Electron settings must carry the Mogao switch.'
+Require-Pattern $visibleSettingsSource 'mogaoDiscipleForgettingEnabled:\s*true' 'Electron must enable the Mogao switch by default.'
+Require-Pattern $configSource '\[Mogao\][\s\S]*?DiscipleForgettingEnabled\s*=\s*\$\{boolText\(settings\.mogaoDiscipleForgettingEnabled\)\}' 'Electron must write the Mogao switch.'
+Require-Pattern $configSource 'getIniSectionBody\(text,\s*''Mogao''\)[\s\S]*?readBool\(\s*mogaoSection,\s*''DiscipleForgettingEnabled''' 'Electron must read the Mogao switch from its own section.'
+Require-Pattern $configSource 'upsertIniSectionValue\(\s*nextMain,\s*''Mogao'',\s*''DiscipleForgettingEnabled''' 'Electron must persist edits to the Mogao switch.'
+Require-Pattern $expTalentSource 'label="掌门可为本门弟子遗忘武学与天赋"[\s\S]*?onSettingChange\(''mogaoDiscipleForgettingEnabled'', value\)[\s\S]*?自己沿用原版耗时流程[\s\S]*?弟子直接生效且不耗时[\s\S]*?非掌门仍只能管理自己' 'Electron must expose and explain the Mogao switch.'
 
 if ($failures.Count -gt 0) {
     foreach ($failure in $failures) {
@@ -143,4 +121,4 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host "Mogao disciple forget semantic checks passed: $resolvedSourcePath"
+Write-Host "Mogao disciple-forget semantic checks passed: $resolvedSourcePath"

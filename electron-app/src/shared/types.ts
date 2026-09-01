@@ -268,6 +268,7 @@ export interface VisibleSettings {
   horseStaminaMultiplier: number;
   carryWeightCap: number;
   ignoreCarryWeight: boolean;
+  treasurePavilionCapacityMultiplier: number;
   merchantCarryCash: number;
   treasureTradeHelperEnabled: boolean;
   treasureAutoTradeEnabled: boolean;
@@ -276,6 +277,7 @@ export interface VisibleSettings {
   materialPurchaseMinItemLv: number;
   shopOwnershipEnabled: boolean;
   skillBookOwnershipIndicatorEnabled: boolean;
+  continuousBookCombineEnabled: boolean;
   mogaoDiscipleForgettingEnabled: boolean;
   auctionEventAlwaysRedEnabled: boolean;
   auctionPreviewRefreshEnabled: boolean;
@@ -288,6 +290,8 @@ export interface VisibleSettings {
   commonBountyRefreshEnabled: boolean;
   governBountyRefreshEnabled: boolean;
   bountyRefreshHotkey: string;
+  bountyContributionMultiplier: number;
+  batchAreaUpgradeEnabled: boolean;
   treasureIdentifyBestValueAssistEnabled: boolean;
   breakthroughRerollEnabled: boolean;
   craftRerollEnabled: boolean;

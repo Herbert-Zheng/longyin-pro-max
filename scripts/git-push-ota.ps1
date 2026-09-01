@@ -401,36 +401,30 @@ if ($LASTEXITCODE -ne 0) {
   throw '维护插件静态兼容性检查失败。'
 }
 
-$auctionEventCheck = Join-Path $RepoRoot 'scripts\check-auction-event-semantics.ps1'
-Assert-FileExists -Path $auctionEventCheck -Label '拍卖会等级语义检查脚本'
-Write-Step '执行拍卖会等级语义检查'
-& pwsh -NoProfile -ExecutionPolicy Bypass -File $auctionEventCheck
-if ($LASTEXITCODE -ne 0) {
-  throw '拍卖会等级语义检查失败。'
-}
+$semanticChecks = @(
+  @{ File = 'check-auction-event-semantics.ps1'; Label = '拍卖会等级' },
+  @{ File = 'check-auction-preview-semantics.ps1'; Label = '拍卖预览刷新' },
+  @{ File = 'check-yellow-crane-refresh-semantics.ps1'; Label = '黄鹤楼候选人刷新' },
+  @{ File = 'check-bounty-refresh-semantics.ps1'; Label = '委托刷新' },
+  @{ File = 'check-batch-area-upgrade-semantics.ps1'; Label = '区域批量升级' },
+  @{ File = 'check-bounty-contribution-multiplier-semantics.ps1'; Label = '委托功绩倍率' },
+  @{ File = 'check-continuous-book-combine-semantics.ps1'; Label = '秘籍持续合成' },
+  @{ File = 'check-external-trainer-money-compatibility.ps1'; Label = '外部金钱修改器兼容性' },
+  @{ File = 'check-mogao-direct-forget-semantics.ps1'; Label = '莫高窟直接遗忘' },
+  @{ File = 'check-mogao-disciple-forget-semantics.ps1'; Label = '莫高窟弟子遗忘' },
+  @{ File = 'check-treasure-pavilion-capacity-semantics.ps1'; Label = '藏宝阁容量倍率' },
+  @{ File = 'check-relationship-feature-guards.ps1'; Label = '关系功能隔离' },
+  @{ File = 'check-skill-book-ownership-semantics.ps1'; Label = '功法书拥有状态' }
+)
 
-$auctionPreviewCheck = Join-Path $RepoRoot 'scripts\check-auction-preview-semantics.ps1'
-Assert-FileExists -Path $auctionPreviewCheck -Label '拍卖预览刷新语义检查脚本'
-Write-Step '执行拍卖预览刷新语义检查'
-& pwsh -NoProfile -ExecutionPolicy Bypass -File $auctionPreviewCheck
-if ($LASTEXITCODE -ne 0) {
-  throw '拍卖预览刷新语义检查失败。'
-}
-
-$yellowCraneRefreshCheck = Join-Path $RepoRoot 'scripts\check-yellow-crane-refresh-semantics.ps1'
-Assert-FileExists -Path $yellowCraneRefreshCheck -Label '黄鹤楼候选人刷新语义检查脚本'
-Write-Step '执行黄鹤楼候选人刷新语义检查'
-& pwsh -NoProfile -ExecutionPolicy Bypass -File $yellowCraneRefreshCheck
-if ($LASTEXITCODE -ne 0) {
-  throw '黄鹤楼候选人刷新语义检查失败。'
-}
-
-$bountyRefreshCheck = Join-Path $RepoRoot 'scripts\check-bounty-refresh-semantics.ps1'
-Assert-FileExists -Path $bountyRefreshCheck -Label '委托刷新语义检查脚本'
-Write-Step '执行委托刷新语义检查'
-& pwsh -NoProfile -ExecutionPolicy Bypass -File $bountyRefreshCheck
-if ($LASTEXITCODE -ne 0) {
-  throw '委托刷新语义检查失败。'
+foreach ($semanticCheck in $semanticChecks) {
+  $checkPath = Join-Path $RepoRoot "scripts\$($semanticCheck.File)"
+  Assert-FileExists -Path $checkPath -Label "$($semanticCheck.Label)语义检查脚本"
+  Write-Step "执行$($semanticCheck.Label)语义检查"
+  & pwsh -NoProfile -ExecutionPolicy Bypass -File $checkPath
+  if ($LASTEXITCODE -ne 0) {
+    throw "$($semanticCheck.Label)语义检查失败。"
+  }
 }
 
 if (-not (Test-Path $zipPath)) {

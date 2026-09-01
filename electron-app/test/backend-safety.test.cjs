@@ -706,6 +706,57 @@ test('saving missing relationship keys preserves CRLF line endings', async (t) =
   assert.match(text, /BlockOverflowLoverHomeBattle = true\r\n\r\n\[Teaching\]/);
 });
 
+test('saving a new configuration writes the fork baseline battle speed multiplier', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+
+  const current = await readVisibleSettings(gameRoot);
+  await saveVisibleSettings(gameRoot, {
+    ...current,
+    battleSkillExpMultiplier: 4
+  });
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.match(text, /\[Battle\][\s\S]*?^SpeedMultiplier = 2$/m);
+  assert.match(text, /\[Battle\][\s\S]*?^SkillExpMultiplier = 4$/m);
+});
+
+test('saving repairs a drifted battle speed multiplier without changing adjacent settings', async (t) => {
+  const { root, gameRoot } = await createWorkspace();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const configPath = 'BepInEx/config/codex.longyin.staminalock.cfg';
+  await writeFile(
+    gameRoot,
+    configPath,
+    [
+      '[WrongSection]',
+      'SpeedMultiplier = 99',
+      '',
+      '[Battle]',
+      'SpeedMultiplier = 7',
+      'SkillExpMultiplier = 3',
+      'UnrelatedBattleSetting = keep-battle',
+      '',
+      '[FutureSection]',
+      'FutureSetting = keep-future',
+      ''
+    ].join('\r\n')
+  );
+
+  const current = await readVisibleSettings(gameRoot);
+  assert.equal(current.battleSkillExpMultiplier, 3);
+
+  await saveVisibleSettings(gameRoot, current);
+  const text = await fs.readFile(path.join(gameRoot, configPath), 'utf8');
+
+  assert.match(text, /\[Battle\][\s\S]*?^SpeedMultiplier = 2$/m);
+  assert.match(text, /\[Battle\][\s\S]*?^SkillExpMultiplier = 3$/m);
+  assert.match(text, /^UnrelatedBattleSetting = keep-battle$/m);
+  assert.match(text, /\[WrongSection\]\r?\nSpeedMultiplier = 99/);
+  assert.match(text, /\[FutureSection\]\r?\nFutureSetting = keep-future/);
+});
+
 test('exploration full-reveal setting reads only the Exploration section and round-trips', async (t) => {
   const { root, gameRoot } = await createWorkspace();
   t.after(() => fs.rm(root, { recursive: true, force: true }));

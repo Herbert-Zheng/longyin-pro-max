@@ -155,7 +155,11 @@ publish job：
 5. 从 GitHub 重新下载资产并比较 SHA-256。
 6. 资产完全匹配后发布为 latest stable Release。
 
-Release body 使用 GitHub 自动生成的 notes 作为初稿，并继续作为 Electron OTA 显示的唯一更新历史来源。
+Release body 从 `CHANGELOG.md` 中与 tag 完全匹配的 `## vX.Y.Z` 段落提取，只包含该版本的用户可见变化。不要把下载说明、CI 验证过程、内部实现备注或完整历史放入 Release body。Electron OTA 直接显示这段正文。
+
+发布前应在版本准备 PR 中完成对应的 `CHANGELOG.md` 段落；仓库根目录不得再新增 `release-notes-v*.md`。已发布版本的 tag 和资产不可修改。仅修正文案或删除无关内容时，可以只修改既有 Release body；任何代码或资产变化都必须提高版本号并创建新 tag。
+
+正常发布校验从 tag 内的 `CHANGELOG.md` 读取正文。若修正的是迁移前、tag 内尚无 `CHANGELOG.md` 的历史 Release，必须由用户明确授权，并在校验时显式传入当前仓库的正文来源：`verify-published-release.ps1 -TagName vX.Y.Z -ReleaseNotesChangelogPath .\CHANGELOG.md`。校验器不会静默回退到工作区文件。
 
 ## OTA 读取流程
 

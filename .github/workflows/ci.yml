@@ -52,6 +52,13 @@ jobs:
         working-directory: electron-app
         run: npm run test:renderer-smoke:harness
 
+      - name: Test release notes policy
+        shell: pwsh
+        run: |
+          ./scripts/test-release-notes-policy.ps1
+          $version = (Get-Content -Raw ./electron-app/package.json | ConvertFrom-Json).version
+          ./scripts/get-release-notes.ps1 -TagName "v$version" | Out-Null
+
       - name: Test staged DLL workflow
         shell: pwsh
         run: ./scripts/test-staged-dll-workflow.ps1

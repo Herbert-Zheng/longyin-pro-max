@@ -6,6 +6,7 @@ param(
 
   [string]$Repository = 'Herbert-Zheng/longyin-pro-max',
   [string]$DownloadRoot = '',
+  [string]$ReleaseNotesChangelogPath = '',
   [ValidateRange(1, 30)]
   [int]$LatestRetryCount = 12,
   [ValidateRange(10, 120)]
@@ -40,6 +41,17 @@ function Assert-File([string]$Path, [string]$Label) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
     throw "未找到$Label：$Path"
   }
+}
+
+function Normalize-ReleaseBody([string]$Body) {
+  $lines = @(($Body -replace "`r`n?", "`n") -split "`n" | ForEach-Object { $_.TrimEnd() })
+  while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[0])) {
+    $lines = @($lines | Select-Object -Skip 1)
+  }
+  while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[-1])) {
+    $lines = @($lines | Select-Object -First ($lines.Count - 1))
+  }
+  return $lines -join "`n"
 }
 
 function Remove-OwnedVerificationRoot([string]$Path) {
@@ -96,6 +108,24 @@ try {
   }
   if ([string]::IsNullOrWhiteSpace([string]$release.body)) {
     throw "$TagName Release body 为空，OTA 更新历史不可用。"
+  }
+  $repoRoot = Split-Path -Parent $PSScriptRoot
+  if ([string]::IsNullOrWhiteSpace($ReleaseNotesChangelogPath)) {
+    $resolvedReleaseNotesChangelogPath = Join-Path $DownloadRoot 'tag-CHANGELOG.md'
+    $tagChangelogLines = & git -C $repoRoot show "${TagName}:CHANGELOG.md" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      throw "无法从 $TagName 读取 CHANGELOG.md：`n$($tagChangelogLines -join "`n")"
+    }
+    [System.IO.File]::WriteAllText($resolvedReleaseNotesChangelogPath, ($tagChangelogLines -join "`n") + "`n", [System.Text.UTF8Encoding]::new($false))
+  }
+  else {
+    $resolvedReleaseNotesChangelogPath = (Resolve-Path -LiteralPath $ReleaseNotesChangelogPath -ErrorAction Stop).Path
+    Assert-File -Path $resolvedReleaseNotesChangelogPath -Label '显式指定的 Release notes CHANGELOG'
+    Write-Step "使用显式 Release notes 来源校验历史正文：$resolvedReleaseNotesChangelogPath"
+  }
+  $expectedReleaseBody = & (Join-Path $PSScriptRoot 'get-release-notes.ps1') -TagName $TagName -ChangelogPath $resolvedReleaseNotesChangelogPath
+  if ((Normalize-ReleaseBody ([string]$release.body)) -cne (Normalize-ReleaseBody ([string]$expectedReleaseBody))) {
+    throw "$TagName Release body 与指定 CHANGELOG 的对应段落不一致。"
   }
 
   $assets = @($release.assets)
@@ -195,7 +225,6 @@ try {
   Assert-File -Path $updaterExe -Label '解压后的 LongYinUpdater.exe'
   Assert-File -Path $publishedInterop -Label '解压后的 Assembly-CSharp.dll'
 
-  $repoRoot = Split-Path -Parent $PSScriptRoot
   $repoInterop = Join-Path $repoRoot 'dist\BepInEx\interop\Assembly-CSharp.dll'
   Assert-File -Path $repoInterop -Label '仓库 Assembly-CSharp.dll 基线'
   foreach ($pluginName in @('LongYinProMax', 'LongYinBattleTurbo', 'LongYinHorseStaminaMultiplier', 'LongYinSkipIntro')) {

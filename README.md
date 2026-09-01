@@ -1,198 +1,66 @@
-# 龙胤立志传 Pro Max 模组仓库
+# 龙胤立志传 Pro Max
 
-这是 `LongYinLiZhiZhuan` 的便携式模组仓库，便于通过 GitHub 管理模组与 Electron 启动器，而不上传游戏本体。
+适用于《龙胤立志传》`V1.1.0f5` 的便携模组与图形启动器。
 
-当前支持游戏版本：`V1.1.0f5`
-
-## 仓库内容
-
-- `dist/`
-  Electron 应用复制到游戏目录中的模组载荷。
-- `electron-app/`
-  便携式 Electron 启动器与更新器源码，是唯一受支持的启动与配置入口。
-- `archive/`
-  存放已经退役的原型、旧脚本和历史备份；这些内容不属于当前受支持的安装与启动流程。
-- `MODDING-NOTES-1.071F.md`
-  `1.071F` 时期的历史开发记录，仅供旧版本逆向与实现参考。
-- `PROJECT-NOTES.md`
-  本地保留的项目说明与仓库处理备注。
-
-## 仓库中不包含
-
-- 游戏本体文件
-- `LongYinLiZhiZhuan.exe`
-- `LongYinLiZhiZhuan_Data/`
-- `GameAssembly.dll`
-- Steam 管理的安装内容
-
-这个仓库只保存模组项目和便携式模组覆盖层。
-
-## 快速安装
-
-1. 安装一份干净的游戏。
-2. 下载或克隆本仓库。
-3. 运行 `electron-app/` 里的 `LongYinProMax.exe`。
-4. 如果能自动识别到游戏目录，应用会把 `dist/` 复制到游戏根目录。
-5. 如果自动识别失败，请手动选择包含 `LongYinLiZhiZhuan.exe` 的文件夹。
-6. 安装完成后，继续通过 Electron 应用保存配置与启动游戏。
-7. 如果之后需要卸载模组，请使用应用内卸载，或运行 `Uninstall.cmd`。
+普通用户无需额外安装运行环境。下载正式版本，运行启动器即可安装、配置、启动和更新模组。
 
 ## 下载
 
-稳定版会发布在 GitHub Releases：
+[下载最新稳定版](https://github.com/Herbert-Zheng/longyin-pro-max/releases/latest)
 
-- [最新稳定版下载](https://github.com/Herbert-Zheng/longyin-pro-max/releases/latest)
+请选择 `LongYinProMaxApp-<版本>-win-x64.zip`，不要单独下载 `update-manifest.json`。
 
-下载 Release ZIP 后，解压到任意位置，然后运行 `LongYinProMax.exe`。
-同一个包里也包含 `Uninstall.cmd`，方便后续干净卸载。
+## 安装与启动
 
-## 开发、CI 与 OTA 发布
+1. 完全关闭游戏。
+2. 把下载的 ZIP 解压到游戏目录以外的任意文件夹。
+3. 运行解压后的 `LongYinProMax.exe`。
+4. 让启动器自动识别游戏，或选择包含 `LongYinLiZhiZhuan.exe` 的目录。
+5. 按需调整功能，点击“保存并启动”。
 
-仓库采用简单 GitHub Flow：
+启动器会把随包模组文件安装到游戏目录。以后继续使用同一个 `LongYinProMax.exe` 配置和启动游戏。
 
-```text
-main -> feature/fix/chore/docs 短期分支 -> Pull Request -> CI -> main
-main 上的 vX.Y.Z tag -> GitHub Actions -> GitHub Release -> OTA
-```
+详细步骤与故障排查见 [INSTALL.md](./INSTALL.md)。
 
-`main` 是唯一集成主干。新分支使用内容型名称，例如 `feature/github-release`，不得以 Agent、模型、作者、用户名或机器名作为前缀。
+## 更新
 
-Pull Request 和 `main` push 会在干净 Windows runner 上执行完整测试与构建。`main` 成功构建的 ZIP 和 manifest 会作为短期 Actions artifact 保存；正式下载和 OTA 只使用 GitHub Release assets。
+启动器可以检查并安装 GitHub Releases 中的最新稳定版本。下载完成后会校验文件完整性，并保留启动器设置和模组配置。
 
-本地运行与 CI 相同的发布构建门禁：
+也可以重新下载最新 ZIP，解压到新的文件夹后运行。
 
-```powershell
-pwsh ./scripts/build-and-verify-release.ps1
-```
+## 卸载
 
-正式版本必须先通过版本准备 PR 合入 `main`。从干净且与 `origin/main` 同步的 `main` 创建并推送 tag：
+先完全关闭游戏，再使用启动器内的卸载功能。已安装载荷中也提供 `Uninstall.cmd`。
 
-```powershell
-pwsh ./scripts/prepare-release.ps1
-pwsh ./scripts/prepare-release.ps1 -SkipBuild -PushTag
-```
+## 主要功能
 
-本地脚本不会创建、修改或覆盖 GitHub Release。tag push 后，GitHub Actions 构建一次、验证 ZIP 与 `update-manifest.json`，并将同一份已验证产物发布到 GitHub Release。
+- 战斗速度、体力和武学成长辅助
+- 交易、藏宝阁、拍卖、鉴宝与材料筛选辅助
+- 城市、门派建筑和道路批量升级
+- 委托、关系、队伍与探索辅助
+- 功法书持有状态、秘籍合成与弟子培养辅助
+- 图形化配置、安装体检、日志查看和自动更新
 
-完整流程、失败恢复和首次启用顺序见 [OTA-WORKFLOW.md](./OTA-WORKFLOW.md)。长期仓库约束见 [AGENTS.md](./AGENTS.md)。
+完整功能与使用边界见 [docs/FEATURES.md](./docs/FEATURES.md)。
 
-## 开发工具
+## 常见问题
 
-当前仓库的模组开发工具链在本地优先使用仓库便携式 .NET：
+**游戏启动了，但模组没有生效**
 
-- `.codex-tools/dotnet/dotnet.exe`
-- 已在本机验证的 SDK 版本：`6.0.428`
-- C# 脚本工具固定为 `dotnet-script 1.5.0`
+先在启动器中检查游戏路径和安装体检。运行日志位于游戏目录的 `BepInEx/LogOutput.log`。
 
-便携 SDK 不存在时，构建脚本会使用 PATH 中的 .NET SDK。GitHub Actions 显式安装 `.NET SDK 6.0.428`，因此 CI 不依赖未提交的 `.codex-tools/`。
+**为什么没有 BepInEx 控制台窗口**
 
-之所以固定到 `1.5.0`，是因为 `dotnet-script 1.6.0+` 已改为 `net8.0/net9.0`，不能直接跑在当前这套便携式 .NET 6 工具链上。
+控制台默认关闭，以避免 Windows 控制台选择模式阻塞游戏。日志仍会正常写入磁盘。
 
-第一次使用或更新本地工具时，运行：
+**Windows 显示安全提示**
 
-```powershell
-.\scripts\restore-tools.ps1
-```
+本项目当前没有代码签名。请确认文件来自本仓库的正式 Release，再按系统提示决定是否运行。
 
-运行任意 `.csx` 脚本时，使用：
+## 版本记录与开发
 
-```powershell
-.\scripts\run-csharp-script.ps1 `
-  -ScriptPath .\scripts\csharp\inspect-interop-type.csx `
-  -ScriptArguments '.\dist\BepInEx\interop\Assembly-CSharp.dll', 'PlotController', 'false', 'skip', 'auto', 'choice', 'plot'
-```
+- 用户可读的版本变化：[CHANGELOG.md](./CHANGELOG.md)
+- 开发、CI、Release 与 OTA：[OTA-WORKFLOW.md](./OTA-WORKFLOW.md)
+- 贡献者和自动化约束：[AGENTS.md](./AGENTS.md)
 
-检查互操作程序集中的某个类型时，优先使用封装好的命令：
-
-```powershell
-.\scripts\inspect-interop-type.ps1 -TypeName PlotController
-```
-
-使用约定：
-
-- `mod-src/build-il2cpp-plugin.ps1` 仍然是唯一受支持的插件编译入口。
-- PowerShell 负责文件编排、构建、日志、部署和仓库自动化。
-- `dotnet-script` 只用于 C# 反射、互操作程序集探查、Harmony 目标发现、枚举转储这类分析型工作。
-
-后续如果需要继续扩展，可以在同样的 repo-pinned 模式下补充：
-
-- `ilspycmd` 用于命令行反编译/导出
-- `gh` 用于 OTA Release 检查与发布辅助
-- BepInEx 日志 tail 脚本
-- 带“游戏已关闭检查 + DLL 备份”的安全部署脚本
-
-## 手动安装
-
-如果你不想通过 Electron 应用安装，也可以手动把 `dist/` 里的内容复制到游戏根目录。
-
-注意：
-不要把整个 `dist` 文件夹原样复制进去。
-只复制 `dist/` 里面的文件和文件夹。
-
-## 当前 dist 内容
-
-当前便携载荷包含：
-
-- BepInEx 加载器和运行时文件
-- `dotnet/`
-- 插件 DLL
-- 插件配置文件
-- `Uninstall.cmd`
-- `Uninstall.ps1`
-- `steam_appid.txt`
-- 安装说明
-
-## 包含的插件
-
-- `LongYinBattleTurbo`
-- `LongYinHorseStaminaMultiplier`
-- `LongYinQuestSnapshot`
-- `LongYinSkillTalentGrant`
-- `LongYinSkipIntro`
-- `LongYinProMax`
-
-`LongYinProMax` 是当前综合玩法插件，提供以下拍卖、鉴宝、交易、制造、关系与功法辅助：
-
-- 在珍宝铺（藏宝阁）交易界面顶部显示珍宝购物车汇总；鉴后卖价会把玩家看到的括号估价临时代入原版卖价公式重算，不额外收取不存在的鉴定费。
-- 进入珍宝铺时，只把鉴定学识要求不高于玩家当前鉴定学识、且按原版买卖价重算后确有利润的未鉴定珍宝加入购物车；该功能只负责加购，结账仍由玩家手动确认。
-- 在 Electron 启动器开启“拍卖刷新”后，可使用拍卖会“查看展品”窗口中的“免费刷新展品”按钮或快捷键；默认快捷键为 `R`，只在展品预览窗口生效，不消耗银钱且不受原版刷新次数限制。
-- 可将新生成的“拍卖大会”固定为红色最高等级（难度 10）；事件难度及按等级生成的拍品会相应提高，关闭开关后恢复原版随机等级。
-- 在 Electron 启动器开启“鉴宝辅助”后，使用鉴宝窗口中的“自动选择最高估价”按钮；按玩家学识决定的悬浮括号价选中最高价宝物，但仍由玩家手动确认。
-- 在 Electron 启动器“成长与天赋”页面开启“刷新突破词条按钮”后，突破候选界面只显示同名按钮，不会自动刷新，也没有快捷键；保存配置后需重新启动游戏生效。
-- 在 Electron 启动器“交易与制造”页面开启“刷新打造词条按钮”后，按钮只出现在普通打造或特殊强化的候选界面，不会自动打造、消耗材料，也没有快捷键；保存配置后需重新启动游戏生效。
-- 在商店交易窗口上方显示“材料扫货”按钮、品级/等级下拉菜单和独立的“词条”筛选窗口。词条窗口最多保存 4 条文字条件，可选择“全部满足”或“任一满足”，并为每条条件选择“包含”或“完全匹配”；词条条件会和最低品级、最低等级同时生效。扫货只加入购物车，成交仍由玩家手动确认。
-- 在官府仓库右侧物品列表的正下方居中显示“刷新”按钮；也可使用 Electron 中配置的快捷键（默认 `R`）。按钮和快捷键只在官府仓库页面生效，刷新会重建交易列表与购物车，不由模组扣除功绩。
-- 在功法悬浮详情的“已习得/未习得”正下方用独立一行显示功法书拥有状态；背包、个人仓库或当前门派藏书中存在对应功法书时显示绿色“已拥有”，否则显示红色“未拥有”。
-- Electron“经验与天赋”页面可开关莫高窟掌门代弟子遗忘功能；启用后，玩家担任掌门时选择“遗忘武学”或“遗忘天赋”会先选择本门弟子（也可选择自己），随后完整复用原版零重武学、永久/后置天赋、银两和闭关天数条件。关闭功能或玩家不是掌门时不会出现弟子选择，保持原版只能为自己遗忘。
-- 黄鹤楼完成一次原版“物色人选”后，候选窗口会显示“刷新候选人”按钮；按钮沿用本次物色的类型、人数和等级重新生成候选，并清理被丢弃的临时候选，不重复消耗物色所需时间。候选窗口就绪时也可按默认快捷键 `R` 刷新。
-- 门派、看板和官府委托各有独立开关；开启后复用原版委托刷新按钮和原版清空重建流程，但不会耗尽当月刷新次数。对应委托窗口中也可按默认快捷键 `R` 刷新；未知委托与 NPC 委托保持原版行为。
-- Electron 启动器的“交易，制造类”页面提供倒宝估价、自动加购、材料扫货、店铺买断、拍卖刷新、拍卖刷新快捷键、官府仓库刷新及快捷键、拍卖会固定红色等级和鉴宝辅助的独立开关、筛选参数及使用提示；鉴宝辅助仍只通过对应的游戏内按钮触发。
-
-## 启动日志与白屏防护
-
-- BepInEx 控制台默认禁用。这样可避免 Windows 控制台进入“选择模式”后阻塞游戏进程并造成白屏。
-- 禁用的是弹出的控制台窗口，不是日志记录；运行日志仍写入 `BepInEx/LogOutput.log`。
-- Electron 启动器会在启动游戏前再次确保 `BepInEx/config/BepInEx.cfg` 中的 `[Logging.Console] Enabled` 为 `false`。
-
-## Staged DLL 更新流程
-
-开发构建的插件 DLL 必须先进入 `_codex_staged_updates/BepInEx/plugins`，不要直接覆盖游戏目录中的 live DLL。
-
-- 只有同时存在匹配的 `<插件名>.dll.pending` 标记时，暂存 DLL 才会被视为待提升版本。
-- 通过 `mod-prototype/LongYinModControl/LongYinModControl.ps1` 启动游戏；脚本会在启动前校验暂存文件、备份现有 live DLL，再把待更新 DLL 提升到 `BepInEx/plugins`。
-- 如果检测到游戏正在运行，脚本会停止提升。禁止在游戏运行中热替换或编辑 live 插件 DLL。
-
-## 重新安装流程
-
-1. 先把这个仓库或它的 ZIP 备份到游戏目录外。
-2. 确认备份安全后，再删除已修改过的游戏目录。
-3. 重新安装一份干净的游戏。
-4. 从发布包或已安装的游戏目录中运行 `Uninstall.cmd`，或使用应用内卸载。
-5. 下载最新 Release ZIP，再运行一次 `LongYinProMax.exe`。
-6. 后续配置与启动都通过 Electron 应用完成。
-
-## 备注
-
-- 这个便携包目标游戏版本为 `V1.1.0f5`。
-- 安装器还会写入 `steam_appid.txt`，游戏 ID 为 `3202030`，这样在新电脑上直接启动也能正常识别 Steam。
-- `mod-prototype/` 里的部分源码脚本是针对本地真实安装环境写的；如果你在另一台机器上重新编译源码，可能需要调整本地路径。
+本仓库不包含游戏本体或 Steam 管理的游戏文件。

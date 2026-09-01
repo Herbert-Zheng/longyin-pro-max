@@ -41,12 +41,17 @@
   - the expected ZIP or `update-manifest.json` is missing
   - the manifest asset name or SHA-256 differs from the ZIP
   - a maintained plugin or interop DLL does not match the verified build provenance
-- GitHub Actions is the only writer for GitHub Releases and Release assets. Local scripts must not create, patch, delete, replace, or upload Release assets.
+- GitHub Actions is the only writer for Release creation and Release assets. Local scripts must not create, delete, replace, or upload Release assets.
 - Never replace assets on a published version. Fixes require a higher version and a new tag.
 - Use `scripts/build-and-verify-release.ps1` for the shared local/CI build gate.
 - Use `scripts/prepare-release.ps1` only from a clean, synchronized `main` to prepare or push a release tag.
 - Before preparing a release, inspect `git status`, recent `git log`, `git diff --stat`, and the diff from the previous stable tag when one exists.
 - GitHub Release body is the canonical OTA update history shown by the Electron app.
+- Keep `README.md` concise and written for ordinary Release users. Installation, download, update, uninstall, and common troubleshooting come first; move exhaustive feature and contributor detail to linked documents.
+- `CHANGELOG.md` is the only repository authoring source for Release notes. Maintain one exact `## vX.Y.Z` section per published version and an optional `## Unreleased` section for pending user-visible changes.
+- A GitHub Release body contains only the user-visible changes for that version, extracted from the matching `CHANGELOG.md` section. Do not append download instructions, CI evidence, internal implementation notes, or the full project history.
+- Do not create root-level `release-notes-v*.md` files. Historical release-note files have been consolidated into `CHANGELOG.md`.
+- A published tag and its binary assets are immutable. A body-only correction may edit an existing GitHub Release description only when the user explicitly requests it, the corrected body matches that version's `CHANGELOG.md` section, and it only fixes wording or removes unrelated text without claiming new code. Code or asset changes always require a higher version and a new tag.
 
 ## Staged DLL Workflow
 

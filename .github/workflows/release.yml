@@ -29,6 +29,14 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: ./scripts/assert-release-source.ps1 -TagName $env:RELEASE_TAG
 
+      - name: Verify release notes policy
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          ./scripts/test-release-notes-policy.ps1
+          ./scripts/get-release-notes.ps1 -TagName $env:RELEASE_TAG | Out-Null
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

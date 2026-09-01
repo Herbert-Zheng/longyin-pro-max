@@ -43,6 +43,7 @@ import { createDefaultVisibleSettings } from './shared/visible-settings';
 
 const execFileAsync = promisify(execFile);
 const LAUNCH_GRACE_MS = 30_000;
+const IS_SMOKE_TEST = process.argv.includes('--smoke-test');
 
 const IS_PACKAGED = app.isPackaged;
 const APP_ROOT = IS_PACKAGED ? path.dirname(process.execPath) : path.resolve(__dirname, '..', '..');
@@ -932,6 +933,7 @@ async function createMainWindow(): Promise<void> {
     height: 940,
     minWidth: 1120,
     minHeight: 760,
+    show: !IS_SMOKE_TEST,
     autoHideMenuBar: true,
     backgroundColor: '#f3efe6',
     title: '龙胤立志传 Pro Max',
@@ -946,6 +948,9 @@ async function createMainWindow(): Promise<void> {
   const rendererReadyTimer = setTimeout(() => {
     if (!rendererReady) {
       void writeStartupLog('渲染器准备超时：HTML 已加载，但未收到 renderer-ready 标记。');
+      if (IS_SMOKE_TEST) {
+        app.exit(1);
+      }
     }
   }, 12000);
   mainWindow.once('closed', () => {
@@ -956,11 +961,17 @@ async function createMainWindow(): Promise<void> {
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
     if (isMainFrame) {
       void writeStartupLog(`渲染页面加载失败：code=${errorCode}, description=${errorDescription}, url=${validatedUrl}`);
+      if (IS_SMOKE_TEST) {
+        app.exit(1);
+      }
     }
   });
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     void writeStartupLog(`渲染进程退出：reason=${details.reason}, exitCode=${details.exitCode}`);
+    if (IS_SMOKE_TEST) {
+      app.exit(1);
+    }
   });
 
   mainWindow.webContents.on('console-message', (details) => {
@@ -968,6 +979,39 @@ async function createMainWindow(): Promise<void> {
       rendererReady = true;
       clearTimeout(rendererReadyTimer);
       void writeStartupLog('渲染器准备完成。');
+      if (IS_SMOKE_TEST) {
+        void (async () => {
+          const smokeWindow = mainWindow;
+          if (!smokeWindow) {
+            throw new Error('Smoke test lost its main window before renderer verification.');
+          }
+
+          const rendererState = await smokeWindow.webContents.executeJavaScript(`(async () => {
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            return {
+              readyState: document.readyState,
+              rootChildCount: document.getElementById('root')?.childElementCount ?? 0,
+              bodyTextLength: document.body?.innerText?.trim().length ?? 0
+            };
+          })()`);
+          if (
+            rendererState?.readyState === 'loading' ||
+            Number(rendererState?.rootChildCount ?? 0) < 1 ||
+            Number(rendererState?.bodyTextLength ?? 0) < 1
+          ) {
+            throw new Error(`Smoke test renderer contract failed: ${JSON.stringify(rendererState)}`);
+          }
+
+          await writeStartupLog(`Smoke test passed: ${JSON.stringify({
+            appVersion: app.getVersion(),
+            renderer: rendererState
+          })}`);
+          app.exit(0);
+        })().catch(async (error: Error) => {
+          await writeStartupLog(`Smoke test failed: ${error.stack ?? error.message}`);
+          app.exit(1);
+        });
+      }
       return;
     }
 
@@ -1000,33 +1044,47 @@ async function createMainWindow(): Promise<void> {
     throw error;
   }
 
-  if (!IS_PACKAGED) {
+  if (!IS_PACKAGED && !IS_SMOKE_TEST) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
 }
 
 process.on('uncaughtException', (error) => {
   void writeStartupLog(`未捕获异常：${error.stack ?? error.message}`);
+  if (IS_SMOKE_TEST) {
+    app.exit(1);
+    return;
+  }
   dialog.showErrorBox('启动失败', error.message);
 });
 
 process.on('unhandledRejection', (reason) => {
   const message = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
   void writeStartupLog(`未处理拒绝：${message}`);
+  if (IS_SMOKE_TEST) {
+    app.exit(1);
+  }
 });
 
 app.whenReady().then(async () => {
   await writeStartupLog('应用启动。');
   await ensureAppDirectories();
   registerIpc();
-  cachedGameRoot = await loadGameRoot();
+  cachedGameRoot = IS_SMOKE_TEST ? undefined : await loadGameRoot();
   await writeStartupLog(`游戏目录：${cachedGameRoot ?? '未找到'}`);
   await createMainWindow();
+  if (IS_SMOKE_TEST) {
+    return;
+  }
   await consumeUpdateCompletion();
   void checkUpdates();
   void getReleaseHistory();
 }).catch(async (error: Error) => {
   await writeStartupLog(`启动链失败：${error.stack ?? error.message}`);
+  if (IS_SMOKE_TEST) {
+    app.exit(1);
+    return;
+  }
   dialog.showErrorBox('启动失败', error.message);
 });
 

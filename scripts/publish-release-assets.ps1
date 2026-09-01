@@ -73,14 +73,21 @@ function Get-Release {
 
 $release = Get-Release
 if ($null -eq $release) {
-  Invoke-Gh @(
+  $releaseNotesPath = Join-Path $RepoRoot "release-notes-$TagName.md"
+  $createArguments = @(
     'release', 'create', $TagName,
     '--repo', $Repository,
     '--verify-tag',
     '--draft',
-    '--generate-notes',
     '--title', "龙胤立志传 Pro Max $TagName"
-  ) | Out-Null
+  )
+  if (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf) {
+    $createArguments += @('--notes-file', $releaseNotesPath)
+  }
+  else {
+    $createArguments += '--generate-notes'
+  }
+  Invoke-Gh $createArguments | Out-Null
   $release = Get-Release
   if ($null -eq $release) {
     throw "创建 draft Release 后无法重新读取：$TagName"

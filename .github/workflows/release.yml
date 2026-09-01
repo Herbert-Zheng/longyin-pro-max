@@ -103,3 +103,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: ./scripts/publish-release-assets.ps1 -TagName $env:RELEASE_TAG -AssetsRoot ./release-assets
+
+      - name: Download and smoke-test published Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: ./scripts/verify-published-release.ps1 -TagName $env:RELEASE_TAG

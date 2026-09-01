@@ -32,6 +32,7 @@
 
 ## CI and Release Workflow
 
+- Repository automation requires PowerShell 7 and must invoke scripts with `pwsh`; do not run UTF-8 automation through Windows PowerShell 5.1.
 - Pull requests targeting `main` and pushes to `main` run `.github/workflows/ci.yml`.
 - Only a pushed stable tag matching `vX.Y.Z` triggers `.github/workflows/release.yml`.
 - The release workflow must reject a tag when:

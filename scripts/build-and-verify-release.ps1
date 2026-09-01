@@ -50,7 +50,7 @@ if (-not [string]::IsNullOrWhiteSpace($LoaderRoot)) {
   $arguments += @('-LoaderRoot', $LoaderRoot)
 }
 
-& powershell @arguments
+& pwsh @arguments
 if ($LASTEXITCODE -ne 0) {
   throw "发布构建与校验失败，退出代码：$LASTEXITCODE"
 }

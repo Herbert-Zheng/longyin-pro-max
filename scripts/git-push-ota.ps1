@@ -187,7 +187,7 @@ function Sync-PluginPayload {
   }
 
   Write-Step "构建 $PluginName 插件"
-  $buildOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $buildScript `
+  $buildOutput = & pwsh -NoProfile -ExecutionPolicy Bypass -File $buildScript `
     -Source $pluginSource `
     -StagedPluginOutput $pluginStaged `
     -LoaderRoot $ResolvedLoaderRoot 2>&1
@@ -393,7 +393,7 @@ if ($payloadSyncs.Count -ne $pluginBuildSpecs.Count) {
 $compatibilityCheck = Join-Path $RepoRoot 'scripts\check-runtime-compatibility.ps1'
 Assert-FileExists -Path $compatibilityCheck -Label '运行时兼容性检查脚本'
 Write-Step '执行维护插件静态兼容性检查'
-& powershell -NoProfile -ExecutionPolicy Bypass -File $compatibilityCheck `
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $compatibilityCheck `
   -RepoRoot $RepoRoot `
   -InteropAssembly (Join-Path $RepoRoot 'dist\BepInEx\interop\Assembly-CSharp.dll') `
   -SkipRuntimeLog
@@ -404,7 +404,7 @@ if ($LASTEXITCODE -ne 0) {
 $auctionEventCheck = Join-Path $RepoRoot 'scripts\check-auction-event-semantics.ps1'
 Assert-FileExists -Path $auctionEventCheck -Label '拍卖会等级语义检查脚本'
 Write-Step '执行拍卖会等级语义检查'
-& powershell -NoProfile -ExecutionPolicy Bypass -File $auctionEventCheck
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $auctionEventCheck
 if ($LASTEXITCODE -ne 0) {
   throw '拍卖会等级语义检查失败。'
 }
@@ -412,7 +412,7 @@ if ($LASTEXITCODE -ne 0) {
 $auctionPreviewCheck = Join-Path $RepoRoot 'scripts\check-auction-preview-semantics.ps1'
 Assert-FileExists -Path $auctionPreviewCheck -Label '拍卖预览刷新语义检查脚本'
 Write-Step '执行拍卖预览刷新语义检查'
-& powershell -NoProfile -ExecutionPolicy Bypass -File $auctionPreviewCheck
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $auctionPreviewCheck
 if ($LASTEXITCODE -ne 0) {
   throw '拍卖预览刷新语义检查失败。'
 }
@@ -420,7 +420,7 @@ if ($LASTEXITCODE -ne 0) {
 $yellowCraneRefreshCheck = Join-Path $RepoRoot 'scripts\check-yellow-crane-refresh-semantics.ps1'
 Assert-FileExists -Path $yellowCraneRefreshCheck -Label '黄鹤楼候选人刷新语义检查脚本'
 Write-Step '执行黄鹤楼候选人刷新语义检查'
-& powershell -NoProfile -ExecutionPolicy Bypass -File $yellowCraneRefreshCheck
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $yellowCraneRefreshCheck
 if ($LASTEXITCODE -ne 0) {
   throw '黄鹤楼候选人刷新语义检查失败。'
 }
@@ -428,7 +428,7 @@ if ($LASTEXITCODE -ne 0) {
 $bountyRefreshCheck = Join-Path $RepoRoot 'scripts\check-bounty-refresh-semantics.ps1'
 Assert-FileExists -Path $bountyRefreshCheck -Label '委托刷新语义检查脚本'
 Write-Step '执行委托刷新语义检查'
-& powershell -NoProfile -ExecutionPolicy Bypass -File $bountyRefreshCheck
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $bountyRefreshCheck
 if ($LASTEXITCODE -ne 0) {
   throw '委托刷新语义检查失败。'
 }

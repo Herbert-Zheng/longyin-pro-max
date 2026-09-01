@@ -95,7 +95,9 @@ try {
     New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $liveRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $interopRoot -Force | Out-Null
+    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $hostExecutable = @(
+        $windowsPowerShell
         (Join-Path $PSHOME "powershell.exe")
         (Join-Path $PSHOME "pwsh.exe")
         (Get-Process -Id $PID).Path
@@ -321,7 +323,7 @@ try {
     $migrationInterop = Join-Path $migrationInteropRoot "Assembly-CSharp.dll"
     $legacyDll = Join-Path $migrationLiveRoot "LongYinStaminaLock.dll"
     $renamedLiveDll = Join-Path $migrationLiveRoot "LongYinProMax.dll"
-    Copy-Item -LiteralPath (Join-Path $PSHOME "powershell.exe") -Destination $migrationGameExe -Force
+    Copy-Item -LiteralPath $hostExecutable -Destination $migrationGameExe -Force
     [System.IO.File]::WriteAllText($migrationInterop, "migration-interop", $utf8NoBom)
     [System.IO.File]::WriteAllText($legacyDll, "legacy-main-plugin", $utf8NoBom)
     $legacyHash = Get-Sha256 $legacyDll
@@ -394,7 +396,7 @@ try {
     $rollbackInterop = Join-Path $rollbackInteropRoot "Assembly-CSharp.dll"
     $rollbackLegacyDll = Join-Path $rollbackLiveRoot "LongYinStaminaLock.dll"
     $rollbackRenamedDll = Join-Path $rollbackLiveRoot "LongYinProMax.dll"
-    Copy-Item -LiteralPath (Join-Path $PSHOME "powershell.exe") -Destination $rollbackGameExe -Force
+    Copy-Item -LiteralPath $hostExecutable -Destination $rollbackGameExe -Force
     [System.IO.File]::WriteAllText($rollbackInterop, "rollback-interop", $utf8NoBom)
     [System.IO.File]::WriteAllText($rollbackLegacyDll, "rollback-legacy-plugin", $utf8NoBom)
     $rollbackLegacyHash = Get-Sha256 $rollbackLegacyDll

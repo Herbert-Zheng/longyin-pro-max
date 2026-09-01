@@ -581,7 +581,7 @@ function getIniSectionBody(text: string | undefined, section: string): string | 
 
 function buildMainTemplate(settings = DEFAULT_VISIBLE_SETTINGS, hidden = DEFAULT_MAIN_HIDDEN): string {
   return normalizeNewlines(`
-## Settings file was created by LongYinPlus Electron
+## Settings file was created by LongYinProMax Electron
 ## Plugin GUID: codex.longyin.staminalock
 
 [Exploration]
@@ -710,7 +710,7 @@ CycleOutsideBattleSpeedHotkey = ${settings.outsideBattleSpeedHotkey}
 
 function buildSkillTemplate(settings = DEFAULT_VISIBLE_SETTINGS): string {
   return normalizeNewlines(`
-## Settings file was created by LongYinPlus Electron
+## Settings file was created by LongYinProMax Electron
 ## Plugin GUID: codex.longyin.skilltalentgrant
 
 [SkillTalent]
@@ -723,7 +723,7 @@ PlayerOnly = ${boolText(settings.skillTalentPlayerOnly)}
 
 function buildBattleTemplate(hidden = DEFAULT_BATTLE_HIDDEN, settings = DEFAULT_VISIBLE_SETTINGS): string {
   return normalizeNewlines(`
-## Settings file was created by LongYinPlus Electron
+## Settings file was created by LongYinProMax Electron
 ## Plugin GUID: codex.longyin.battleturbo
 
 [Audio]
@@ -750,7 +750,7 @@ DisableSkillSpecialEffects = ${boolText(hidden.disableSkillSpecialEffects)}
 
 function buildHorseTemplate(settings = DEFAULT_VISIBLE_SETTINGS): string {
   return normalizeNewlines(`
-## Settings file was created by LongYinPlus Electron
+## Settings file was created by LongYinProMax Electron
 ## Plugin GUID: codex.longyin.horsestamina
 
 [WorldMapHorse]
@@ -760,7 +760,7 @@ StaminaMultiplier = ${formatFloat(settings.horseStaminaMultiplier, 2)}
 
 function buildQuestSnapshotTemplate(): string {
   return normalizeNewlines(`
-## Settings file was created by LongYinPlus Electron
+## Settings file was created by LongYinProMax Electron
 ## Plugin GUID: codex.longyin.questsnapshot
 
 [General]

@@ -7,7 +7,7 @@ import AdmZip from 'adm-zip';
 import { RELEASE_MANIFEST_NAME, ReleaseHistoryItem, UpdateCheckResult, UpdateManifest } from './types';
 
 const GITHUB_OWNER = 'Herbert-Zheng';
-const GITHUB_REPO = 'longyin_plus';
+const GITHUB_REPO = 'longyin-pro-max';
 const DEFAULT_PRESERVE_PATHS = ['user-data/**', 'BepInEx/config/**'];
 const JSON_DOWNLOAD_LIMIT_BYTES = 2 * 1024 * 1024;
 const UPDATE_DOWNLOAD_LIMIT_BYTES = 512 * 1024 * 1024;
@@ -128,7 +128,7 @@ export async function downloadBuffer(
       headers: {
         Accept: accept,
         'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'LongYinPlus-Electron'
+        'User-Agent': 'LongYinProMax-Electron'
       },
       signal: abortController.signal
     });

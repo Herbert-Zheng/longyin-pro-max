@@ -392,7 +392,7 @@ This repository is the portable source-of-truth backup for the modded `LongYinLi
 
 Current working assumptions to preserve:
 
-- GitHub repo: `Zhihong0321/longyin_plus`
+- GitHub repo: `Herbert-Zheng/longyin-pro-max`
 - `dist/` is the install overlay that gets copied into a clean game root
 - `run_this_first.ps1` and `run_this_first.cmd` are the supported install entry points
 - the repo should keep mod source, packaging scripts, and install notes

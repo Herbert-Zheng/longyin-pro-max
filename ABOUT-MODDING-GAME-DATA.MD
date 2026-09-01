@@ -172,9 +172,9 @@ The mod also already constructs custom plot objects:
 
 And the existing notes confirm direct construction is viable:
 
-- [MODDING-NOTES-1.071F.md:304](G:\Steam\steamapps\common\longyin_plus_repo\MODDING-NOTES-1.071F.md#L304)
-- [MODDING-NOTES-1.071F.md:305](G:\Steam\steamapps\common\longyin_plus_repo\MODDING-NOTES-1.071F.md#L305)
-- [MODDING-NOTES-1.071F.md:311](G:\Steam\steamapps\common\longyin_plus_repo\MODDING-NOTES-1.071F.md#L311)
+- [MODDING-NOTES-1.071F.md:304](MODDING-NOTES-1.071F.md#L304)
+- [MODDING-NOTES-1.071F.md:305](MODDING-NOTES-1.071F.md#L305)
+- [MODDING-NOTES-1.071F.md:311](MODDING-NOTES-1.071F.md#L311)
 
 So plot editing is not just theoretical. We already know the mod can interact with this system.
 

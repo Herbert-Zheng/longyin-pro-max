@@ -23,6 +23,8 @@
 
 ## Source and Artifact Boundary
 
+- The canonical GitHub repository slug is `longyin-pro-max`; repository URLs and OTA API endpoints must use that slug.
+- Preserve legacy runtime compatibility identifiers such as `com.zhihong.longyinplus`, `.longyin-plus`, `longyin-plus-update`, and `LongYinPlus-InstallBundle-*` unless a dedicated migration supports existing installations and rollback data.
 - `dist/` is intentionally tracked as the current portable payload baseline and build input. Do not remove it as part of unrelated release work.
 - Rebuild first-party plugin DLLs from source and verify that the staged DLL, tracked payload DLL, and DLL inside the final ZIP have the same SHA-256.
 - Do not commit generated Electron outputs from `electron-app/release/`, `electron-app/updater-dist/`, or `electron-app/dist/`.

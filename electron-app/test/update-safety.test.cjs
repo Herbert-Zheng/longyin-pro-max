@@ -111,6 +111,7 @@ test('download timeout aborts the request with an actionable error', async (t) =
 test('release check rejects a manifest whose ZIP has no direct release asset URL', async (t) => {
   const originalFetch = global.fetch;
   t.after(() => { global.fetch = originalFetch; });
+  const requestedUrls = [];
   const responses = [
     {
       tag_name: 'v9.9.9',
@@ -128,12 +129,16 @@ test('release check rejects a manifest whose ZIP has no direct release asset URL
       sha256: '0'.repeat(64)
     }
   ];
-  global.fetch = async () => new Response(JSON.stringify(responses.shift()), {
-    status: 200,
-    headers: { 'content-type': 'application/json' }
-  });
+  global.fetch = async (url) => {
+    requestedUrls.push(String(url));
+    return new Response(JSON.stringify(responses.shift()), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  };
 
   await assert.rejects(checkGitHubRelease('0.1.0'), /未提供有效下载资产/);
+  assert.equal(requestedUrls[0], 'https://api.github.com/repos/Herbert-Zheng/longyin-pro-max/releases/latest');
 });
 
 test('staging requires the direct URL returned by the Release asset', async () => {

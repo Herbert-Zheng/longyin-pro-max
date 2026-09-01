@@ -162,7 +162,7 @@ Release body 使用 GitHub 自动生成的 notes 作为初稿，并继续作为 
 Electron 应用读取：
 
 ```text
-https://api.github.com/repos/Herbert-Zheng/longyin_plus/releases/latest
+https://api.github.com/repos/Herbert-Zheng/longyin-pro-max/releases/latest
 ```
 
 客户端随后：

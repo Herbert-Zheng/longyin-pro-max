@@ -87,14 +87,21 @@ $requiredInteropMembers = [ordered]@{
         'FreshAuctionItem',
         'GenerateAuctionItem',
         'FinishRecruitHero',
+        'ExternalStorageInteract',
+        'ShowExternalStorage',
+        'ChooseItemIntoExternalStorage',
+        'ItemIntoExternalStorageSure',
+        'ChooseDeleteItemExternalStorage',
+        'DeleteItemExternalStorageSure',
         'Update',
         'plotPanel',
         'plotItemGrid',
         'tempPlotShop',
         'nowEvent'
     )
-    GameController = @('RefreshGovernStorage', 'worldData')
-    WorldData = @('governStorage', 'RemoveTempHero', 'monthFreshBountyTime')
+    GameController = @('RefreshGovernStorage', 'CheckGameResultTrigger', 'worldData')
+    GameDataController = @('GetExternalStorageMaxValue', 'ExternalStorage', 'ChangeAchStats', 'CheckAch', 'playerPrefData')
+    WorldData = @('governStorage', 'RemoveTempHero', 'monthFreshBountyTime', 'HaveGameResultTriggered')
     RecruitUIController = @('ShowRecruitUI', 'HideRecruitUI', 'recruitUIPanel', 'sureButton', 'cancelButton')
     RecruitUIType = @('Normal', 'Hire')
     HeroIconController = @('heroData')
@@ -177,6 +184,7 @@ if (-not $SkipRuntimeLog) {
             '[Compatibility] Summary:',
             '[Compatibility] Auction preview refresh: ENABLED',
             '[Compatibility] Government storage refresh: ENABLED',
+            '[Compatibility] Treasure pavilion capacity multiplier: ENABLED',
             '[Compatibility] Yellow Crane Tower candidate refresh: ENABLED',
             '[Compatibility] Commission refresh: ENABLED',
             '[Compatibility] Treasure identify assist: ENABLED',

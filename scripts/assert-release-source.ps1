@@ -29,13 +29,13 @@ if ($TagName -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+)$') {
 $tagVersion = $Matches.version
 
 $packageJson = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot 'electron-app\package.json') | ConvertFrom-Json
-$packageLock = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot 'electron-app\package-lock.json') | ConvertFrom-Json
-$lockRoot = $packageLock.packages.PSObject.Properties[''].Value
+$packageLock = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot 'electron-app\package-lock.json') | ConvertFrom-Json -AsHashtable
+$lockRoot = $packageLock['packages']['']
 
 foreach ($candidate in @(
   [pscustomobject]@{ Label = 'package.json'; Version = [string]$packageJson.version },
-  [pscustomobject]@{ Label = 'package-lock.json'; Version = [string]$packageLock.version },
-  [pscustomobject]@{ Label = 'package-lock.json packages root'; Version = [string]$lockRoot.version }
+  [pscustomobject]@{ Label = 'package-lock.json'; Version = [string]$packageLock['version'] },
+  [pscustomobject]@{ Label = 'package-lock.json packages root'; Version = [string]$lockRoot['version'] }
 )) {
   if ($candidate.Version -ne $tagVersion) {
     throw "$($candidate.Label) 版本与 tag 不一致：$($candidate.Version) vs $tagVersion"

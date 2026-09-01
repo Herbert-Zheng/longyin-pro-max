@@ -1,6 +1,6 @@
 # 龙吟立志传 MOD 便携版安装与运行说明
 
-适用游戏版本：`1.071F`
+适用游戏版本：`V1.1.0f5`
 
 本压缩包为便携版模组载荷。
 唯一受支持的启动与配置方式是单独打包的 Electron 启动器 `LongYinProMax.exe`。
@@ -42,6 +42,8 @@
 - `BepInEx` 不是“首次运行自动联网安装”，而是已经随本压缩包一起提供
 - 新版 Electron 启动器会通过 GitHub Releases 拉取更新，但它不会覆盖你的游戏目录内容
 - 安装器会自动清除下载标记，尽量减少 Windows Defender 的云安全扫描提示
+- BepInEx 控制台默认禁用，以避免 Windows 控制台进入“选择模式”后阻塞游戏并造成白屏
+- 控制台关闭不影响磁盘日志；排查问题时仍可查看 `BepInEx\LogOutput.log`
 
 ## 四、常见问题
 
@@ -61,6 +63,10 @@
 - 是否存在 `winhttp.dll`
 - 是否存在 `doorstop_config.ini`
 - `BepInEx\plugins` 里是否有本 MOD 的 `.dll` 文件
+
+### 4. 为什么没有弹出 BepInEx 控制台
+
+这是正常设置。Electron 启动器会在启动游戏前保持 BepInEx 控制台关闭，防止控制台“选择模式”造成游戏白屏。运行日志仍会写入 `BepInEx\LogOutput.log`。
 
 ## 五、卸载方法
 

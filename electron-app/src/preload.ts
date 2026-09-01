@@ -3,9 +3,11 @@ import type {
   CustomTalentPack,
   CustomTalentSaveResult,
   GameSnapshot,
+  LauncherPreferences,
   LogFileKind,
   OperationResult,
   ReleaseHistoryItem,
+  SaveAndLaunchRequest,
   UpdateCheckResult,
   UpdateProgressEvent,
   VisibleSettings
@@ -21,7 +23,10 @@ export interface LongYinApi {
   install: () => Promise<OperationResult>;
   uninstall: () => Promise<OperationResult>;
   launch: () => Promise<OperationResult>;
-  saveAndLaunch: (settings: VisibleSettings) => Promise<OperationResult>;
+  saveAndLaunch: (request: SaveAndLaunchRequest) => Promise<OperationResult>;
+  setLauncherPreferences: (preferences: LauncherPreferences) => Promise<GameSnapshot>;
+  startOverlay: () => Promise<OperationResult>;
+  stopOverlay: () => Promise<OperationResult>;
   checkUpdates: () => Promise<UpdateCheckResult>;
   getReleaseHistory: () => Promise<ReleaseHistoryItem[]>;
   applyUpdate: () => Promise<OperationResult>;
@@ -41,7 +46,10 @@ const api: LongYinApi = {
   install: () => ipcRenderer.invoke('app:install'),
   uninstall: () => ipcRenderer.invoke('app:uninstall'),
   launch: () => ipcRenderer.invoke('app:launch'),
-  saveAndLaunch: (settings: VisibleSettings) => ipcRenderer.invoke('app:save-and-launch', settings),
+  saveAndLaunch: (request: SaveAndLaunchRequest) => ipcRenderer.invoke('app:save-and-launch', request),
+  setLauncherPreferences: (preferences: LauncherPreferences) => ipcRenderer.invoke('app:set-launcher-preferences', preferences),
+  startOverlay: () => ipcRenderer.invoke('app:start-overlay'),
+  stopOverlay: () => ipcRenderer.invoke('app:stop-overlay'),
   checkUpdates: () => ipcRenderer.invoke('app:check-updates'),
   getReleaseHistory: () => ipcRenderer.invoke('app:get-release-history'),
   applyUpdate: () => ipcRenderer.invoke('app:apply-update'),

@@ -15,6 +15,11 @@ import {
   STEAM_APP_ID,
   VisibleSettings
 } from './types';
+import {
+  createDefaultVisibleSettings,
+  sanitizeVisibleSettings,
+  VISIBLE_SETTINGS_DEFAULTS as DEFAULT_VISIBLE_SETTINGS
+} from './visible-settings';
 
 const MAIN_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.staminalock.cfg');
 const HORSE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.horsestamina.cfg');
@@ -24,6 +29,7 @@ const LEGACY_SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.s
 const SKILL_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.skilltalentgrant.cfg');
 const BATTLE_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.battleturbo.cfg');
 const CUSTOM_TALENT_CONFIG_NAME = path.join('BepInEx', 'config', 'codex.longyin.custom-talents.json');
+const BEPINEX_CONFIG_NAME = path.join('BepInEx', 'config', 'BepInEx.cfg');
 const DOORSTOP_NAME = 'doorstop_config.ini';
 const STEAM_APP_ID_NAME = 'steam_appid.txt';
 const REQUIRED_PLUGIN_NAMES = [
@@ -32,13 +38,12 @@ const REQUIRED_PLUGIN_NAMES = [
   'LongYinQuestSnapshot.dll',
   'LongYinSkillTalentGrant.dll',
   'LongYinSkipIntro.dll',
-  'LongYinStaminaLock.dll'
+  'LongYinProMax.dll'
 ];
 
 interface MainConfigHidden {
   revealExtraFogOnMove: boolean;
   moveRevealRadius: number;
-  revealAllOnStepTile: boolean;
   treasureChestChoiceEnabled: boolean;
   treasureChestChoiceOptions: number;
   treasureChestTotalItems: number;
@@ -57,57 +62,9 @@ interface BattleConfigHidden {
   disableBattleVoices: boolean;
 }
 
-const DEFAULT_VISIBLE_SETTINGS: VisibleSettings = {
-  lockStamina: true,
-  expMultiplier: 1,
-  battleSkillExpMultiplier: 1,
-  creationPointMultiplier: 1,
-  horseBaseSpeedMultiplier: 1,
-  horseTurboSpeedMultiplier: 1,
-  horseTurboDurationMultiplier: 1,
-  horseTurboCooldownMultiplier: 1,
-  lockHorseTurboStamina: true,
-  horseStaminaMultiplier: 1,
-  carryWeightCap: 100000,
-  ignoreCarryWeight: false,
-  merchantCarryCash: 100000,
-  treasureAutoTradeEnabled: true,
-  luckyHitChancePercent: 0,
-  extraRelationshipGainChancePercent: 0,
-  teamAutoFavorEnabled: true,
-  teamAutoFavorPerDay: 5,
-  maxLoverCount: 8,
-  debatePlayerDamageTakenMultiplier: 1,
-  debateEnemyDamageTakenMultiplier: 1,
-  craftRandomPickUpgrade: true,
-  craftTier1ExtraItems: 0,
-  craftTier2ExtraItems: 1,
-  craftTier3ExtraItems: 2,
-  craftTier4ExtraItems: 3,
-  craftTier5ExtraItems: 4,
-  drinkPlayerPowerCostMultiplier: 1,
-  drinkEnemyPowerCostMultiplier: 1,
-  dialogMonthlyLimitMultiplier: 3,
-  dialogFastForwardAssistEnabled: false,
-  dailySkillInsightChancePercent: 0,
-  dailySkillInsightExpPercent: 5,
-  dailySkillInsightUseRarityScaling: true,
-  dailySkillInsightRealtimeIntervalSeconds: 0,
-  skillTalentEnabled: true,
-  skillTalentLevelThreshold: 10,
-  skillTalentTierPointMultiplier: 2,
-  skillTalentPlayerOnly: true,
-  freezeDate: false,
-  freezeHotkey: 'F1',
-  outsideBattleSpeedHotkey: 'F11',
-  battleTurboEnabled: true,
-  battleTurboHotkey: 'F8'
-};
-
 const DEFAULT_MAIN_HIDDEN: MainConfigHidden = {
   revealExtraFogOnMove: true,
   moveRevealRadius: 2,
-  revealAllOnStepTile: true,
   treasureChestChoiceEnabled: true,
   treasureChestChoiceOptions: 3,
   treasureChestTotalItems: 2
@@ -137,19 +94,6 @@ function boolText(value: boolean): string {
 
 function formatFloat(value: number, digits = 2): string {
   return Number.parseFloat(value.toFixed(digits)).toString();
-}
-
-function clamp(value: number, min: number, max: number): number {
-  if (Number.isNaN(value)) {
-    return min;
-  }
-
-  return Math.min(max, Math.max(min, value));
-}
-
-function normalizeHotkey(value: string | undefined, fallback: string): string {
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : fallback;
 }
 
 function escapeRegex(value: string): string {
@@ -257,18 +201,27 @@ export function getGamePaths(gameRoot: string) {
     skillConfigPath: path.join(gameRoot, SKILL_CONFIG_NAME),
     battleConfigPath: path.join(gameRoot, BATTLE_CONFIG_NAME),
     customTalentConfigPath: path.join(gameRoot, CUSTOM_TALENT_CONFIG_NAME),
+    bepinExLogPath: path.join(gameRoot, 'BepInEx', 'LogOutput.log'),
     legacyTraceConfigPath: path.join(gameRoot, LEGACY_TRACE_CONFIG_NAME),
     legacySkillConfigPath: path.join(gameRoot, LEGACY_SKILL_CONFIG_NAME)
   };
 }
 
-function createHealthCheck(key: string, label: string, ok: boolean, detail: string): HealthCheckResult {
-  return { key, label, ok, detail };
+function createHealthCheck(
+  key: string,
+  label: string,
+  ok: boolean,
+  detail: string,
+  blocking = true,
+  launchBlocking = false
+): HealthCheckResult {
+  return { key, label, ok, detail, blocking, launchBlocking };
 }
 
 function summarizeHealth(checks: HealthCheckResult[], driftedFiles: string[]): string {
-  const failed = checks.filter((check) => !check.ok);
-  if (failed.length === 0 && driftedFiles.length === 0) {
+  const failed = checks.filter((check) => !check.ok && check.blocking !== false);
+  const warnings = checks.filter((check) => !check.ok && check.blocking === false);
+  if (failed.length === 0 && warnings.length === 0 && driftedFiles.length === 0) {
     return `已通过 ${checks.length} 项安装检查。`;
   }
 
@@ -279,7 +232,71 @@ function summarizeHealth(checks: HealthCheckResult[], driftedFiles: string[]): s
   if (driftedFiles.length > 0) {
     parts.push(`${driftedFiles.length} 个载荷文件与当前 Electron 包不一致`);
   }
+  if (warnings.length > 0) {
+    parts.push(`${warnings.length} 项 BepInEx 运行日志警告`);
+  }
   return `检测到${parts.join('，')}。`;
+}
+
+async function listPayloadPluginDlls(payloadRoot: string): Promise<string[]> {
+  const pluginsRoot = path.join(payloadRoot, 'BepInEx', 'plugins');
+  const pluginsRootExists = await directoryExists(pluginsRoot);
+  if (!pluginsRootExists) {
+    return [];
+  }
+
+  const relativePaths: string[] = [];
+  async function visit(directoryPath: string): Promise<void> {
+    const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) {
+        await visit(entryPath);
+      }
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith('.dll')) {
+        relativePaths.push(path.relative(payloadRoot, entryPath));
+      }
+    }
+  }
+
+  await visit(pluginsRoot);
+  return relativePaths;
+}
+
+function findBepInExRuntimeIssues(text: string | undefined): {
+  hardFailures: string[];
+  compatibilityWarnings: string[];
+} {
+  if (!text) {
+    return { hardFailures: [], compatibilityWarnings: [] };
+  }
+
+  const hardFailures: string[] = [];
+  const compatibilityWarnings: string[] = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+
+    const missingMethod = /\bMissing(?:Method|Field)(?:Exception)?\b/i.test(line);
+    const harmonyTargetMissing =
+      /(?:undefined|missing|not found|null|no)\s+target\s*method/i.test(line) ||
+      /target\s*method.{0,80}(?:undefined|missing|not found|null)/i.test(line) ||
+      /harmony(?:lib|x)?\.harmonyexception/i.test(line) ||
+      /could not patch/i.test(line) ||
+      /\bTypeLoadException\b/i.test(line);
+    const compatibilityWarning =
+      /\[Compatibility\].*(?::\s*|;\s*| is )(?:SKIPPED|PARTIAL|DEGRADED)\b/i.test(line);
+    if ((missingMethod || harmonyTargetMissing) && hardFailures.length < 6) {
+      hardFailures.push(line.slice(0, 360));
+    }
+    else if (compatibilityWarning && compatibilityWarnings.length < 6) {
+      compatibilityWarnings.push(line.slice(0, 360));
+    }
+  }
+
+  return { hardFailures, compatibilityWarnings };
 }
 
 function readBool(text: string | undefined, key: string, fallback: boolean): boolean {
@@ -469,9 +486,30 @@ function ensureIniSection(text: string, section: string): string {
   return `${text}${suffix}[${section}]\r\n`;
 }
 
+function getIniLineEnding(text: string): string {
+  if (text.includes('\r\n')) {
+    return '\r\n';
+  }
+
+  if (text.includes('\n')) {
+    return '\n';
+  }
+
+  if (text.includes('\r')) {
+    return '\r';
+  }
+
+  return '\r\n';
+}
+
+function normalizeIniLineEndings(text: string): string {
+  const newline = getIniLineEnding(text);
+  return text.replace(/\r\n|\r|\n/g, newline);
+}
+
 function createIniSectionPattern(section: string): RegExp {
   return new RegExp(
-    `(^\\s*\\[${escapeRegex(section)}\\]\\s*$\\r?\\n?)([\\s\\S]*?)(?=^\\s*\\[[^\\]]+\\]\\s*$|(?![\\s\\S]))`,
+    `(^[^\\S\\r\\n]*\\[${escapeRegex(section)}\\][^\\S\\r\\n]*(?:\\r\\n|\\r|\\n)?)([\\s\\S]*?)(?=^[^\\S\\r\\n]*\\[[^\\]\\r\\n]+\\][^\\S\\r\\n]*$|(?![\\s\\S]))`,
     'mi'
   );
 }
@@ -479,6 +517,7 @@ function createIniSectionPattern(section: string): RegExp {
 function upsertIniSectionValue(text: string, section: string, key: string, value: string): string {
   const ensured = ensureIniSection(text, section);
   const sectionPattern = createIniSectionPattern(section);
+  const newline = getIniLineEnding(ensured);
 
   return ensured.replace(sectionPattern, (_match, header: string, body: string) => {
     const keyPattern = new RegExp(`^(\\s*${escapeRegex(key)}\\s*=\\s*).*$`, 'mi');
@@ -486,8 +525,14 @@ function upsertIniSectionValue(text: string, section: string, key: string, value
       return `${header}${body.replace(keyPattern, `$1${value}`)}`;
     }
 
-    const suffix = body.endsWith('\n') || body.endsWith('\r') || body.length === 0 ? '' : '\r\n';
-    return `${header}${body}${suffix}${key} = ${value}\r\n`;
+    const trailingWhitespace = body.match(/(?:[ \t]*(?:\r\n|\r|\n))+$/)?.[0] ?? '';
+    const content = trailingWhitespace.length > 0
+      ? body.slice(0, body.length - trailingWhitespace.length)
+      : body;
+    const trailingLineCount = trailingWhitespace.match(/\r\n|\r|\n/g)?.length ?? 0;
+    const separator = content.length === 0 || /(?:\r\n|\r|\n)$/.test(content) ? '' : newline;
+    const preservedTrailingLines = newline.repeat(Math.max(0, trailingLineCount - 1));
+    return `${header}${content}${separator}${key} = ${value}${newline}${preservedTrailingLines}`;
   });
 }
 
@@ -495,8 +540,25 @@ function removeIniSectionValue(text: string, section: string, key: string): stri
   const sectionPattern = createIniSectionPattern(section);
 
   return text.replace(sectionPattern, (_match, header: string, body: string) => {
-    const nextBody = body.replace(new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*.*(?:\\r?\\n)?`, 'gmi'), '');
+    const keyPattern = new RegExp(
+      `^[\\t ]*${escapeRegex(key)}\\s*=\\s*.*(?:\\r?\\n)?`,
+      'gmi'
+    );
+    const nextBody = body.replace(keyPattern, '');
     return `${header}${nextBody}`;
+  });
+}
+
+function removeIniSectionCommentBlock(text: string, section: string, firstCommentLine: string): string {
+  const sectionPattern = createIniSectionPattern(section);
+
+  return text.replace(sectionPattern, (_match, header: string, body: string) => {
+    const commentBlockPattern = new RegExp(
+      `^[\\t ]*##[\\t ]*${escapeRegex(firstCommentLine)}[\\t ]*(?:\\r?\\n|$)` +
+        `(?:[\\t ]*#[\\t ]*(?:Setting type:|Default value:|Acceptable values:)[^\\r\\n]*(?:\\r?\\n|$))*`,
+      'gmi'
+    );
+    return `${header}${body.replace(commentBlockPattern, '')}`;
   });
 }
 
@@ -519,14 +581,14 @@ function getIniSectionBody(text: string | undefined, section: string): string | 
 
 function buildMainTemplate(settings = DEFAULT_VISIBLE_SETTINGS, hidden = DEFAULT_MAIN_HIDDEN): string {
   return normalizeNewlines(`
-## Settings file was created by LongYinPlus Electron
+## Settings file was created by LongYinProMax Electron
 ## Plugin GUID: codex.longyin.staminalock
 
 [Exploration]
 LockStamina = ${boolText(settings.lockStamina)}
 RevealExtraFogOnMove = ${boolText(hidden.revealExtraFogOnMove)}
 MoveRevealRadius = ${hidden.moveRevealRadius}
-RevealAllOnStepTile = ${boolText(hidden.revealAllOnStepTile)}
+RevealAllOnStepTile = ${boolText(settings.revealAllOnStepTile)}
 TreasureChestChoiceEnabled = ${boolText(hidden.treasureChestChoiceEnabled)}
 TreasureChestChoiceOptions = ${hidden.treasureChestChoiceOptions}
 TreasureChestTotalItems = ${hidden.treasureChestTotalItems}
@@ -554,22 +616,69 @@ IgnoreCarryWeight = ${boolText(settings.ignoreCarryWeight)}
 
 [Commerce]
 MerchantCarryCash = ${settings.merchantCarryCash}
+TreasureTradeHelperEnabled = ${boolText(settings.treasureTradeHelperEnabled)}
 TreasureAutoTradeEnabled = ${boolText(settings.treasureAutoTradeEnabled)}
+MaterialAutoBuyEnabled = ${boolText(settings.materialAutoBuyEnabled)}
+MaterialPurchaseMinRareLv = ${settings.materialPurchaseMinRareLv}
+MaterialPurchaseMinItemLv = ${settings.materialPurchaseMinItemLv}
+ShopOwnershipEnabled = ${boolText(settings.shopOwnershipEnabled)}
+
+[SkillDisplay]
+BookOwnershipIndicatorEnabled = ${boolText(settings.skillBookOwnershipIndicatorEnabled)}
+
+[Mogao]
+DiscipleForgettingEnabled = ${boolText(settings.mogaoDiscipleForgettingEnabled)}
+
+[Auction]
+EventAlwaysRedEnabled = ${boolText(settings.auctionEventAlwaysRedEnabled)}
+PreviewRefreshEnabled = ${boolText(settings.auctionPreviewRefreshEnabled)}
+PreviewRefreshHotkey = ${settings.auctionPreviewRefreshHotkey}
+
+[GovernmentStorage]
+RefreshEnabled = ${boolText(settings.governmentStorageRefreshEnabled)}
+RefreshHotkey = ${settings.governmentStorageRefreshHotkey}
+
+[YellowCraneTower]
+CandidateRefreshEnabled = ${boolText(settings.yellowCraneCandidateRefreshEnabled)}
+CandidateRefreshHotkey = ${settings.yellowCraneCandidateRefreshHotkey}
+
+[BountyRefresh]
+ForceEnabled = ${boolText(settings.forceBountyRefreshEnabled)}
+CommonEnabled = ${boolText(settings.commonBountyRefreshEnabled)}
+GovernEnabled = ${boolText(settings.governBountyRefreshEnabled)}
+RefreshHotkey = ${settings.bountyRefreshHotkey}
+
+[TreasureIdentify]
+BestValueAssistEnabled = ${boolText(settings.treasureIdentifyBestValueAssistEnabled)}
+
+[Breakthrough]
+RerollEnabled = ${boolText(settings.breakthroughRerollEnabled)}
 
 [MoneyLuck]
 LuckyHitChancePercent = ${settings.luckyHitChancePercent}
 
 [Relationship]
+FeaturesEnabled = ${boolText(settings.relationshipFeaturesEnabled)}
 ExtraRelationshipGainChancePercent = ${settings.extraRelationshipGainChancePercent}
 TeamAutoFavorEnabled = ${boolText(settings.teamAutoFavorEnabled)}
 TeamAutoFavorPerDay = ${formatFloat(settings.teamAutoFavorPerDay)}
+TeamFameShareEnabled = ${boolText(settings.teamFameShareEnabled)}
+TeamFameSharePercent = ${formatFloat(settings.teamFameSharePercent)}
+BlockOverflowLoverHomeBattle = ${boolText(settings.blockOverflowLoverHomeBattle)}
 MaxLoverCount = ${settings.maxLoverCount}
+
+[Teaching]
+SameSectAreaShareEnabled = ${boolText(settings.sameSectAreaShareEnabled)}
+
+[Debug]
+CharacterDataTestHotkeyEnabled = ${boolText(settings.characterDataTestHotkeyEnabled)}
 
 [Debate]
 PlayerDamageTakenMultiplier = ${formatFloat(settings.debatePlayerDamageTakenMultiplier)}
 EnemyDamageTakenMultiplier = ${formatFloat(settings.debateEnemyDamageTakenMultiplier)}
 
 [Craft]
+RerollEnabled = ${boolText(settings.craftRerollEnabled)}
 RandomPickUpgrade = ${boolText(settings.craftRandomPickUpgrade)}
 Tier1ExtraItems = ${settings.craftTier1ExtraItems}
 Tier2ExtraItems = ${settings.craftTier2ExtraItems}
@@ -601,7 +710,7 @@ CycleOutsideBattleSpeedHotkey = ${settings.outsideBattleSpeedHotkey}
 
 function buildSkillTemplate(settings = DEFAULT_VISIBLE_SETTINGS): string {
   return normalizeNewlines(`
-## Settings file was created by LongYinPlus Electron
+## Settings file was created by LongYinProMax Electron
 ## Plugin GUID: codex.longyin.skilltalentgrant
 
 [SkillTalent]
@@ -614,7 +723,7 @@ PlayerOnly = ${boolText(settings.skillTalentPlayerOnly)}
 
 function buildBattleTemplate(hidden = DEFAULT_BATTLE_HIDDEN, settings = DEFAULT_VISIBLE_SETTINGS): string {
   return normalizeNewlines(`
-## Settings file was created by LongYinPlus Electron
+## Settings file was created by LongYinProMax Electron
 ## Plugin GUID: codex.longyin.battleturbo
 
 [Audio]
@@ -641,7 +750,7 @@ DisableSkillSpecialEffects = ${boolText(hidden.disableSkillSpecialEffects)}
 
 function buildHorseTemplate(settings = DEFAULT_VISIBLE_SETTINGS): string {
   return normalizeNewlines(`
-## Settings file was created by LongYinPlus Electron
+## Settings file was created by LongYinProMax Electron
 ## Plugin GUID: codex.longyin.horsestamina
 
 [WorldMapHorse]
@@ -651,7 +760,7 @@ StaminaMultiplier = ${formatFloat(settings.horseStaminaMultiplier, 2)}
 
 function buildQuestSnapshotTemplate(): string {
   return normalizeNewlines(`
-## Settings file was created by LongYinPlus Electron
+## Settings file was created by LongYinProMax Electron
 ## Plugin GUID: codex.longyin.questsnapshot
 
 [General]
@@ -751,67 +860,33 @@ export async function removeLegacyArtifacts(gameRoot: string): Promise<void> {
   await Promise.all(legacyPaths.map((filePath) => fs.rm(filePath, { recursive: true, force: true }).catch(() => undefined)));
 }
 
-function sanitizeVisibleSettings(input: VisibleSettings): VisibleSettings {
-  return {
-    lockStamina: input.lockStamina,
-    expMultiplier: Math.round(clamp(input.expMultiplier, 1, 999)),
-    battleSkillExpMultiplier: Math.round(clamp(input.battleSkillExpMultiplier, 1, 999)),
-    creationPointMultiplier: Math.round(clamp(input.creationPointMultiplier, 1, 999)),
-    horseBaseSpeedMultiplier: clamp(input.horseBaseSpeedMultiplier, 0.01, 999),
-    horseTurboSpeedMultiplier: clamp(input.horseTurboSpeedMultiplier, 0.01, 999),
-    horseTurboDurationMultiplier: clamp(input.horseTurboDurationMultiplier, 0.01, 999),
-    horseTurboCooldownMultiplier: clamp(input.horseTurboCooldownMultiplier, 0.01, 999),
-    lockHorseTurboStamina: input.lockHorseTurboStamina,
-    horseStaminaMultiplier: clamp(input.horseStaminaMultiplier, 0.01, 999),
-    carryWeightCap: clamp(input.carryWeightCap, 0, 999999999),
-    ignoreCarryWeight: input.ignoreCarryWeight,
-    merchantCarryCash: Math.round(clamp(input.merchantCarryCash, 0, 999999999)),
-    treasureAutoTradeEnabled: input.treasureAutoTradeEnabled,
-    luckyHitChancePercent: Math.round(clamp(input.luckyHitChancePercent, 0, 100)),
-    extraRelationshipGainChancePercent: Math.round(clamp(input.extraRelationshipGainChancePercent, 0, 100)),
-    teamAutoFavorEnabled: input.teamAutoFavorEnabled,
-    teamAutoFavorPerDay: clamp(input.teamAutoFavorPerDay, 0, 999),
-    maxLoverCount: Math.round(clamp(input.maxLoverCount, 1, 999)),
-    debatePlayerDamageTakenMultiplier: clamp(input.debatePlayerDamageTakenMultiplier, 0, 999),
-    debateEnemyDamageTakenMultiplier: clamp(input.debateEnemyDamageTakenMultiplier, 0, 999),
-    craftRandomPickUpgrade: input.craftRandomPickUpgrade,
-    craftTier1ExtraItems: Math.round(clamp(input.craftTier1ExtraItems, 0, 999)),
-    craftTier2ExtraItems: Math.round(clamp(input.craftTier2ExtraItems, 0, 999)),
-    craftTier3ExtraItems: Math.round(clamp(input.craftTier3ExtraItems, 0, 999)),
-    craftTier4ExtraItems: Math.round(clamp(input.craftTier4ExtraItems, 0, 999)),
-    craftTier5ExtraItems: Math.round(clamp(input.craftTier5ExtraItems, 0, 999)),
-    drinkPlayerPowerCostMultiplier: clamp(input.drinkPlayerPowerCostMultiplier, 0, 999),
-    drinkEnemyPowerCostMultiplier: clamp(input.drinkEnemyPowerCostMultiplier, 0, 999),
-    dialogMonthlyLimitMultiplier: clamp(input.dialogMonthlyLimitMultiplier, 0, 999),
-    dialogFastForwardAssistEnabled: input.dialogFastForwardAssistEnabled,
-    dailySkillInsightChancePercent: Math.round(clamp(input.dailySkillInsightChancePercent, 0, 100)),
-    dailySkillInsightExpPercent: clamp(input.dailySkillInsightExpPercent, 0, 999),
-    dailySkillInsightUseRarityScaling: input.dailySkillInsightUseRarityScaling,
-    dailySkillInsightRealtimeIntervalSeconds: clamp(input.dailySkillInsightRealtimeIntervalSeconds, 0, 999),
-    skillTalentEnabled: input.skillTalentEnabled,
-    skillTalentLevelThreshold: Math.round(clamp(input.skillTalentLevelThreshold, 1, 999)),
-    skillTalentTierPointMultiplier: clamp(input.skillTalentTierPointMultiplier, 0.1, 999),
-    skillTalentPlayerOnly: input.skillTalentPlayerOnly,
-    freezeDate: input.freezeDate,
-    freezeHotkey: normalizeHotkey(input.freezeHotkey, DEFAULT_VISIBLE_SETTINGS.freezeHotkey),
-    outsideBattleSpeedHotkey: normalizeHotkey(
-      input.outsideBattleSpeedHotkey,
-      DEFAULT_VISIBLE_SETTINGS.outsideBattleSpeedHotkey
-    ),
-    battleTurboEnabled: input.battleTurboEnabled,
-    battleTurboHotkey: normalizeHotkey(input.battleTurboHotkey, DEFAULT_VISIBLE_SETTINGS.battleTurboHotkey)
-  };
-}
-
 function parseVisibleFromMain(text: string | undefined): VisibleSettings {
+  const explorationSection = getIniSectionBody(text, 'Exploration');
   const battleSection = getIniSectionBody(text, 'Battle');
   const dialogFlowSection = getIniSectionBody(text, 'DialogFlow');
   const dailySkillInsightSection = getIniSectionBody(text, 'DailySkillInsight');
   const relationshipSection = getIniSectionBody(text, 'Relationship');
+  const teachingSection = getIniSectionBody(text, 'Teaching');
+  const debugSection = getIniSectionBody(text, 'Debug');
   const systemsSection = getIniSectionBody(text, 'Systems') ?? getIniSectionBody(text, 'Time');
+  const commerceSection = getIniSectionBody(text, 'Commerce');
+  const skillDisplaySection = getIniSectionBody(text, 'SkillDisplay');
+  const mogaoSection = getIniSectionBody(text, 'Mogao');
+  const auctionSection = getIniSectionBody(text, 'Auction');
+  const governmentStorageSection = getIniSectionBody(text, 'GovernmentStorage');
+  const yellowCraneTowerSection = getIniSectionBody(text, 'YellowCraneTower');
+  const bountyRefreshSection = getIniSectionBody(text, 'BountyRefresh');
+  const treasureIdentifySection = getIniSectionBody(text, 'TreasureIdentify');
+  const breakthroughSection = getIniSectionBody(text, 'Breakthrough');
+  const craftSection = getIniSectionBody(text, 'Craft');
 
   return {
     lockStamina: readBool(text, 'LockStamina', DEFAULT_VISIBLE_SETTINGS.lockStamina),
+    revealAllOnStepTile: readBool(
+      explorationSection,
+      'RevealAllOnStepTile',
+      DEFAULT_VISIBLE_SETTINGS.revealAllOnStepTile
+    ),
     expMultiplier: readInt(text, 'ExpMultiplier', DEFAULT_VISIBLE_SETTINGS.expMultiplier),
     battleSkillExpMultiplier: readInt(
       battleSection ?? text,
@@ -827,13 +902,123 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
     horseStaminaMultiplier: DEFAULT_VISIBLE_SETTINGS.horseStaminaMultiplier,
     carryWeightCap: readFloat(text, 'CarryWeightCap', DEFAULT_VISIBLE_SETTINGS.carryWeightCap),
     ignoreCarryWeight: readBool(text, 'IgnoreCarryWeight', DEFAULT_VISIBLE_SETTINGS.ignoreCarryWeight),
-    merchantCarryCash: readInt(text, 'MerchantCarryCash', DEFAULT_VISIBLE_SETTINGS.merchantCarryCash),
+    merchantCarryCash: readInt(commerceSection, 'MerchantCarryCash', DEFAULT_VISIBLE_SETTINGS.merchantCarryCash),
+    treasureTradeHelperEnabled: readBool(
+      commerceSection,
+      'TreasureTradeHelperEnabled',
+      DEFAULT_VISIBLE_SETTINGS.treasureTradeHelperEnabled
+    ),
     treasureAutoTradeEnabled: readBool(
-      text,
+      commerceSection,
       'TreasureAutoTradeEnabled',
       DEFAULT_VISIBLE_SETTINGS.treasureAutoTradeEnabled
     ),
+    materialAutoBuyEnabled: readBool(
+      commerceSection,
+      'MaterialAutoBuyEnabled',
+      DEFAULT_VISIBLE_SETTINGS.materialAutoBuyEnabled
+    ),
+    materialPurchaseMinRareLv: readInt(
+      commerceSection,
+      'MaterialPurchaseMinRareLv',
+      DEFAULT_VISIBLE_SETTINGS.materialPurchaseMinRareLv
+    ),
+    materialPurchaseMinItemLv: readInt(
+      commerceSection,
+      'MaterialPurchaseMinItemLv',
+      DEFAULT_VISIBLE_SETTINGS.materialPurchaseMinItemLv
+    ),
+    shopOwnershipEnabled: readBool(
+      commerceSection,
+      'ShopOwnershipEnabled',
+      DEFAULT_VISIBLE_SETTINGS.shopOwnershipEnabled
+    ),
+    skillBookOwnershipIndicatorEnabled: readBool(
+      skillDisplaySection,
+      'BookOwnershipIndicatorEnabled',
+      DEFAULT_VISIBLE_SETTINGS.skillBookOwnershipIndicatorEnabled
+    ),
+    mogaoDiscipleForgettingEnabled: readBool(
+      mogaoSection,
+      'DiscipleForgettingEnabled',
+      DEFAULT_VISIBLE_SETTINGS.mogaoDiscipleForgettingEnabled
+    ),
+    auctionEventAlwaysRedEnabled: readBool(
+      auctionSection,
+      'EventAlwaysRedEnabled',
+      DEFAULT_VISIBLE_SETTINGS.auctionEventAlwaysRedEnabled
+    ),
+    auctionPreviewRefreshEnabled: readBool(
+      auctionSection,
+      'PreviewRefreshEnabled',
+      DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshEnabled
+    ),
+    auctionPreviewRefreshHotkey: readString(
+      auctionSection,
+      'PreviewRefreshHotkey',
+      DEFAULT_VISIBLE_SETTINGS.auctionPreviewRefreshHotkey
+    ),
+    governmentStorageRefreshEnabled: readBool(
+      governmentStorageSection,
+      'RefreshEnabled',
+      DEFAULT_VISIBLE_SETTINGS.governmentStorageRefreshEnabled
+    ),
+    governmentStorageRefreshHotkey: readString(
+      governmentStorageSection,
+      'RefreshHotkey',
+      DEFAULT_VISIBLE_SETTINGS.governmentStorageRefreshHotkey
+    ),
+    yellowCraneCandidateRefreshEnabled: readBool(
+      yellowCraneTowerSection,
+      'CandidateRefreshEnabled',
+      DEFAULT_VISIBLE_SETTINGS.yellowCraneCandidateRefreshEnabled
+    ),
+    yellowCraneCandidateRefreshHotkey: readString(
+      yellowCraneTowerSection,
+      'CandidateRefreshHotkey',
+      DEFAULT_VISIBLE_SETTINGS.yellowCraneCandidateRefreshHotkey
+    ),
+    forceBountyRefreshEnabled: readBool(
+      bountyRefreshSection,
+      'ForceEnabled',
+      DEFAULT_VISIBLE_SETTINGS.forceBountyRefreshEnabled
+    ),
+    commonBountyRefreshEnabled: readBool(
+      bountyRefreshSection,
+      'CommonEnabled',
+      DEFAULT_VISIBLE_SETTINGS.commonBountyRefreshEnabled
+    ),
+    governBountyRefreshEnabled: readBool(
+      bountyRefreshSection,
+      'GovernEnabled',
+      DEFAULT_VISIBLE_SETTINGS.governBountyRefreshEnabled
+    ),
+    bountyRefreshHotkey: readString(
+      bountyRefreshSection,
+      'RefreshHotkey',
+      DEFAULT_VISIBLE_SETTINGS.bountyRefreshHotkey
+    ),
+    treasureIdentifyBestValueAssistEnabled: readBool(
+      treasureIdentifySection,
+      'BestValueAssistEnabled',
+      DEFAULT_VISIBLE_SETTINGS.treasureIdentifyBestValueAssistEnabled
+    ),
+    breakthroughRerollEnabled: readBool(
+      breakthroughSection,
+      'RerollEnabled',
+      DEFAULT_VISIBLE_SETTINGS.breakthroughRerollEnabled
+    ),
+    craftRerollEnabled: readBool(
+      craftSection,
+      'RerollEnabled',
+      DEFAULT_VISIBLE_SETTINGS.craftRerollEnabled
+    ),
     luckyHitChancePercent: readInt(text, 'LuckyHitChancePercent', DEFAULT_VISIBLE_SETTINGS.luckyHitChancePercent),
+    relationshipFeaturesEnabled: readBool(
+      relationshipSection,
+      'FeaturesEnabled',
+      DEFAULT_VISIBLE_SETTINGS.relationshipFeaturesEnabled
+    ),
     extraRelationshipGainChancePercent: readInt(
       relationshipSection ?? text,
       'ExtraRelationshipGainChancePercent',
@@ -848,6 +1033,31 @@ function parseVisibleFromMain(text: string | undefined): VisibleSettings {
       relationshipSection ?? text,
       'TeamAutoFavorPerDay',
       DEFAULT_VISIBLE_SETTINGS.teamAutoFavorPerDay
+    ),
+    teamFameShareEnabled: readBool(
+      relationshipSection,
+      'TeamFameShareEnabled',
+      DEFAULT_VISIBLE_SETTINGS.teamFameShareEnabled
+    ),
+    teamFameSharePercent: readFloat(
+      relationshipSection,
+      'TeamFameSharePercent',
+      DEFAULT_VISIBLE_SETTINGS.teamFameSharePercent
+    ),
+    blockOverflowLoverHomeBattle: readBool(
+      relationshipSection,
+      'BlockOverflowLoverHomeBattle',
+      DEFAULT_VISIBLE_SETTINGS.blockOverflowLoverHomeBattle
+    ),
+    sameSectAreaShareEnabled: readBool(
+      teachingSection,
+      'SameSectAreaShareEnabled',
+      DEFAULT_VISIBLE_SETTINGS.sameSectAreaShareEnabled
+    ),
+    characterDataTestHotkeyEnabled: readBool(
+      debugSection,
+      'CharacterDataTestHotkeyEnabled',
+      DEFAULT_VISIBLE_SETTINGS.characterDataTestHotkeyEnabled
     ),
     maxLoverCount: readInt(
       relationshipSection ?? text,
@@ -981,7 +1191,20 @@ export async function inspectGameHealth(gameRoot: string, payloadRoot?: string):
   checks.push(createHealthCheck('game-exe', '游戏主程序', gameExeExists, gameExeExists ? GAME_EXE_NAME : `缺少 ${GAME_EXE_NAME}`));
   checks.push(createHealthCheck('bepinex-dir', 'BepInEx 目录', bepinexExists, bepinexExists ? '已检测到 BepInEx。' : '缺少 BepInEx 目录。'));
   checks.push(createHealthCheck('winhttp', 'Doorstop Loader', winhttpExists, winhttpExists ? '已检测到 winhttp.dll。' : '缺少 winhttp.dll。'));
-  checks.push(createHealthCheck('steam-appid', 'Steam AppId', steamAppIdExists, steamAppIdExists ? '已检测到 steam_appid.txt。' : '缺少 steam_appid.txt。'));
+  const steamAppIdText = steamAppIdExists ? await readTextIfExists(paths.steamAppIdPath) : undefined;
+  const steamAppIdValid = steamAppIdText?.trim() === STEAM_APP_ID;
+  checks.push(
+    createHealthCheck(
+      'steam-appid',
+      'Steam AppId',
+      steamAppIdValid,
+      !steamAppIdExists
+        ? '缺少 steam_appid.txt。'
+        : steamAppIdValid
+          ? `steam_appid.txt 已设置为 ${STEAM_APP_ID}。`
+          : `steam_appid.txt 内容不是 ${STEAM_APP_ID}。`
+    )
+  );
 
   const doorstopText = await readTextIfExists(paths.doorstopConfigPath);
   const doorstopEnabled = readBool(doorstopText, 'enabled', false);
@@ -996,6 +1219,65 @@ export async function inspectGameHealth(gameRoot: string, payloadRoot?: string):
         : doorstopEnabled && ignoreDisableSwitch
           ? 'Doorstop 已启用。'
           : 'doorstop_config.ini 存在，但未启用必要开关。'
+    )
+  );
+
+  const runtimeLogText = await readTextIfExists(paths.bepinExLogPath);
+  const runtimeFindings = findBepInExRuntimeIssues(runtimeLogText);
+  const runtimeLogStat = await fs.stat(paths.bepinExLogPath).catch(() => undefined);
+  const livePluginStats = await Promise.all(
+    REQUIRED_PLUGIN_NAMES.map((pluginName) =>
+      fs.stat(path.join(gameRoot, 'BepInEx', 'plugins', pluginName)).catch(() => undefined))
+  );
+  const newestPluginMtime = livePluginStats.reduce(
+    (latest, stat) => Math.max(latest, stat?.mtimeMs ?? 0),
+    0
+  );
+  const runtimeLogCurrent = Boolean(
+    runtimeLogStat && (newestPluginMtime === 0 || runtimeLogStat.mtimeMs + 1_000 >= newestPluginMtime)
+  );
+  const runtimeIssues = [
+    ...runtimeFindings.hardFailures,
+    ...runtimeFindings.compatibilityWarnings
+  ];
+  const hardRuntimeFailure = runtimeFindings.hardFailures.length > 0;
+  const stalePrefix = runtimeIssues.length > 0 && !runtimeLogCurrent
+    ? '日志早于当前插件部署；允许重新启动生成新日志。旧日志：'
+    : '';
+  checks.push(
+    createHealthCheck(
+      'bepinex-runtime-log',
+      'BepInEx 运行日志',
+      runtimeIssues.length === 0,
+      runtimeIssues.length === 0
+        ? runtimeLogText === undefined
+          ? '尚未生成 BepInEx LogOutput.log。'
+          : '未检测到运行时目标缺失或兼容性降级。'
+        : `${stalePrefix}${runtimeIssues.join(' | ')}`,
+      false,
+      hardRuntimeFailure && runtimeLogCurrent
+    )
+  );
+
+  const managedConfigPaths = [
+    paths.mainConfigPath,
+    paths.horseConfigPath,
+    paths.questSnapshotConfigPath,
+    paths.skillConfigPath,
+    paths.battleConfigPath
+  ];
+  const managedConfigExists = await Promise.all(managedConfigPaths.map((configPath) => fileExists(configPath)));
+  const missingManagedConfigs = managedConfigPaths
+    .filter((_configPath, index) => !managedConfigExists[index])
+    .map((configPath) => path.basename(configPath));
+  checks.push(
+    createHealthCheck(
+      'config-files',
+      '模组配置文件',
+      missingManagedConfigs.length === 0,
+      missingManagedConfigs.length === 0
+        ? '主要模组配置文件齐全。'
+        : `缺少配置文件：${missingManagedConfigs.join(', ')}`
     )
   );
 
@@ -1019,12 +1301,12 @@ export async function inspectGameHealth(gameRoot: string, payloadRoot?: string):
     createHealthCheck(
       'custom-talent-config',
       '自定义天赋配置',
-      customTalentConfigExists || writableCustomTalentConfig,
+      customTalentConfigExists,
       customTalentConfigExists
         ? '已检测到自定义天赋 JSON 配置。'
         : writableCustomTalentConfig
-          ? '自定义天赋 JSON 尚未生成，但路径可创建。'
-          : '自定义天赋 JSON 路径不可写。'
+          ? '缺少自定义天赋 JSON，需安装或修复。'
+          : '自定义天赋 JSON 缺失且路径不可写。'
     )
   );
 
@@ -1044,12 +1326,15 @@ export async function inspectGameHealth(gameRoot: string, payloadRoot?: string):
 
   const driftedFiles: string[] = [];
   if (payloadRoot && (await directoryExists(payloadRoot))) {
+    const payloadPluginDlls = await listPayloadPluginDlls(payloadRoot);
+    const synchronizedPaths = [...new Set([
+      'winhttp.dll',
+      'doorstop_config.ini',
+      ...REQUIRED_PLUGIN_NAMES.map((pluginName) => path.join('BepInEx', 'plugins', pluginName)),
+      ...payloadPluginDlls
+    ])];
     const payloadChecks = await Promise.all(
-      [
-        'winhttp.dll',
-        'doorstop_config.ini',
-        ...REQUIRED_PLUGIN_NAMES.map((pluginName) => path.join('BepInEx', 'plugins', pluginName))
-      ].map(async (relativePath) => {
+      synchronizedPaths.map(async (relativePath) => {
         const payloadPath = path.join(payloadRoot, relativePath);
         const gamePath = path.join(gameRoot, relativePath);
         const payloadHash = await sha256File(payloadPath);
@@ -1074,11 +1359,13 @@ export async function inspectGameHealth(gameRoot: string, payloadRoot?: string):
   }
 
   const healthy = checks.every((check) => check.ok) && driftedFiles.length === 0;
-  const needsRepair = !healthy;
+  const needsRepair = checks.some((check) => !check.ok && check.blocking !== false) || driftedFiles.length > 0;
+  const launchBlocked = checks.some((check) => !check.ok && check.launchBlocking === true);
 
   return {
     healthy,
     needsRepair,
+    launchBlocked,
     summary: summarizeHealth(checks, driftedFiles),
     driftedFiles,
     checks
@@ -1100,7 +1387,6 @@ export async function ensureGameFiles(gameRoot: string): Promise<void> {
 
 export async function readVisibleSettings(gameRoot: string): Promise<VisibleSettings> {
   const paths = getGamePaths(gameRoot);
-  await ensureGameFiles(gameRoot);
 
   const mainText = await readTextIfExists(paths.mainConfigPath);
   const horseText = await readTextIfExists(paths.horseConfigPath);
@@ -1124,8 +1410,14 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   const skillText = await ensureConfigFile(paths.skillConfigPath, buildSkillTemplate());
   const battleText = await ensureConfigFile(paths.battleConfigPath, buildBattleTemplate());
 
-  let nextMain = mainText;
+  let nextMain = normalizeIniLineEndings(mainText);
   nextMain = upsertIniValue(nextMain, 'LockStamina', boolText(normalized.lockStamina));
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Exploration',
+    'RevealAllOnStepTile',
+    boolText(normalized.revealAllOnStepTile)
+  );
   nextMain = removeIniSectionValue(nextMain, 'StudySkill', 'CostMultiplier');
   nextMain = removeIniSectionValue(nextMain, 'Exploration', 'TreasureChestAutoPickMostValuable');
   nextMain = removeIniValue(nextMain, 'TreasureChestAutoPickMostValuable');
@@ -1139,10 +1431,170 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   nextMain = upsertIniValue(nextMain, 'LockTurboStamina', boolText(normalized.lockHorseTurboStamina));
   nextMain = upsertIniValue(nextMain, 'CarryWeightCap', formatFloat(normalized.carryWeightCap));
   nextMain = upsertIniValue(nextMain, 'IgnoreCarryWeight', boolText(normalized.ignoreCarryWeight));
-  nextMain = upsertIniValue(nextMain, 'MerchantCarryCash', String(normalized.merchantCarryCash));
-  nextMain = upsertIniValue(nextMain, 'TreasureAutoTradeEnabled', boolText(normalized.treasureAutoTradeEnabled));
+  nextMain = upsertIniSectionValue(nextMain, 'Commerce', 'MerchantCarryCash', String(normalized.merchantCarryCash));
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Commerce',
+    'TreasureTradeHelperEnabled',
+    boolText(normalized.treasureTradeHelperEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Commerce',
+    'TreasureAutoTradeEnabled',
+    boolText(normalized.treasureAutoTradeEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Commerce',
+    'MaterialAutoBuyEnabled',
+    boolText(normalized.materialAutoBuyEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Commerce',
+    'MaterialPurchaseMinRareLv',
+    String(normalized.materialPurchaseMinRareLv)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Commerce',
+    'MaterialPurchaseMinItemLv',
+    String(normalized.materialPurchaseMinItemLv)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Commerce',
+    'ShopOwnershipEnabled',
+    boolText(normalized.shopOwnershipEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'SkillDisplay',
+    'BookOwnershipIndicatorEnabled',
+    boolText(normalized.skillBookOwnershipIndicatorEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Mogao',
+    'DiscipleForgettingEnabled',
+    boolText(normalized.mogaoDiscipleForgettingEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Auction',
+    'EventAlwaysRedEnabled',
+    boolText(normalized.auctionEventAlwaysRedEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Auction',
+    'PreviewRefreshEnabled',
+    boolText(normalized.auctionPreviewRefreshEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Auction',
+    'PreviewRefreshHotkey',
+    normalized.auctionPreviewRefreshHotkey
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'GovernmentStorage',
+    'RefreshEnabled',
+    boolText(normalized.governmentStorageRefreshEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'GovernmentStorage',
+    'RefreshHotkey',
+    normalized.governmentStorageRefreshHotkey
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'YellowCraneTower',
+    'CandidateRefreshEnabled',
+    boolText(normalized.yellowCraneCandidateRefreshEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'YellowCraneTower',
+    'CandidateRefreshHotkey',
+    normalized.yellowCraneCandidateRefreshHotkey
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'BountyRefresh',
+    'ForceEnabled',
+    boolText(normalized.forceBountyRefreshEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'BountyRefresh',
+    'CommonEnabled',
+    boolText(normalized.commonBountyRefreshEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'BountyRefresh',
+    'GovernEnabled',
+    boolText(normalized.governBountyRefreshEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'BountyRefresh',
+    'RefreshHotkey',
+    normalized.bountyRefreshHotkey
+  );
+  nextMain = removeIniSectionValue(nextMain, 'Auction', 'PreviewRefreshRequireAlt');
+  nextMain = removeIniSectionCommentBlock(
+    nextMain,
+    'Auction',
+    'Main key used to refresh while the auction exhibit preview is open.'
+  );
+  nextMain = removeIniSectionCommentBlock(
+    nextMain,
+    'Auction',
+    'When true, hold either Alt key while pressing PreviewRefreshHotkey. The default shortcut is Alt+W.'
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'TreasureIdentify',
+    'BestValueAssistEnabled',
+    boolText(normalized.treasureIdentifyBestValueAssistEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Breakthrough',
+    'RerollEnabled',
+    boolText(normalized.breakthroughRerollEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Craft',
+    'RerollEnabled',
+    boolText(normalized.craftRerollEnabled)
+  );
+  nextMain = removeIniSectionValue(nextMain, 'TreasureIdentify', 'BestValueHotkey');
+  nextMain = removeIniSectionValue(nextMain, 'TreasureIdentify', 'BestValueRequireAlt');
+  nextMain = removeIniSectionCommentBlock(
+    nextMain,
+    'TreasureIdentify',
+    'Main key used to select the highest parenthesized appraisal value while the appraisal window is open.'
+  );
+  nextMain = removeIniSectionCommentBlock(
+    nextMain,
+    'TreasureIdentify',
+    'When true, hold either Alt key while pressing BestValueHotkey. The default shortcut is Alt+F.'
+  );
   nextMain = upsertIniSectionValue(nextMain, 'MoneyLuck', 'LuckyHitChancePercent', String(normalized.luckyHitChancePercent));
   nextMain = removeIniSectionValue(nextMain, 'Commerce', 'LuckyHitChancePercent');
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Relationship',
+    'FeaturesEnabled',
+    boolText(normalized.relationshipFeaturesEnabled)
+  );
   nextMain = upsertIniSectionValue(
     nextMain,
     'Relationship',
@@ -1161,6 +1613,24 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'TeamAutoFavorPerDay',
     formatFloat(normalized.teamAutoFavorPerDay)
   );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Relationship',
+    'TeamFameShareEnabled',
+    boolText(normalized.teamFameShareEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Relationship',
+    'TeamFameSharePercent',
+    formatFloat(normalized.teamFameSharePercent)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Relationship',
+    'BlockOverflowLoverHomeBattle',
+    boolText(normalized.blockOverflowLoverHomeBattle)
+  );
   nextMain = removeIniSectionValue(nextMain, 'Relationship', 'TeamStayDurationMultiplier');
   nextMain = removeIniValue(nextMain, 'TeamStayDurationMultiplier');
   nextMain = upsertIniSectionValue(
@@ -1168,6 +1638,18 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
     'Relationship',
     'MaxLoverCount',
     String(normalized.maxLoverCount)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Teaching',
+    'SameSectAreaShareEnabled',
+    boolText(normalized.sameSectAreaShareEnabled)
+  );
+  nextMain = upsertIniSectionValue(
+    nextMain,
+    'Debug',
+    'CharacterDataTestHotkeyEnabled',
+    boolText(normalized.characterDataTestHotkeyEnabled)
   );
   nextMain = removeIniSectionValue(nextMain, 'Commerce', 'ExtraRelationshipGainChancePercent');
   nextMain = upsertIniValue(
@@ -1254,8 +1736,10 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
 
 export async function readCustomTalentPack(gameRoot: string): Promise<CustomTalentPack> {
   const paths = getGamePaths(gameRoot);
-  await ensureGameFiles(gameRoot);
-  const text = await ensureCustomTalentPackFile(paths.customTalentConfigPath);
+  const text = await readTextIfExists(paths.customTalentConfigPath);
+  if (text === undefined) {
+    return buildDefaultCustomTalentPack();
+  }
 
   let parsed: unknown;
   try {
@@ -1283,6 +1767,115 @@ export async function saveCustomTalentPack(gameRoot: string, pack: CustomTalentP
   }
 
   return verified;
+}
+
+interface IniSectionRange {
+  name: string;
+  bodyStart: number;
+  end: number;
+}
+
+function findIniSectionRanges(text: string): IniSectionRange[] {
+  const headerPattern = /^(?:\uFEFF)?[ \t]*\[([^\]\r\n]+)\][ \t]*(?:\r?\n|$)/gm;
+  const headers = [...text.matchAll(headerPattern)];
+  return headers.map((header, index) => ({
+    name: header[1].trim(),
+    bodyStart: (header.index ?? 0) + header[0].length,
+    end: headers[index + 1]?.index ?? text.length
+  }));
+}
+
+function normalizeConsoleEnabledLines(body: string): { text: string; count: number } {
+  let count = 0;
+  const text = body.replace(
+    /^([ \t]*Enabled[ \t]*=)([ \t]*)([^\r\n]*)(?=\r?$)/gmi,
+    (_line, assignment: string, spacing: string, remainder: string) => {
+      count += 1;
+      const commentIndex = remainder.search(/[;#]/);
+      const valuePart = commentIndex === -1 ? remainder : remainder.slice(0, commentIndex);
+      const comment = commentIndex === -1 ? '' : remainder.slice(commentIndex);
+      const trailingSpacing = valuePart.match(/[ \t]*$/)?.[0] ?? '';
+
+      if (valuePart.trim().length === 0) {
+        const prefixSpacing = spacing.slice(0, 1);
+        return `${assignment}${prefixSpacing}false${spacing.slice(prefixSpacing.length)}${comment}`;
+      }
+
+      return `${assignment}${spacing}false${trailingSpacing}${comment}`;
+    }
+  );
+  return { text, count };
+}
+
+function transformBepInExConsoleConfig(text: string): string {
+  const newline = text.includes('\r\n') ? '\r\n' : text.includes('\n') ? '\n' : '\r\n';
+  const consoleSections = findIniSectionRanges(text)
+    .filter((section) => section.name.toLowerCase() === 'logging.console');
+
+  if (consoleSections.length === 0) {
+    const separator = text.length === 0 ? '' : text.endsWith('\n') ? newline : `${newline}${newline}`;
+    return `${text}${separator}[Logging.Console]${newline}Enabled = false${newline}`;
+  }
+
+  let updated = text;
+  for (const section of [...consoleSections].reverse()) {
+    const body = text.slice(section.bodyStart, section.end);
+    const normalized = normalizeConsoleEnabledLines(body);
+    let updatedBody = normalized.text;
+    if (normalized.count === 0) {
+      if (updatedBody.length === 0 && !/[\r\n]$/.test(text.slice(0, section.bodyStart))) {
+        updatedBody = `${newline}Enabled = false${newline}`;
+      }
+      else {
+        const contentEnd = updatedBody.search(/\s*$/);
+        updatedBody = contentEnd === 0
+          ? `Enabled = false${updatedBody}`
+          : `${updatedBody.slice(0, contentEnd)}${newline}Enabled = false${updatedBody.slice(contentEnd)}`;
+      }
+    }
+    updated = `${updated.slice(0, section.bodyStart)}${updatedBody}${updated.slice(section.end)}`;
+  }
+  return updated;
+}
+
+function validateBepInExConsoleConfig(text: string, configPath: string): void {
+  const consoleSections = findIniSectionRanges(text)
+    .filter((section) => section.name.toLowerCase() === 'logging.console');
+  const valid = consoleSections.length > 0 && consoleSections.every((section) => {
+    const body = text.slice(section.bodyStart, section.end);
+    const values = [...body.matchAll(/^[ \t]*Enabled[ \t]*=[ \t]*([^\r\n]*)(?=\r?$)/gmi)];
+    return values.length > 0 && values.every((match) => {
+      const value = match[1].split(/[;#]/, 1)[0].trim().toLowerCase();
+      return value === 'false';
+    });
+  });
+
+  if (!valid) {
+    throw new Error(`BepInEx.cfg 控制台防护校验失败：${configPath}。请修复模组安装或重新安装 BepInEx 后再启动游戏。`);
+  }
+}
+
+export async function ensureBepInExConsoleDisabled(gameRoot: string): Promise<void> {
+  const configPath = path.join(gameRoot, BEPINEX_CONFIG_NAME);
+  let text: string;
+  try {
+    text = await fs.readFile(configPath, 'utf8');
+  }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      throw new Error(`未找到 BepInEx.cfg：${configPath}。请先修复模组安装或重新安装 BepInEx。`);
+    }
+    throw error;
+  }
+
+  const updated = transformBepInExConsoleConfig(text);
+  validateBepInExConsoleConfig(updated, configPath);
+  if (updated !== text) {
+    await fs.writeFile(configPath, updated, 'utf8');
+    const verified = await fs.readFile(configPath, 'utf8');
+    validateBepInExConsoleConfig(verified, configPath);
+  }
 }
 
 export async function ensureSteamAppId(gameRoot: string): Promise<void> {

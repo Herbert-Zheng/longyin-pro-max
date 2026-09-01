@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -7,20 +7,16 @@ const projectRoot = process.cwd();
 const releaseRoot = path.join(projectRoot, 'release');
 const packageJson = JSON.parse(await readFile(path.join(projectRoot, 'package.json'), 'utf8'));
 const zipFiles = (await readdir(releaseRoot)).filter((file) => file.toLowerCase().endsWith('.zip'));
+const zipFile = `LongYinProMaxApp-${packageJson.version}-win-x64.zip`;
 
-if (zipFiles.length === 0) {
-  throw new Error(`No ZIP artifact found in ${releaseRoot}. Run the build first.`);
+if (!zipFiles.includes(zipFile)) {
+  throw new Error(`Expected ZIP artifact ${zipFile} was not found in ${releaseRoot}.`);
 }
 
-const zipFilesWithTimes = await Promise.all(
-  zipFiles.map(async (file) => ({
-    file,
-    mtime: (await stat(path.join(releaseRoot, file))).mtimeMs
-  }))
-);
-
-zipFilesWithTimes.sort((left, right) => left.mtime - right.mtime);
-const zipFile = zipFilesWithTimes[zipFilesWithTimes.length - 1].file;
+const unexpectedZipFiles = zipFiles.filter((file) => file !== zipFile);
+if (unexpectedZipFiles.length > 0) {
+  throw new Error(`Release directory contains stale ZIP artifacts: ${unexpectedZipFiles.join(', ')}`);
+}
 const zipPath = path.join(releaseRoot, zipFile);
 const zipBuffer = await readFile(zipPath);
 const sha256 = createHash('sha256').update(zipBuffer).digest('hex');

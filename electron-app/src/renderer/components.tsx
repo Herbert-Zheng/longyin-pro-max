@@ -28,55 +28,6 @@ export const BATTLE_TURBO_HOTKEYS = [
   'Mouse5'
 ];
 
-export function defaultSettings(): VisibleSettings {
-  return {
-    lockStamina: true,
-    expMultiplier: 1,
-    battleSkillExpMultiplier: 1,
-    creationPointMultiplier: 1,
-    horseBaseSpeedMultiplier: 1,
-    horseTurboSpeedMultiplier: 1,
-    horseTurboDurationMultiplier: 1,
-    horseTurboCooldownMultiplier: 1,
-    lockHorseTurboStamina: true,
-    horseStaminaMultiplier: 1,
-    carryWeightCap: 100000,
-    ignoreCarryWeight: false,
-    merchantCarryCash: 100000,
-    treasureAutoTradeEnabled: true,
-    luckyHitChancePercent: 0,
-    extraRelationshipGainChancePercent: 0,
-    teamAutoFavorEnabled: true,
-    teamAutoFavorPerDay: 5,
-    maxLoverCount: 8,
-    debatePlayerDamageTakenMultiplier: 1,
-    debateEnemyDamageTakenMultiplier: 1,
-    craftRandomPickUpgrade: true,
-    craftTier1ExtraItems: 0,
-    craftTier2ExtraItems: 1,
-    craftTier3ExtraItems: 2,
-    craftTier4ExtraItems: 3,
-    craftTier5ExtraItems: 4,
-    drinkPlayerPowerCostMultiplier: 1,
-    drinkEnemyPowerCostMultiplier: 1,
-    dialogMonthlyLimitMultiplier: 3,
-    dialogFastForwardAssistEnabled: false,
-    dailySkillInsightChancePercent: 0,
-    dailySkillInsightExpPercent: 5,
-    dailySkillInsightUseRarityScaling: true,
-    dailySkillInsightRealtimeIntervalSeconds: 0,
-    skillTalentEnabled: true,
-    skillTalentLevelThreshold: 10,
-    skillTalentTierPointMultiplier: 2,
-    skillTalentPlayerOnly: true,
-    freezeDate: false,
-    freezeHotkey: 'F1',
-    outsideBattleSpeedHotkey: 'F11',
-    battleTurboEnabled: true,
-    battleTurboHotkey: 'F8'
-  };
-}
-
 export function mergeSettings(base: VisibleSettings, patch: Partial<VisibleSettings>): VisibleSettings {
   return { ...base, ...patch };
 }
@@ -94,9 +45,10 @@ export function FieldShell(props: {
   hint?: string;
   children: ReactNode;
   wide?: boolean;
+  disabled?: boolean;
 }) {
   return (
-    <label className={`field ${props.wide ? 'field--wide' : ''}`}>
+    <label className={`field ${props.wide ? 'field--wide' : ''} ${props.disabled ? 'field--disabled' : ''}`}>
       <span className="field__label">{props.label}</span>
       {props.children}
       {props.hint ? <span className="field__hint">{props.hint}</span> : null}
@@ -113,9 +65,10 @@ export function NumberField(props: {
   step?: number;
   hint?: string;
   suffix?: string;
+  disabled?: boolean;
 }) {
   return (
-    <FieldShell label={props.label} hint={props.hint}>
+    <FieldShell label={props.label} hint={props.hint} disabled={props.disabled}>
       <div className="field__input-row">
         <input
           className="input input--number"
@@ -123,6 +76,7 @@ export function NumberField(props: {
           min={props.min}
           max={props.max}
           step={props.step}
+          disabled={props.disabled}
           value={formatNumber(props.value)}
           onChange={(event) => props.onChange(Number(event.target.value))}
         />
@@ -137,9 +91,10 @@ export function CheckboxField(props: {
   value: boolean;
   onChange: (next: boolean) => void;
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
-    <label className="toggle">
+    <label className={`toggle ${props.disabled ? 'toggle--disabled' : ''}`}>
       <span className="toggle__copy">
         <span className="toggle__label">{props.label}</span>
         {props.hint ? <span className="toggle__hint">{props.hint}</span> : null}
@@ -148,25 +103,33 @@ export function CheckboxField(props: {
         className="toggle__input"
         type="checkbox"
         checked={props.value}
+        disabled={props.disabled}
         onChange={(event) => props.onChange(event.target.checked)}
       />
     </label>
   );
 }
 
-export function SelectField(props: {
+export function SelectField<T extends string>(props: {
   label: string;
-  value: string;
-  onChange: (next: string) => void;
-  options: string[];
+  value: T;
+  onChange: (next: T) => void;
+  options: readonly T[];
+  getOptionLabel?: (option: T) => string;
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
-    <FieldShell label={props.label} hint={props.hint}>
-      <select className="input" value={props.value} onChange={(event) => props.onChange(event.target.value)}>
+    <FieldShell label={props.label} hint={props.hint} disabled={props.disabled}>
+      <select
+        className="input"
+        value={props.value}
+        disabled={props.disabled}
+        onChange={(event) => props.onChange(event.target.value as T)}
+      >
         {props.options.map((option) => (
           <option key={option} value={option}>
-            {option}
+            {props.getOptionLabel?.(option) ?? option}
           </option>
         ))}
       </select>
@@ -179,17 +142,18 @@ export function TextField(props: {
   value: string;
   onChange: (next: string) => void;
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
-    <FieldShell label={props.label} hint={props.hint}>
-      <input className="input" type="text" value={props.value} onChange={(event) => props.onChange(event.target.value)} />
+    <FieldShell label={props.label} hint={props.hint} disabled={props.disabled}>
+      <input className="input" type="text" value={props.value} disabled={props.disabled} onChange={(event) => props.onChange(event.target.value)} />
     </FieldShell>
   );
 }
 
 export function Card(props: { title: string; eyebrow?: string; children: ReactNode }) {
   return (
-    <section className="card">
+    <section className="card" data-searchable-card>
       <div className="card__head">
         {props.eyebrow ? <span className="eyebrow">{props.eyebrow}</span> : null}
         <h2>{props.title}</h2>

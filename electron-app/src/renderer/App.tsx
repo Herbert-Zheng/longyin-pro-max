@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BASE_ATTRI_TYPE_NAMES,
   CUSTOM_TALENT_CONDITION_TYPES,
@@ -16,8 +16,10 @@ import type {
   UpdateProgressEvent,
   VisibleSettings
 } from '../shared/types';
+import { reconcilePersistedValue } from '../shared/persisted-state';
+import { deriveConfigurationStatus, deriveLaunchAvailability } from '../shared/launcher-state';
+import { createDefaultVisibleSettings } from '../shared/visible-settings';
 import {
-  BATTLE_TURBO_HOTKEYS,
   Card,
   CheckboxField,
   HOTKEY_OPTIONS,
@@ -26,7 +28,6 @@ import {
   StatusPill,
   TextField,
   clampText,
-  defaultSettings,
   mergeSettings
 } from './components';
 import {
@@ -41,6 +42,9 @@ import {
   formatHeroSpeAddDataType,
   validateCustomTalentPack
 } from './customTalents';
+import { SettingsWorkspace } from './settings/SettingsWorkspace';
+import { ConfirmDialog, LaunchActions, SidebarNav, StatusCenter } from './layout';
+import type { ConfirmRequest } from './layout';
 
 type NavKey =
   | 'home'
@@ -122,6 +126,11 @@ function formatProgressTimestamp(value: string): string {
   }).format(date);
 }
 
+function optionsWithCurrent(current: string, options: string[]): string[] {
+  const normalized = current.trim();
+  return !normalized || options.includes(normalized) ? options : [normalized, ...options];
+}
+
 async function copyText(value: string): Promise<void> {
   await navigator.clipboard.writeText(value);
 }
@@ -154,12 +163,21 @@ function LogPreview(props: { title: string; body: string }) {
 }
 
 function summarizeCustomTalent(talent: CustomTalentDefinition): string {
-  return `${talent.conditions.length} 条条件 · ${talent.effects.length} 条效果 · ${talent.durationDays} 天`;
+  const firstCondition = talent.conditions[0];
+  const firstEffect = talent.effects[0];
+  const conditionSummary = firstCondition
+    ? `首个条件：${formatCustomTalentConditionType(firstCondition.type)} · ${formatBaseAttriType(firstCondition.stat)} ≥ ${firstCondition.min}`
+    : '暂无条件';
+  const effectSummary = firstEffect
+    ? `首个效果：${formatHeroSpeAddDataType(firstEffect.effectType)} ${firstEffect.value >= 0 ? '+' : ''}${firstEffect.value}`
+    : '暂无效果';
+  return `${talent.conditions.length} 条条件 · ${talent.effects.length} 条效果 · ${talent.durationDays} 天 · ${conditionSummary} · ${effectSummary}`;
 }
 
 export function App() {
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
-  const [settings, setSettings] = useState<VisibleSettings>(defaultSettings());
+  const [settings, setSettings] = useState<VisibleSettings>(() => createDefaultVisibleSettings());
+  const [savedSettingsText, setSavedSettingsText] = useState(() => JSON.stringify(createDefaultVisibleSettings()));
   const [activePage, setActivePage] = useState<NavKey>('home');
   const [working, setWorking] = useState<string | null>(null);
   const [message, setMessage] = useState('正在加载...');
@@ -176,17 +194,21 @@ export function App() {
   const [savedCustomTalentPackText, setSavedCustomTalentPackText] = useState(() => JSON.stringify(createEmptyCustomTalentPack()));
   const [selectedCustomTalentId, setSelectedCustomTalentId] = useState<string | null>(null);
   const [customTalentLoadError, setCustomTalentLoadError] = useState<string | null>(null);
+  const [customTalentsReady, setCustomTalentsReady] = useState(false);
+  const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
+  const pageTitleRef = useRef<HTMLHeadingElement>(null);
 
   const navItems = useMemo<NavItem[]>(
     () => [
       { key: 'home', label: '主页', eyebrow: 'Launcher', title: '主页', description: '集中处理安装、自检、保存配置与安全启动。' },
       { key: 'updates', label: '更新记录', eyebrow: 'OTA', title: '更新记录', description: '查看当前版本、GitHub Release 说明与 OTA 运行日志。' },
       { key: 'systems', label: '系统更改', eyebrow: 'Runtime', title: '系统更改', description: '整理全局运行控制、时间冻结与环境自检。' },
-      { key: 'expTalent', label: '经验值，天赋相关', eyebrow: 'Growth', title: '经验值，天赋相关', description: '把经验成长、心悟机制与突破天赋放在同一页。' },
+      { key: 'expTalent', label: '成长与天赋', eyebrow: 'Growth', title: '成长与天赋', description: '把经验成长、心悟机制与突破天赋放在同一页。' },
       { key: 'customTalent', label: '自定义天赋', eyebrow: 'Creator', title: '自定义天赋', description: '创建、编辑和管理多个自定义天赋，保存后下次启动游戏生效。' },
-      { key: 'worldExplore', label: '大地图，探索类', eyebrow: 'Explore', title: '大地图，探索类', description: '专注探索体力、世界地图坐骑与移动体验。' },
-      { key: 'tradeCraft', label: '交易，制造类', eyebrow: 'Commerce', title: '交易，制造类', description: '交易、背包与制造增产统一归档。' },
-      { key: 'socialTeam', label: '聊天，关系，组队', eyebrow: 'Social', title: '聊天，关系，组队', description: '把聊天配额、关系提升与组队辅助集中展示。' },
+      { key: 'worldExplore', label: '探索与大地图', eyebrow: 'Explore', title: '探索与大地图', description: '专注探索体力、世界地图坐骑与移动体验。' },
+      { key: 'tradeCraft', label: '交易与制造', eyebrow: 'Commerce', title: '交易与制造', description: '交易、背包与制造增产统一归档。' },
+      { key: 'socialTeam', label: '社交与组队', eyebrow: 'Social', title: '社交与组队', description: '把聊天配额、关系提升与组队辅助集中展示。' },
       { key: 'battle', label: '战斗相关', eyebrow: 'Battle', title: '战斗相关', description: '收纳战斗数值、战斗节奏与战斗加速。' }
     ],
     []
@@ -194,12 +216,37 @@ export function App() {
 
   const activeNav = navItems.find((item) => item.key === activePage) ?? navItems[0];
 
+  const navigateTo = (page: NavKey) => {
+    setActivePage(page);
+  };
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    pageTitleRef.current?.focus({ preventScroll: true });
+  }, [activePage]);
+
   const updateSetting = <K extends keyof VisibleSettings>(key: K, value: VisibleSettings[K]) => {
     setSettings((current) => mergeSettings(current, { [key]: value } as Partial<VisibleSettings>));
   };
 
+  const acceptVisibleSettings = (nextSettings: VisibleSettings) => {
+    setSettings(nextSettings);
+    setSavedSettingsText(JSON.stringify(nextSettings));
+  };
+
+  const acceptVisibleSettingsIfUnchanged = (nextSettings: VisibleSettings, submittedText: string) => {
+    setSavedSettingsText(JSON.stringify(nextSettings));
+    setSettings((current) => reconcilePersistedValue(current, submittedText, nextSettings));
+  };
+
   const replaceCustomTalentPack = (nextPack: CustomTalentPack) => {
     setCustomTalentPack(cloneCustomTalentPack(nextPack));
+  };
+
+  const acceptCustomTalentPackIfUnchanged = (nextPack: CustomTalentPack, submittedText: string) => {
+    const persistedPack = cloneCustomTalentPack(nextPack);
+    setSavedCustomTalentPackText(JSON.stringify(persistedPack));
+    setCustomTalentPack((current) => reconcilePersistedValue(current, submittedText, persistedPack));
   };
 
   const updateSelectedTalent = (updater: (talent: CustomTalentDefinition) => CustomTalentDefinition) => {
@@ -224,12 +271,15 @@ export function App() {
   };
 
   const refreshCustomTalents = async (targetGameRoot?: string) => {
+    setCustomTalentsReady(false);
+    setCustomTalentLoadError(null);
     if (!targetGameRoot) {
       const emptyPack = createEmptyCustomTalentPack();
       replaceCustomTalentPack(emptyPack);
       setSavedCustomTalentPackText(JSON.stringify(emptyPack));
       setSelectedCustomTalentId(null);
       setCustomTalentLoadError(null);
+      setCustomTalentsReady(true);
       return emptyPack;
     }
 
@@ -238,6 +288,7 @@ export function App() {
       replaceCustomTalentPack(nextPack);
       setSavedCustomTalentPackText(JSON.stringify(nextPack));
       setCustomTalentLoadError(null);
+      setCustomTalentsReady(true);
       return nextPack;
     }
     catch (err) {
@@ -253,8 +304,9 @@ export function App() {
   const refresh = async (nextMessage?: string, preserveMessage = false, syncSettings = true) => {
     const next = await window.longyin.getSnapshot();
     setSnapshot(next);
+    setInitialLoadError(null);
     if (syncSettings) {
-      setSettings(next.visibleSettings);
+      acceptVisibleSettings(next.visibleSettings);
     }
     setUpdate(next.update);
     if (!preserveMessage) {
@@ -297,19 +349,25 @@ export function App() {
     return nextHistory;
   };
 
-  const run = async (label: string, action: () => Promise<any>) => {
+  const run = async (label: string, action: () => Promise<any>, syncSettings = false) => {
+    const submittedSettingsText = JSON.stringify(settings);
     setWorking(label);
     clearError();
     try {
       const result = await action();
       if (result?.updatedSnapshot) {
         setSnapshot(result.updatedSnapshot);
-        setSettings(result.updatedSnapshot.visibleSettings);
+        if (syncSettings) {
+          acceptVisibleSettingsIfUnchanged(result.updatedSnapshot.visibleSettings, submittedSettingsText);
+        }
         setUpdate(result.updatedSnapshot.update);
         setMessage(result.message ?? label);
       }
       else {
-        await refresh(label);
+        const nextSnapshot = await refresh(label, false, false);
+        if (syncSettings) {
+          acceptVisibleSettingsIfUnchanged(nextSnapshot.visibleSettings, submittedSettingsText);
+        }
       }
       return result;
     }
@@ -326,6 +384,7 @@ export function App() {
   useEffect(() => {
     void refresh().catch((err: Error) => {
       showError(err.message);
+      setInitialLoadError(err.message);
       setMessage('加载状态失败。');
     });
     void refreshReleaseHistory(true).catch(() => undefined);
@@ -403,7 +462,7 @@ export function App() {
   const gameRoot = snapshot?.gameRoot ?? '';
   const gameInstalled = snapshot?.gameInstalled ?? false;
   const health =
-    snapshot?.health ?? { healthy: false, needsRepair: false, summary: '正在加载自检状态。', driftedFiles: [], checks: [] };
+    snapshot?.health ?? { healthy: false, needsRepair: false, launchBlocked: false, summary: '正在加载自检状态。', driftedFiles: [], checks: [] };
   const payloadRoot = snapshot?.payloadRoot ?? '';
   const userDataRoot = snapshot?.userDataRoot ?? '';
   const startupLogPath = snapshot?.startupLogPath ?? '';
@@ -420,15 +479,44 @@ export function App() {
   const selectedCustomTalent =
     customTalentPack.talents.find((talent) => talent.id === selectedCustomTalentId) ?? customTalentPack.talents[0] ?? null;
   const customTalentValidationErrors = validateCustomTalentPack(customTalentPack);
+  const settingsDirty = JSON.stringify(settings) !== savedSettingsText;
   const customTalentDirty = JSON.stringify(customTalentPack) !== savedCustomTalentPackText;
+  const customTalentWriteBlocked = !customTalentsReady && !customTalentLoadError;
+  const configurationStatus = deriveConfigurationStatus({
+    gameRoot,
+    customTalentsReady,
+    customTalentLoadError,
+    settingsDirty,
+    customTalentDirty
+  });
+  const launchFacts = {
+    gameRoot,
+    working,
+    launchBusy,
+    launchReady,
+    launchNote: snapshot?.launchNote,
+    customTalentsReady,
+    customTalentLoadError,
+    customTalentValidationErrors,
+    settingsDirty,
+    customTalentDirty
+  };
+  const saveAndLaunchAvailability = deriveLaunchAvailability({ ...launchFacts, mode: 'save-and-launch' });
+  const launchSavedAvailability = deriveLaunchAvailability({ ...launchFacts, mode: 'launch-saved' });
+  const saveAvailability = {
+    enabled: working === null && Boolean(gameRoot),
+    disabledReason: working ? `${working}，请稍候。` : gameRoot ? null : '请先选择游戏目录。',
+    warning: null
+  };
 
   const save = async () => {
+    const submittedSettingsText = JSON.stringify(settings);
     setWorking('保存中');
     clearError();
     try {
       const nextSnapshot = await window.longyin.saveSettings(settings);
       setSnapshot(nextSnapshot);
-      setSettings(nextSnapshot.visibleSettings);
+      acceptVisibleSettingsIfUnchanged(nextSnapshot.visibleSettings, submittedSettingsText);
       setUpdate(nextSnapshot.update);
       setMessage('设置已保存。');
     }
@@ -441,18 +529,18 @@ export function App() {
   };
 
   const saveCustomTalents = async () => {
+    const submittedCustomTalentText = JSON.stringify(customTalentPack);
     setWorking('应用自定义天赋');
     clearError();
     try {
       const result = await window.longyin.saveCustomTalents(customTalentPack);
-      replaceCustomTalentPack(result.pack);
-      setSavedCustomTalentPackText(JSON.stringify(result.pack));
+      acceptCustomTalentPackIfUnchanged(result.pack, submittedCustomTalentText);
       setCustomTalentLoadError(null);
+      setCustomTalentsReady(true);
       setMessage(result.message);
     }
     catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setCustomTalentLoadError(message);
       showError(message);
       setMessage('无法保存自定义天赋。');
     }
@@ -492,11 +580,17 @@ export function App() {
     if (!selectedCustomTalent) {
       return;
     }
-
-    setCustomTalentPack((current) => ({
-      version: current.version,
-      talents: current.talents.filter((talent) => talent.id !== selectedCustomTalent.id)
-    }));
+    const talent = selectedCustomTalent;
+    setConfirmRequest({
+      title: '删除自定义天赋？',
+      body: `“${talent.name || '未命名天赋'}”将从当前编辑列表中移除；保存前仍可取消本次修改。`,
+      confirmLabel: '删除天赋',
+      tone: 'danger',
+      onConfirm: () => setCustomTalentPack((current) => ({
+        version: current.version,
+        talents: current.talents.filter((item) => item.id !== talent.id)
+      }))
+    });
   };
 
   const moveSelectedTalent = (direction: -1 | 1) => {
@@ -533,19 +627,77 @@ export function App() {
   };
 
   const saveAndLaunch = async () => {
-    await run('保存并启动', () => window.longyin.saveAndLaunch(settings));
+    const submittedCustomTalentText = JSON.stringify(customTalentPack);
+    const result = await run(
+      '保存并启动',
+      () => window.longyin.saveAndLaunch({ settings, customTalents: customTalentPack }),
+      true
+    );
+    if (result?.customTalents) {
+      acceptCustomTalentPackIfUnchanged(result.customTalents, submittedCustomTalentText);
+      setCustomTalentLoadError(null);
+      setCustomTalentsReady(true);
+    }
+  };
+
+  const setLaunchOverlayWithGame = async (value: boolean) => {
+    setWorking('保存 Overlay 设置');
+    clearError();
+    try {
+      const next = await window.longyin.setLauncherPreferences({ launchOverlayWithGame: value });
+      setSnapshot(next);
+      setMessage(value ? '已启用随游戏启动 Overlay。' : '已关闭随游戏启动 Overlay。');
+    }
+    catch (err) {
+      showError(err instanceof Error ? err.message : String(err));
+    }
+    finally {
+      setWorking(null);
+    }
+  };
+
+  const startOverlay = async () => {
+    await run('启动 Overlay', () => window.longyin.startOverlay(), false);
+  };
+
+  const stopOverlay = async () => {
+    await run('关闭 Overlay', () => window.longyin.stopOverlay(), false);
   };
 
   const install = async () => {
-    await run('安装模组', () => window.longyin.install());
+    await run('安装模组', () => window.longyin.install(), false);
   };
 
   const uninstall = async () => {
-    await run('卸载模组', () => window.longyin.uninstall());
+    await run('卸载模组', () => window.longyin.uninstall(), false);
+  };
+
+  const requestUninstall = () => {
+    setConfirmRequest({
+      title: '卸载当前模组？',
+      body: '将移除由启动器安装的模组文件；你的游戏存档和未由启动器接管的文件不会删除。',
+      confirmLabel: '确认卸载',
+      tone: 'danger',
+      onConfirm: () => void uninstall()
+    });
   };
 
   const launch = async () => {
-    await run('启动游戏', () => window.longyin.launch());
+    await run('启动游戏', () => window.longyin.launch(), false);
+  };
+
+  const requestLaunchSaved = () => {
+    if (!settingsDirty && !customTalentDirty) {
+      void launch();
+      return;
+    }
+
+    setConfirmRequest({
+      title: '使用已保存配置启动？',
+      body: '当前界面仍有未保存修改。本次游戏只会读取上次保存的配置，界面中的修改会继续保留。',
+      confirmLabel: '启动已保存配置',
+      onConfirm: () => void launch()
+    });
   };
 
   const pickGameRoot = async () => {
@@ -554,7 +706,7 @@ export function App() {
     try {
       const next = await window.longyin.pickGameRoot();
       setSnapshot(next);
-      setSettings(next.visibleSettings);
+      acceptVisibleSettings(next.visibleSettings);
       setUpdate(next.update);
       setMessage('游戏目录已选择。');
     }
@@ -592,7 +744,6 @@ export function App() {
       const result = await window.longyin.applyUpdate();
       if (result?.updatedSnapshot) {
         setSnapshot(result.updatedSnapshot);
-        setSettings(result.updatedSnapshot.visibleSettings);
         setUpdate(result.updatedSnapshot.update);
         setMessage(result.message ?? '更新包已下载。请等待应用自动重启。');
       }
@@ -645,107 +796,97 @@ export function App() {
   if (!snapshot) {
     return (
       <div className="shell shell--loading">
-        <div className="loading-card">正在加载 龙胤立志传 Pro Max...</div>
+        <div className="loading-card">
+          {initialLoadError ? (
+            <div className="stack">
+              <strong>启动器状态加载失败</strong>
+              <p className="body-copy">{initialLoadError}</p>
+              <button
+                className="btn btn--primary"
+                onClick={() => {
+                  setInitialLoadError(null);
+                  setMessage('正在重试加载...');
+                  void refresh().catch((err: Error) => {
+                    showError(err.message);
+                    setInitialLoadError(err.message);
+                  });
+                }}
+              >
+                重试加载
+              </button>
+            </div>
+          ) : (
+            '正在加载 龙胤立志传 Pro Max...'
+          )}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="shell">
+      <ConfirmDialog request={confirmRequest} onCancel={() => setConfirmRequest(null)} />
       <div className="ambient ambient--one" />
       <div className="ambient ambient--two" />
       <div className="ambient ambient--three" />
 
       <div className="dashboard">
-        <aside className="sidebar">
-          <div className="sidebar__brand">
-            <span className="eyebrow">龙胤立志传 Pro Max</span>
-            <h1>控制台</h1>
-            <p>左侧按功能分区，右侧专注当前页面，不再把所有开关堆在一起。</p>
-          </div>
-
-          <nav className="sidebar__nav" aria-label="主导航">
-            {navItems.map((item) => (
-              <button
-                key={item.key}
-                className={`nav-item ${activePage === item.key ? 'nav-item--active' : ''}`}
-                onClick={() => setActivePage(item.key)}
-              >
-                <span className="nav-item__eyebrow">{item.eyebrow}</span>
-                <strong>{item.label}</strong>
-                <span className="nav-item__desc">{item.description}</span>
-              </button>
-            ))}
-          </nav>
-
-          <div className="sidebar__panel">
-            <div className="sidebar__panel-row">
-              <span>应用版本</span>
-              <strong>{snapshot.appVersion}</strong>
-            </div>
-            <div className="sidebar__panel-row">
-              <span>游戏目录</span>
-              <strong>{gameRoot ? '已连接' : '未选择'}</strong>
-            </div>
-            <div className="sidebar__panel-row">
-              <span>模组状态</span>
-              <strong>{gameInstalled ? '已就绪' : gameRoot ? '需修复' : '未安装'}</strong>
-            </div>
-            <div className="sidebar__panel-row">
-              <span>更新状态</span>
-              <strong>{update?.updateAvailable ? `可升级到 ${update.latestVersion}` : '已是最新'}</strong>
-            </div>
-          </div>
-        </aside>
+        <SidebarNav
+          items={navItems}
+          activeKey={activePage}
+          onNavigate={navigateTo}
+          statusRows={[
+            { label: '应用版本', value: snapshot.appVersion },
+            { label: '游戏目录', value: gameRoot ? '已连接' : '未选择' },
+            { label: '模组状态', value: gameInstalled ? '已就绪' : gameRoot ? '需修复' : '未安装' },
+            { label: '更新状态', value: update?.updateAvailable ? `可升级到 ${update.latestVersion}` : '已是最新' },
+            { label: '配置状态', value: configurationStatus.label, tone: configurationStatus.key === 'saved' ? 'good' : 'warn' }
+          ]}
+        />
 
         <div className="workspace">
           <header className="workspace__hero card">
             <div className="workspace__hero-copy">
               <span className="eyebrow">{activeNav.eyebrow}</span>
-              <h2>{activeNav.title}</h2>
+              <h1 ref={pageTitleRef} tabIndex={-1} data-page-title>
+                {activeNav.title}
+              </h1>
               <p>{activeNav.description}</p>
             </div>
 
-            <div className="workspace__hero-actions">
-              <button className="btn btn--primary" onClick={save} disabled={working !== null}>
-                保存设置
-              </button>
-              <button className="btn btn--ghost" onClick={saveAndLaunch} disabled={working !== null || !launchReady}>
-                {launchBusy ? '启动中，请等待' : '保存并启动'}
-              </button>
-              <button
-                className={`btn btn--launch ${launchBusy ? 'btn--launching' : ''}`}
-                onClick={launch}
-                disabled={working !== null || !launchReady}
-              >
-                <span className="btn--launch__glow" />
-                <span className="btn--launch__label">{launchBusy ? '启动中，请等待' : '启动游戏'}</span>
-              </button>
-            </div>
+            <LaunchActions
+              save={{ run: () => void save(), availability: saveAvailability }}
+              saveAndLaunch={{ run: () => void saveAndLaunch(), availability: saveAndLaunchAvailability }}
+              launchSaved={{ run: requestLaunchSaved, availability: launchSavedAvailability }}
+              configurationDirty={settingsDirty || customTalentDirty}
+              launchBusy={launchBusy}
+            />
           </header>
 
           <section className="summary-grid">
-            <StatusPill label="应用版本" value={snapshot.appVersion} tone="good" />
-            <StatusPill label="游戏目录" value={gameRoot ? '已连接' : '未选择'} tone={gameRoot ? 'good' : 'warn'} />
-            <StatusPill label="模组状态" value={gameInstalled ? '已就绪' : gameRoot ? '需修复' : '未安装'} tone={gameInstalled ? 'good' : 'warn'} />
+            <StatusPill label="配置状态" value={configurationStatus.label} tone={configurationStatus.tone} />
             <StatusPill
               label="启动状态"
               value={snapshot.launchState === 'starting' ? '启动中' : snapshot.launchState === 'running' ? '运行中' : '待命'}
               tone={launchTone(snapshot.launchState)}
             />
             <StatusPill label="环境自检" value={health.summary} tone={healthTone(snapshot)} />
-            <StatusPill label="OTA 通道" value={update?.updateAvailable ? `发现 ${update.latestVersion}` : '已是最新'} tone={update?.updateAvailable ? 'warn' : 'good'} />
           </section>
 
-          <section className="status-strip">
-            <div className="status-strip__label">当前状态</div>
-            <div className="status-strip__value">{working ?? message}</div>
-          </section>
+          <StatusCenter
+            message={message}
+            working={working}
+            configuration={configurationStatus}
+            dirtyScopes={[
+              ...(gameRoot && settingsDirty ? ['普通设置未保存'] : []),
+              ...(gameRoot && customTalentsReady && customTalentDirty ? ['自定义天赋未应用'] : [])
+            ]}
+          />
 
-          {copyNotice ? <div className="copy-banner">{copyNotice}</div> : null}
+          {copyNotice ? <div className="copy-banner" role="status" aria-live="polite">{copyNotice}</div> : null}
 
           {error ? (
-            <div className="error-banner">
+            <div className="error-banner" role="alert" aria-live="assertive">
               <div className="error-banner__head">
                 <div>
                   <strong>最近错误</strong>
@@ -829,7 +970,7 @@ export function App() {
                     <button className="btn" onClick={install} disabled={working !== null || !gameRoot || launchBusy}>
                       安装模组
                     </button>
-                    <button className="btn" onClick={uninstall} disabled={working !== null || !gameRoot || launchBusy}>
+                    <button className="btn" onClick={requestUninstall} disabled={working !== null || !gameRoot || launchBusy}>
                       卸载模组
                     </button>
                     <button className="btn" onClick={checkUpdates} disabled={working !== null}>
@@ -1025,7 +1166,7 @@ export function App() {
             ) : null}
 
             {activePage === 'systems' ? (
-              <div className="page-grid">
+              <div className="page-grid page-grid--systems page-grid--settings">
                 <Card title="时间与运行控制" eyebrow="Systems">
                   <div className="field-grid">
                     <CheckboxField
@@ -1049,6 +1190,28 @@ export function App() {
                   </div>
                 </Card>
 
+                <Card title="游戏内悬浮信息窗" eyebrow="Overlay">
+                  <div className="stack">
+                    <CheckboxField
+                      label="随游戏启动 Overlay"
+                      value={snapshot.launcherPreferences.launchOverlayWithGame}
+                      onChange={(value) => void setLaunchOverlayWithGame(value)}
+                    />
+                    <p className="body-copy body-copy--muted">
+                      这是显示在游戏旁的实时信息小窗，方便你无需切回启动器就能查看辅助信息。它不会重复启动；如果由启动器随游戏开启，退出游戏时也会自动关闭。
+                    </p>
+                    <div className="inline-actions">
+                      <button className="btn" onClick={startOverlay} disabled={working !== null || snapshot.overlayRunning}>
+                        {snapshot.overlayRunning ? 'Overlay 已运行' : '启动 Overlay'}
+                      </button>
+                      <button className="btn" onClick={stopOverlay} disabled={working !== null || !snapshot.overlayRunning}>
+                        关闭 Overlay
+                      </button>
+                    </div>
+                  </div>
+                </Card>
+
+                <div className="system-environment-card">
                 <Card title="环境自检与目录" eyebrow="Environment">
                   <div className="stack">
                     <p className="body-copy">
@@ -1067,120 +1230,28 @@ export function App() {
                         打开载荷目录
                       </button>
                     </div>
-                    <CheckList
-                      items={health.checks.map((check) => `${check.ok ? '已通过' : '需处理'} · ${check.label} · ${check.detail}`)}
-                      empty={gameRoot ? '没有可展示的环境检查。' : '选择游戏目录后，这里会出现完整自检信息。'}
-                    />
+                    <details className="health-details">
+                      <summary>
+                        <span>健康检查详情</span>
+                        <strong>{health.summary}</strong>
+                      </summary>
+                      <CheckList
+                        items={health.checks.map((check) => `${check.ok ? '已通过' : '需处理'} · ${check.label} · ${check.detail}`)}
+                        empty={gameRoot ? '没有可展示的环境检查。' : '选择游戏目录后，这里会出现完整自检信息。'}
+                      />
+                    </details>
                   </div>
                 </Card>
+                </div>
               </div>
             ) : null}
 
-            {activePage === 'expTalent' ? (
-              <div className="page-grid">
-                <Card title="经验成长" eyebrow="EXP">
-                  <div className="field-grid">
-                    <NumberField
-                      label="书籍经验倍率"
-                      value={settings.expMultiplier}
-                      onChange={(value) => updateSetting('expMultiplier', value)}
-                      min={1}
-                      max={999}
-                      step={1}
-                    />
-                    <NumberField
-                      label="战斗武学经验倍率"
-                      value={settings.battleSkillExpMultiplier}
-                      onChange={(value) => updateSetting('battleSkillExpMultiplier', value)}
-                      min={1}
-                      max={999}
-                      step={1}
-                      hint="只影响战斗内通过出招获得的武学经验，敌我双方都会生效。"
-                    />
-                    <NumberField
-                      label="创作点倍率"
-                      value={settings.creationPointMultiplier}
-                      onChange={(value) => updateSetting('creationPointMultiplier', value)}
-                      min={1}
-                      max={999}
-                      step={1}
-                    />
-                  </div>
-                  <p className="body-copy body-copy--muted">
-                    武学写书现在直接按角色属性结算消耗，不再提供独立倍率开关。
-                  </p>
-                </Card>
-
-                <Card title="心悟机制" eyebrow="Insight">
-                  <div className="field-grid">
-                    <NumberField
-                      label="心悟触发几率"
-                      value={settings.dailySkillInsightChancePercent}
-                      onChange={(value) => updateSetting('dailySkillInsightChancePercent', value)}
-                      min={0}
-                      max={100}
-                      step={1}
-                      suffix="%"
-                    />
-                    <NumberField
-                      label="心悟经验值比率"
-                      value={settings.dailySkillInsightExpPercent}
-                      onChange={(value) => updateSetting('dailySkillInsightExpPercent', value)}
-                      min={0}
-                      max={999}
-                      step={0.5}
-                      suffix="%"
-                    />
-                    <CheckboxField
-                      label="心悟经验值按武学品级调整"
-                      value={settings.dailySkillInsightUseRarityScaling}
-                      onChange={(value) => updateSetting('dailySkillInsightUseRarityScaling', value)}
-                    />
-                    <NumberField
-                      label="心悟触发频率"
-                      value={settings.dailySkillInsightRealtimeIntervalSeconds}
-                      onChange={(value) => updateSetting('dailySkillInsightRealtimeIntervalSeconds', value)}
-                      min={0}
-                      max={999}
-                      step={0.5}
-                      suffix="秒"
-                    />
-                  </div>
-                </Card>
-
-                <Card title="突破成功额外天赋" eyebrow="Talent">
-                  <div className="field-grid">
-                    <CheckboxField
-                      label="启用突破成功额外天赋"
-                      value={settings.skillTalentEnabled}
-                      onChange={(value) => updateSetting('skillTalentEnabled', value)}
-                    />
-                    <CheckboxField
-                      label="仅玩家角色"
-                      value={settings.skillTalentPlayerOnly}
-                      onChange={(value) => updateSetting('skillTalentPlayerOnly', value)}
-                    />
-                    <NumberField
-                      label="武学等级触发"
-                      value={settings.skillTalentLevelThreshold}
-                      onChange={(value) => updateSetting('skillTalentLevelThreshold', value)}
-                      min={1}
-                      max={999}
-                      step={1}
-                      hint="如果设为 5，武学修炼到 5 级时触发天赋奖励。"
-                    />
-                    <NumberField
-                      label="品级天赋倍率"
-                      value={settings.skillTalentTierPointMultiplier}
-                      onChange={(value) => updateSetting('skillTalentTierPointMultiplier', value)}
-                      min={0.1}
-                      max={999}
-                      step={0.25}
-                      hint="如果倍率 = 1，灰级 = 1 点、青级 = 2 点天赋。"
-                    />
-                  </div>
-                </Card>
-              </div>
+            {activePage === 'expTalent' ||
+            activePage === 'worldExplore' ||
+            activePage === 'tradeCraft' ||
+            activePage === 'socialTeam' ||
+            activePage === 'battle' ? (
+              <SettingsWorkspace page={activePage} settings={settings} onSettingChange={updateSetting} />
             ) : null}
 
             {activePage === 'customTalent' ? (
@@ -1252,7 +1323,7 @@ export function App() {
                           <button
                             className="btn btn--primary"
                             onClick={saveCustomTalents}
-                            disabled={working !== null || !gameRoot || customTalentValidationErrors.length > 0 || !customTalentDirty}
+                            disabled={working !== null || !gameRoot || customTalentWriteBlocked || customTalentValidationErrors.length > 0 || !customTalentDirty}
                           >
                             应用到游戏配置
                           </button>
@@ -1313,6 +1384,7 @@ export function App() {
                         <div className="stack">
                           {selectedCustomTalent.conditions.map((condition, conditionIndex) => (
                             <div key={`${selectedCustomTalent.id}-condition-${conditionIndex}`} className="array-row">
+                              <div className="array-row__title">条件 {conditionIndex + 1}</div>
                               <div className="array-row__grid array-row__grid--conditions">
                                 <SelectField
                                   label="类型"
@@ -1331,6 +1403,7 @@ export function App() {
                                     }))
                                   }
                                   options={[...CUSTOM_TALENT_CONDITION_TYPES]}
+                                  getOptionLabel={formatCustomTalentConditionType}
                                   hint={formatCustomTalentConditionType(condition.type)}
                                 />
                                 <SelectField
@@ -1350,6 +1423,7 @@ export function App() {
                                     }))
                                   }
                                   options={[...BASE_ATTRI_TYPE_NAMES]}
+                                  getOptionLabel={formatBaseAttriType}
                                   hint={formatBaseAttriType(condition.stat)}
                                 />
                                 <NumberField
@@ -1416,6 +1490,7 @@ export function App() {
                         <div className="stack">
                           {selectedCustomTalent.effects.map((effect, effectIndex) => (
                             <div key={`${selectedCustomTalent.id}-effect-${effectIndex}`} className="array-row">
+                              <div className="array-row__title">效果 {effectIndex + 1}</div>
                               <div className="array-row__grid array-row__grid--effects">
                                 <SelectField
                                   label="效果类型"
@@ -1434,6 +1509,7 @@ export function App() {
                                     }))
                                   }
                                   options={[...HERO_SPE_ADD_DATA_TYPE_NAMES]}
+                                  getOptionLabel={formatHeroSpeAddDataType}
                                   hint={formatHeroSpeAddDataType(effect.effectType)}
                                 />
                                 <NumberField
@@ -1511,7 +1587,7 @@ export function App() {
                         <button
                           className="btn btn--primary"
                           onClick={saveCustomTalents}
-                          disabled={working !== null || !gameRoot || customTalentValidationErrors.length > 0 || !customTalentDirty}
+                          disabled={working !== null || !gameRoot || customTalentWriteBlocked || customTalentValidationErrors.length > 0 || !customTalentDirty}
                         >
                           应用到游戏配置
                         </button>
@@ -1522,295 +1598,9 @@ export function App() {
               </div>
             ) : null}
 
-            {activePage === 'worldExplore' ? (
-              <div className="page-grid">
-                <Card title="探索辅助" eyebrow="Explore">
-                  <div className="stack">
-                    <p className="body-copy">
-                      这页只保留确认有效的探索与大地图项。已确认无效的“宝箱自动选最高价值”已从界面和脚本中移除。
-                    </p>
-                    <div className="field-grid field-grid--single">
-                      <CheckboxField
-                        label="锁定探索体力"
-                        value={settings.lockStamina}
-                        onChange={(value) => updateSetting('lockStamina', value)}
-                      />
-                    </div>
-                  </div>
-                </Card>
 
-                <Card title="世界地图坐骑" eyebrow="World Map">
-                  <div className="field-grid">
-                    <CheckboxField
-                      label="锁定加速体力"
-                      value={settings.lockHorseTurboStamina}
-                      onChange={(value) => updateSetting('lockHorseTurboStamina', value)}
-                      hint="避免体力耗尽时加速提前结束。"
-                    />
-                    <NumberField
-                      label="坐骑体力倍率"
-                      value={settings.horseStaminaMultiplier}
-                      onChange={(value) => updateSetting('horseStaminaMultiplier', value)}
-                      min={0.01}
-                      max={999}
-                      step={0.25}
-                      hint="大于 1 的数值会让坐骑持续更久。"
-                    />
-                    <NumberField
-                      label="基础速度倍率"
-                      value={settings.horseBaseSpeedMultiplier}
-                      onChange={(value) => updateSetting('horseBaseSpeedMultiplier', value)}
-                      min={0.01}
-                      max={999}
-                      step={0.25}
-                    />
-                    <NumberField
-                      label="加速速度倍率"
-                      value={settings.horseTurboSpeedMultiplier}
-                      onChange={(value) => updateSetting('horseTurboSpeedMultiplier', value)}
-                      min={0.01}
-                      max={999}
-                      step={0.25}
-                    />
-                    <NumberField
-                      label="加速持续倍率"
-                      value={settings.horseTurboDurationMultiplier}
-                      onChange={(value) => updateSetting('horseTurboDurationMultiplier', value)}
-                      min={0.01}
-                      max={999}
-                      step={0.25}
-                    />
-                    <NumberField
-                      label="加速冷却倍率"
-                      value={settings.horseTurboCooldownMultiplier}
-                      onChange={(value) => updateSetting('horseTurboCooldownMultiplier', value)}
-                      min={0.01}
-                      max={999}
-                      step={0.25}
-                    />
-                  </div>
-                </Card>
-              </div>
-            ) : null}
 
-            {activePage === 'tradeCraft' ? (
-              <div className="page-grid">
-                <Card title="交易与背包" eyebrow="Trade">
-                  <div className="field-grid">
-                    <NumberField
-                      label="商人现金下限"
-                      value={settings.merchantCarryCash}
-                      onChange={(value) => updateSetting('merchantCarryCash', value)}
-                      min={0}
-                      max={999999999}
-                      step={1000}
-                    />
-                    <CheckboxField
-                      label="珍宝自动加入购物车"
-                      value={settings.treasureAutoTradeEnabled}
-                      onChange={(value) => updateSetting('treasureAutoTradeEnabled', value)}
-                      hint="进入珍宝铺时，自动把预估有利润的未鉴定珍宝加入购物车；不会替你结账。"
-                    />
-                    <NumberField
-                      label="幸运返利命中概率"
-                      value={settings.luckyHitChancePercent}
-                      onChange={(value) => updateSetting('luckyHitChancePercent', value)}
-                      min={0}
-                      max={100}
-                      step={1}
-                      suffix="%"
-                    />
-                    <CheckboxField
-                      label="忽略负重"
-                      value={settings.ignoreCarryWeight}
-                      onChange={(value) => updateSetting('ignoreCarryWeight', value)}
-                    />
-                    <NumberField
-                      label="负重上限"
-                      value={settings.carryWeightCap}
-                      onChange={(value) => updateSetting('carryWeightCap', value)}
-                      min={0}
-                      max={999999999}
-                      step={1000}
-                    />
-                  </div>
-                </Card>
 
-                <Card title="制造增产" eyebrow="Craft">
-                  <div className="field-grid">
-                    <CheckboxField
-                      label="追加材料按大阶增产"
-                      value={settings.craftRandomPickUpgrade}
-                      onChange={(value) => updateSetting('craftRandomPickUpgrade', value)}
-                      hint="按追加材料的大阶给成品加数量。下面 5 个数值分别对应一阶到五阶。"
-                    />
-                    <NumberField
-                      label="一阶额外数量"
-                      value={settings.craftTier1ExtraItems}
-                      onChange={(value) => updateSetting('craftTier1ExtraItems', value)}
-                      min={0}
-                      max={999}
-                      step={1}
-                    />
-                    <NumberField
-                      label="二阶额外数量"
-                      value={settings.craftTier2ExtraItems}
-                      onChange={(value) => updateSetting('craftTier2ExtraItems', value)}
-                      min={0}
-                      max={999}
-                      step={1}
-                    />
-                    <NumberField
-                      label="三阶额外数量"
-                      value={settings.craftTier3ExtraItems}
-                      onChange={(value) => updateSetting('craftTier3ExtraItems', value)}
-                      min={0}
-                      max={999}
-                      step={1}
-                    />
-                    <NumberField
-                      label="四阶额外数量"
-                      value={settings.craftTier4ExtraItems}
-                      onChange={(value) => updateSetting('craftTier4ExtraItems', value)}
-                      min={0}
-                      max={999}
-                      step={1}
-                    />
-                    <NumberField
-                      label="五阶额外数量"
-                      value={settings.craftTier5ExtraItems}
-                      onChange={(value) => updateSetting('craftTier5ExtraItems', value)}
-                      min={0}
-                      max={999}
-                      step={1}
-                    />
-                  </div>
-                </Card>
-              </div>
-            ) : null}
-
-            {activePage === 'socialTeam' ? (
-              <div className="page-grid">
-                <Card title="聊天与互动" eyebrow="Dialog">
-                  <div className="field-grid">
-                    <NumberField
-                      label="每月对话次数倍率"
-                      value={settings.dialogMonthlyLimitMultiplier}
-                      onChange={(value) => updateSetting('dialogMonthlyLimitMultiplier', value)}
-                      min={0}
-                      max={999}
-                      step={1}
-                      hint="影响交谈、请教等每月互动次数。"
-                    />
-                    <CheckboxField
-                      label="启用剧情快进辅助"
-                      value={settings.dialogFastForwardAssistEnabled}
-                      onChange={(value) => updateSetting('dialogFastForwardAssistEnabled', value)}
-                      hint="在剧情出现快进按钮时自动开启快进，游戏内热键仍然是 P。"
-                    />
-                    <NumberField
-                      label="额外好感增长"
-                      value={settings.extraRelationshipGainChancePercent}
-                      onChange={(value) => updateSetting('extraRelationshipGainChancePercent', value)}
-                      min={0}
-                      max={100}
-                      step={1}
-                      suffix="%"
-                    />
-                  </div>
-                </Card>
-
-                <Card title="关系与组队" eyebrow="Relationship">
-                  <div className="stack">
-                    <p className="body-copy">已确认无效的“队友离队天数倍率”已移除，避免继续在界面里误导使用。</p>
-                    <div className="field-grid">
-                      <CheckboxField
-                        label="队友每日自动加好感"
-                        value={settings.teamAutoFavorEnabled}
-                        onChange={(value) => updateSetting('teamAutoFavorEnabled', value)}
-                        hint="当前队伍中的已招募 NPC 会在每个游戏日自动获得好感。"
-                      />
-                      <NumberField
-                        label="队友每日自动加好感点数"
-                        value={settings.teamAutoFavorPerDay}
-                        onChange={(value) => updateSetting('teamAutoFavorPerDay', value)}
-                        min={0}
-                        max={999}
-                        step={1}
-                      />
-                      <NumberField
-                        label="伴侣上限"
-                        value={settings.maxLoverCount}
-                        onChange={(value) => updateSetting('maxLoverCount', value)}
-                        min={1}
-                        max={999}
-                        step={1}
-                        hint="提高玩家可同时拥有的伴侣/夫妻数量。默认改为 8。"
-                      />
-                    </div>
-                  </div>
-                </Card>
-              </div>
-            ) : null}
-
-            {activePage === 'battle' ? (
-              <div className="page-grid">
-                <Card title="战斗数值" eyebrow="Combat">
-                  <div className="field-grid">
-                    <NumberField
-                      label="辩论我方伤害倍率"
-                      value={settings.debatePlayerDamageTakenMultiplier}
-                      onChange={(value) => updateSetting('debatePlayerDamageTakenMultiplier', value)}
-                      min={0}
-                      max={999}
-                      step={0.25}
-                    />
-                    <NumberField
-                      label="辩论敌方伤害倍率"
-                      value={settings.debateEnemyDamageTakenMultiplier}
-                      onChange={(value) => updateSetting('debateEnemyDamageTakenMultiplier', value)}
-                      min={0}
-                      max={999}
-                      step={0.25}
-                    />
-                    <NumberField
-                      label="对酒我方伤害倍率"
-                      value={settings.drinkPlayerPowerCostMultiplier}
-                      onChange={(value) => updateSetting('drinkPlayerPowerCostMultiplier', value)}
-                      min={0}
-                      max={999}
-                      step={0.25}
-                    />
-                    <NumberField
-                      label="对酒敌方伤害倍率"
-                      value={settings.drinkEnemyPowerCostMultiplier}
-                      onChange={(value) => updateSetting('drinkEnemyPowerCostMultiplier', value)}
-                      min={0}
-                      max={999}
-                      step={0.25}
-                    />
-                  </div>
-                </Card>
-
-                <Card title="战斗节奏" eyebrow="Turbo">
-                  <div className="stack">
-                    <CheckboxField
-                      label="启动时开启战斗加速"
-                      value={settings.battleTurboEnabled}
-                      onChange={(value) => updateSetting('battleTurboEnabled', value)}
-                    />
-                    <SelectField
-                      label="战斗加速快捷键"
-                      value={settings.battleTurboHotkey}
-                      onChange={(value) => updateSetting('battleTurboHotkey', clampText(value))}
-                      options={BATTLE_TURBO_HOTKEYS}
-                      hint="在战斗中按下可切换加速开关。20x 速度，取消技能视觉特效。"
-                    />
-                    <p className="body-copy body-copy--muted">保存时会自动保留原始模组配置中的高级计时与视觉标记。</p>
-                  </div>
-                </Card>
-              </div>
-            ) : null}
           </main>
         </div>
       </div>

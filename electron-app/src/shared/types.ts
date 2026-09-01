@@ -256,6 +256,7 @@ export type HeroSpeAddDataTypeName = typeof HERO_SPE_ADD_DATA_TYPE_NAMES[number]
 
 export interface VisibleSettings {
   lockStamina: boolean;
+  revealAllOnStepTile: boolean;
   expMultiplier: number;
   battleSkillExpMultiplier: number;
   creationPointMultiplier: number;
@@ -268,11 +269,38 @@ export interface VisibleSettings {
   carryWeightCap: number;
   ignoreCarryWeight: boolean;
   merchantCarryCash: number;
+  treasureTradeHelperEnabled: boolean;
   treasureAutoTradeEnabled: boolean;
+  materialAutoBuyEnabled: boolean;
+  materialPurchaseMinRareLv: number;
+  materialPurchaseMinItemLv: number;
+  shopOwnershipEnabled: boolean;
+  skillBookOwnershipIndicatorEnabled: boolean;
+  mogaoDiscipleForgettingEnabled: boolean;
+  auctionEventAlwaysRedEnabled: boolean;
+  auctionPreviewRefreshEnabled: boolean;
+  auctionPreviewRefreshHotkey: string;
+  governmentStorageRefreshEnabled: boolean;
+  governmentStorageRefreshHotkey: string;
+  yellowCraneCandidateRefreshEnabled: boolean;
+  yellowCraneCandidateRefreshHotkey: string;
+  forceBountyRefreshEnabled: boolean;
+  commonBountyRefreshEnabled: boolean;
+  governBountyRefreshEnabled: boolean;
+  bountyRefreshHotkey: string;
+  treasureIdentifyBestValueAssistEnabled: boolean;
+  breakthroughRerollEnabled: boolean;
+  craftRerollEnabled: boolean;
   luckyHitChancePercent: number;
+  relationshipFeaturesEnabled: boolean;
   extraRelationshipGainChancePercent: number;
   teamAutoFavorEnabled: boolean;
   teamAutoFavorPerDay: number;
+  teamFameShareEnabled: boolean;
+  teamFameSharePercent: number;
+  blockOverflowLoverHomeBattle: boolean;
+  sameSectAreaShareEnabled: boolean;
+  characterDataTestHotkeyEnabled: boolean;
   maxLoverCount: number;
   debatePlayerDamageTakenMultiplier: number;
   debateEnemyDamageTakenMultiplier: number;
@@ -387,11 +415,23 @@ export interface HealthCheckResult {
   label: string;
   ok: boolean;
   detail: string;
+  blocking?: boolean;
+  launchBlocking?: boolean;
+}
+
+export interface SaveAndLaunchRequest {
+  settings: VisibleSettings;
+  customTalents: CustomTalentPack;
+}
+
+export interface LauncherPreferences {
+  launchOverlayWithGame: boolean;
 }
 
 export interface GameHealth {
   healthy: boolean;
   needsRepair: boolean;
+  launchBlocked: boolean;
   summary: string;
   driftedFiles: string[];
   checks: HealthCheckResult[];
@@ -412,6 +452,8 @@ export interface GameSnapshot {
   launchState: 'idle' | 'starting' | 'running';
   launchNote: string;
   visibleSettings: VisibleSettings;
+  launcherPreferences: LauncherPreferences;
+  overlayRunning: boolean;
   status: string;
   update: UpdateCheckResult;
 }
@@ -421,4 +463,5 @@ export interface OperationResult {
   message: string;
   gameRoot?: string;
   updatedSnapshot?: GameSnapshot;
+  customTalents?: CustomTalentPack;
 }

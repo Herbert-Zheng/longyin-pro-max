@@ -5,11 +5,13 @@ mod-prototype/dist/
 mod-prototype/release-build/
 mod-prototype/_codex_temp_reflect/
 mod-prototype/*/artifacts/
+artifacts/
 mod-prototype/mod-prototype/
 electron-app/node_modules/
 electron-app/dist/
 electron-app/release/
 electron-app/updater-dist/
+electron-app/user-data/
 mod-src/bin/
 mod-src/*/bin/
 mod-src/*/artifacts/
@@ -26,7 +28,7 @@ mod-prototype/LongYinQuestSnapshot/test.txt
 archive/
 _codex_staged_updates/
 config.js
-mod-src/LongYinStaminaLock/LongYinStaminaLock.dll
+mod-src/LongYinProMax/LongYinProMax.dll
 
 # Logs
 *.log

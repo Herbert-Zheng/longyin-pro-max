@@ -1,65 +1,61 @@
 # Project Instructions
 
-## Work Reports
+## Repository Baseline
 
-Do not create, update, sync, or upload any `work-report-*.md` file for this project.
+- `origin/main` is the only integration trunk and must remain buildable and releasable.
+- A release source is a commit on `origin/main` referenced by an annotated `vX.Y.Z` tag.
+- The latest commit on `main` may be newer than the latest published version; the latest stable tag identifies what users receive.
+- Existing historical branches are not rewritten solely to satisfy new naming rules. The rules below apply to new branches.
+- Do not introduce a long-lived `develop` branch or a permanent `release` branch.
 
-This repository is for personal modding/tool use and must be excluded from any work-report workflow, management reporting, or CEO reporting.
+## Short-Lived Branch Workflow
 
-If a task is completed here, do not use the `work-report-updater` skill for this repository.
+- Create short-lived branches using `<type>/<short-topic>` names such as:
+  - `feature/github-release`
+  - `fix/ota-manifest-selection`
+  - `chore/release-0.1.51`
+  - `docs/release-workflow`
+- Branch names must describe the work. Do not prefix them with an agent, model, author, username, machine, or tool name.
+- Merge short-lived branches into `main` through a pull request after required CI checks pass.
+- Prefer squash merge for ordinary feature, fix, documentation, and maintenance pull requests.
+- Delete short-lived branches after they are fully merged.
+- Use a dedicated `sync/<topic>` branch when importing upstream changes; never merge upstream changes directly into `main` without CI and review.
+
+## Source and Artifact Boundary
+
+- `dist/` is intentionally tracked as the current portable payload baseline and build input. Do not remove it as part of unrelated release work.
+- Rebuild first-party plugin DLLs from source and verify that the staged DLL, tracked payload DLL, and DLL inside the final ZIP have the same SHA-256.
+- Do not commit generated Electron outputs from `electron-app/release/`, `electron-app/updater-dist/`, or `electron-app/dist/`.
+- GitHub Actions artifacts are short-lived CI outputs. GitHub Release assets are the stable user download and OTA source.
+
+## CI and Release Workflow
+
+- Pull requests targeting `main` and pushes to `main` run `.github/workflows/ci.yml`.
+- Only a pushed stable tag matching `vX.Y.Z` triggers `.github/workflows/release.yml`.
+- The release workflow must reject a tag when:
+  - its commit is not part of `origin/main`
+  - the tag, `package.json`, or `package-lock.json` versions differ
+  - the expected ZIP or `update-manifest.json` is missing
+  - the manifest asset name or SHA-256 differs from the ZIP
+  - a maintained plugin or interop DLL does not match the verified build provenance
+- GitHub Actions is the only writer for GitHub Releases and Release assets. Local scripts must not create, patch, delete, replace, or upload Release assets.
+- Never replace assets on a published version. Fixes require a higher version and a new tag.
+- Use `scripts/build-and-verify-release.ps1` for the shared local/CI build gate.
+- Use `scripts/prepare-release.ps1` only from a clean, synchronized `main` to prepare or push a release tag.
+- Before preparing a release, inspect `git status`, recent `git log`, `git diff --stat`, and the diff from the previous stable tag when one exists.
+- GitHub Release body is the canonical OTA update history shown by the Electron app.
 
 ## Staged DLL Workflow
 
-Use the staged DLL promotion flow for plugin updates:
+- Queue rebuilt plugin DLLs under `_codex_staged_updates\BepInEx\plugins`.
+- Treat a DLL as pending only when a matching `*.pending` marker exists.
+- Promote staged DLLs only from `mod-prototype\LongYinModControl\LongYinModControl.ps1` before launching the game.
+- Back up live plugin DLLs before overwriting them.
+- Never hot-swap or edit live plugin DLLs while the game is running.
+- `_codex_staged_updates` is an established runtime protocol name; the no-agent-name branch rule does not rename this directory.
 
-- queue rebuilt plugin DLLs under `_codex_staged_updates\BepInEx\plugins`
-- treat a DLL as pending only when a matching `*.pending` marker exists
-- promote staged DLLs only from `mod-prototype\LongYinModControl\LongYinModControl.ps1` before launching the game
-- back up any live plugin DLLs before overwriting them
-- never hot-swap or edit live plugin DLLs while the game is already running
+## Local Game Folder
 
-## OTA Release Workflow
-
-Use the active Git worktree containing this `AGENTS.md` as the only source of truth for commits, tags, GitHub Releases, and OTA assets. Do not require a specific drive letter or absolute repository path.
-
-Treat the detected game installation directory as a local test folder only. It is for verifying the mod and Electron launcher, not for deciding what to publish.
-
-Before any OTA publish, first determine what the new code is by checking the repository state:
-
-- run `git status`
-- run `git log --oneline --decorate -n 12`
-- run `git diff --stat`
-- if a previous release tag exists, inspect `git diff <last-tag>..HEAD`
-
-Do not assume cross-thread context. If changes were made in another thread, recover context from Git history, diffs, repo files, and release notes before publishing.
-
-The Electron OTA packaging flow is:
-
-1. update the Electron app version when the release version should change
-2. run `npm run typecheck` in `electron-app`
-3. run `npm run build` in `electron-app`
-4. verify these two OTA assets exist and match each other:
-   - `release\LongYinProMaxApp-<version>-win-x64.zip`
-   - `release\update-manifest.json`
-5. verify `update-manifest.json` has the correct `version`, `zipAsset`, and `sha256`
-6. verify the build locally if needed by testing the launcher from the game folder
-7. create or update the GitHub Release for that version
-8. upload the ZIP and `update-manifest.json` to the same GitHub Release
-9. verify the GitHub Release page shows both assets
-
-GitHub Release body is the single source of truth for OTA update history. The Electron app reads release body text to display update logs.
-
-## Reserved Publish Commands
-
-Treat `git push ota` and `publish update` as the same command.
-
-When the user says either command, execute the full OTA publish workflow, not just a local build:
-
-- run `.\git-push-ota.cmd` from the repo root when possible
-- inspect and summarize the new code first
-- build and validate the Electron app
-- prepare the GitHub Release body from the real code changes
-- push commits and tags as needed
-- publish the GitHub Release
-- upload the OTA ZIP and `update-manifest.json`
-- confirm the release is live and OTA-readable
+- Treat a detected game installation as a local test target only, never as the source for commits, tags, builds, or OTA assets.
+- Do not require a specific drive letter, user profile, absolute checkout path, or local game path.
+- Local game verification may supplement CI, but it does not replace the tag build and Release asset verification performed by GitHub Actions.

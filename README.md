@@ -46,46 +46,45 @@
 下载 Release ZIP 后，解压到任意位置，然后运行 `LongYinProMax.exe`。
 同一个包里也包含 `Uninstall.cmd`，方便后续干净卸载。
 
-## 标准 OTA 发布
+## 开发、CI 与 OTA 发布
 
-仓库根目录提供了统一入口：
+仓库采用简单 GitHub Flow：
 
-- [git-push-ota.cmd](G:\Steam\steamapps\common\longyin_plus_repo\git-push-ota.cmd)
-- [publish-update.cmd](G:\Steam\steamapps\common\longyin_plus_repo\publish-update.cmd)
-
-这两个命令是同义入口，都会执行同一套 OTA 发布流程：
-
-1. 检查当前 Git 状态和最近变更
-2. 读取 `electron-app/package.json` 版本号
-3. 运行 `npm run typecheck`
-4. 运行 `npm run build`
-5. 校验 `release/LongYinProMaxApp-<version>-win-x64.zip`
-6. 校验 `release/update-manifest.json`
-7. 推送当前分支和对应 tag
-8. 创建或更新 GitHub Release
-9. 上传 ZIP 和 `update-manifest.json`
-
-默认脚本要求工作树干净，否则会拒绝发布。
-
-如果只想做预检查，不真正发布，可以运行：
-
-```powershell
-.\git-push-ota.ps1 -DryRun
+```text
+main -> feature/fix/chore/docs 短期分支 -> Pull Request -> CI -> main
+main 上的 vX.Y.Z tag -> GitHub Actions -> GitHub Release -> OTA
 ```
 
-如果已经手动 build，只想校验和发布，可以运行：
+`main` 是唯一集成主干。新分支使用内容型名称，例如 `feature/github-release`，不得以 Agent、模型、作者、用户名或机器名作为前缀。
+
+Pull Request 和 `main` push 会在干净 Windows runner 上执行完整测试与构建。`main` 成功构建的 ZIP 和 manifest 会作为短期 Actions artifact 保存；正式下载和 OTA 只使用 GitHub Release assets。
+
+本地运行与 CI 相同的发布构建门禁：
 
 ```powershell
-.\git-push-ota.ps1 -SkipBuild
+pwsh ./scripts/build-and-verify-release.ps1
 ```
+
+正式版本必须先通过版本准备 PR 合入 `main`。从干净且与 `origin/main` 同步的 `main` 创建并推送 tag：
+
+```powershell
+pwsh ./scripts/prepare-release.ps1
+pwsh ./scripts/prepare-release.ps1 -SkipBuild -PushTag
+```
+
+本地脚本不会创建、修改或覆盖 GitHub Release。tag push 后，GitHub Actions 构建一次、验证 ZIP 与 `update-manifest.json`，并将同一份已验证产物发布到 GitHub Release。
+
+完整流程、失败恢复和首次启用顺序见 [OTA-WORKFLOW.md](./OTA-WORKFLOW.md)。长期仓库约束见 [AGENTS.md](./AGENTS.md)。
 
 ## 开发工具
 
-当前仓库的模组开发工具链默认使用仓库内置的便携式 .NET：
+当前仓库的模组开发工具链在本地优先使用仓库便携式 .NET：
 
 - `.codex-tools/dotnet/dotnet.exe`
 - 已在本机验证的 SDK 版本：`6.0.428`
 - C# 脚本工具固定为 `dotnet-script 1.5.0`
+
+便携 SDK 不存在时，构建脚本会使用 PATH 中的 .NET SDK。GitHub Actions 显式安装 `.NET SDK 6.0.428`，因此 CI 不依赖未提交的 `.codex-tools/`。
 
 之所以固定到 `1.5.0`，是因为 `dotnet-script 1.6.0+` 已改为 `net8.0/net9.0`，不能直接跑在当前这套便携式 .NET 6 工具链上。
 

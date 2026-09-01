@@ -95,7 +95,15 @@ try {
     New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $liveRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $interopRoot -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $PSHOME "powershell.exe") -Destination $fakeGameExe -Force
+    $hostExecutable = @(
+        (Join-Path $PSHOME "powershell.exe")
+        (Join-Path $PSHOME "pwsh.exe")
+        (Get-Process -Id $PID).Path
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
+    if (-not $hostExecutable) {
+        throw "未找到可用于 staged workflow 测试的宿主可执行文件。"
+    }
+    Copy-Item -LiteralPath $hostExecutable -Destination $fakeGameExe -Force
 
     [System.IO.File]::WriteAllText($liveDll, "old-live-payload", $utf8NoBom)
     [System.IO.File]::WriteAllText($liveInterop, "matching-interop-payload", $utf8NoBom)

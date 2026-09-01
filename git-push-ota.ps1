@@ -1,3 +1,3 @@
-$scriptPath = Join-Path $PSScriptRoot 'scripts\git-push-ota.ps1'
-& $scriptPath @args
+$scriptPath = Join-Path $PSScriptRoot 'scripts\prepare-release.ps1'
+& $scriptPath -PushTag @args
 exit $LASTEXITCODE

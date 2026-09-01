@@ -60,6 +60,7 @@ if ([string]$packageLock['version'] -ne $version -or [string]$lockRoot['version'
 }
 
 $tagName = "v$version"
+& (Join-Path $PSScriptRoot 'get-release-notes.ps1') -TagName $tagName -ChangelogPath (Join-Path $RepoRoot 'CHANGELOG.md') | Out-Null
 if (-not $SkipBuild) {
   & (Join-Path $PSScriptRoot 'build-and-verify-release.ps1') -RepoRoot $RepoRoot
   if ($LASTEXITCODE -ne 0) {

@@ -64,33 +64,56 @@ function Invoke-Gh {
 }
 
 function Get-Release {
-  $result = Invoke-Gh @('release', 'view', $TagName, '--repo', $Repository, '--json', 'isDraft,url,assets') -AllowFailure
+  $result = Invoke-Gh @('release', 'view', $TagName, '--repo', $Repository, '--json', 'isDraft,url,assets,body') -AllowFailure
   if ($result.ExitCode -ne 0) {
     return $null
   }
   return $result.Output | ConvertFrom-Json
 }
 
+function Normalize-ReleaseBody([string]$Body) {
+  $lines = @(($Body -replace "`r`n?", "`n") -split "`n" | ForEach-Object { $_.TrimEnd() })
+  while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[0])) {
+    $lines = @($lines | Select-Object -Skip 1)
+  }
+  while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[-1])) {
+    $lines = @($lines | Select-Object -First ($lines.Count - 1))
+  }
+  return $lines -join "`n"
+}
+
+$runnerTemp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
+$releaseNotesPath = Join-Path $runnerTemp ("release-notes-{0}-{1}.md" -f $TagName, [guid]::NewGuid().ToString('N'))
+& (Join-Path $PSScriptRoot 'get-release-notes.ps1') -TagName $TagName -ChangelogPath (Join-Path $RepoRoot 'CHANGELOG.md') -OutputPath $releaseNotesPath
+$expectedReleaseBody = Normalize-ReleaseBody ([System.IO.File]::ReadAllText($releaseNotesPath))
+
 $release = Get-Release
 if ($null -eq $release) {
-  $releaseNotesPath = Join-Path $RepoRoot "release-notes-$TagName.md"
   $createArguments = @(
     'release', 'create', $TagName,
     '--repo', $Repository,
     '--verify-tag',
     '--draft',
-    '--title', "龙胤立志传 Pro Max $TagName"
+    '--title', "龙胤立志传 Pro Max $TagName",
+    '--notes-file', $releaseNotesPath
   )
-  if (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf) {
-    $createArguments += @('--notes-file', $releaseNotesPath)
-  }
-  else {
-    $createArguments += '--generate-notes'
-  }
   Invoke-Gh $createArguments | Out-Null
   $release = Get-Release
   if ($null -eq $release) {
     throw "创建 draft Release 后无法重新读取：$TagName"
+  }
+}
+
+$actualReleaseBody = Normalize-ReleaseBody ([string]$release.body)
+if ($actualReleaseBody -cne $expectedReleaseBody) {
+  if (-not $release.isDraft) {
+    throw "已发布 Release 正文与 CHANGELOG 的 $TagName 段落不一致，拒绝原地修改。"
+  }
+  Invoke-Gh @('release', 'edit', $TagName, '--repo', $Repository, '--notes-file', $releaseNotesPath) | Out-Null
+  $release = Get-Release
+  $actualReleaseBody = Normalize-ReleaseBody ([string]$release.body)
+  if ($actualReleaseBody -cne $expectedReleaseBody) {
+    throw "无法将 draft Release 正文校正为 CHANGELOG 的 $TagName 段落。"
   }
 }
 
@@ -104,7 +127,6 @@ if ($unexpectedAssets.Count -gt 0) {
   throw "Release 中存在非预期资产，拒绝自动发布：$($unexpectedAssets -join ', ')"
 }
 
-$runnerTemp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
 $verificationRoot = [System.IO.Path]::GetFullPath((Join-Path $runnerTemp "longyin-release-$TagName"))
 $runnerTempFull = [System.IO.Path]::GetFullPath($runnerTemp).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
 if (-not ($verificationRoot + [System.IO.Path]::DirectorySeparatorChar).StartsWith($runnerTempFull, [System.StringComparison]::OrdinalIgnoreCase)) {

@@ -1458,6 +1458,7 @@ export async function saveVisibleSettings(gameRoot: string, settings: VisibleSet
   nextMain = removeIniSectionValue(nextMain, 'Exploration', 'TreasureChestAutoPickMostValuable');
   nextMain = removeIniValue(nextMain, 'TreasureChestAutoPickMostValuable');
   nextMain = upsertIniValue(nextMain, 'ExpMultiplier', String(normalized.expMultiplier));
+  nextMain = upsertIniSectionValue(nextMain, 'Battle', 'SpeedMultiplier', '2');
   nextMain = upsertIniSectionValue(nextMain, 'Battle', 'SkillExpMultiplier', String(normalized.battleSkillExpMultiplier));
   nextMain = upsertIniValue(nextMain, 'PointMultiplier', String(normalized.creationPointMultiplier));
   nextMain = upsertIniValue(nextMain, 'BaseSpeedMultiplier', formatFloat(normalized.horseBaseSpeedMultiplier));

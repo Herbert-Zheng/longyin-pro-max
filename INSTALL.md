@@ -1,75 +1,50 @@
-# 龙吟立志传 MOD 便携版安装与运行说明
+# 龙胤立志传 Pro Max 安装说明
 
 适用游戏版本：`V1.1.0f5`
 
-本压缩包为便携版模组载荷。
-唯一受支持的启动与配置方式是单独打包的 Electron 启动器 `LongYinProMax.exe`。
+## 安装
 
-`BepInEx` 启动器文件已经包含在压缩包里，不需要你另外安装；你只需要把压缩包内容解压到游戏根目录即可。
-压缩包里还包含 `Uninstall.cmd`，方便你之后清理并重新安装。
+1. **完全关闭游戏。**不要在游戏运行时安装、更新或替换 DLL。
+2. 从 [GitHub Releases](https://github.com/Herbert-Zheng/longyin-pro-max/releases/latest) 下载 `LongYinProMaxApp-<版本>-win-x64.zip`。
+3. 把 ZIP 解压到游戏目录以外的任意文件夹。
+4. 确认解压目录中能看到 `LongYinProMax.exe`、`resources/` 等文件；不要只复制 EXE。
+5. 运行 `LongYinProMax.exe`。
+6. 让启动器自动识别游戏，或选择包含 `LongYinLiZhiZhuan.exe` 的游戏目录。
+7. 调整需要的功能，点击“保存并启动”。
 
-## 一、安装步骤
+正式 ZIP 是完整的便携启动器，内置模组载荷位于 `resources/payload`。启动器会把载荷安装到所选游戏目录；不要把整个 Release ZIP 解压到游戏根目录。
 
-1. 找到游戏安装目录。
-2. 确认该目录里能看到 `LongYinLiZhiZhuan.exe`。
-3. 将本压缩包内的全部文件直接解压到这个目录。
-4. 如果系统提示“是否覆盖/合并文件夹”，请选择“是”。
+## 后续使用
 
-正确位置示例：
+- 继续运行解压目录中的 `LongYinProMax.exe` 来修改配置或启动游戏。
+- 启动器可检查并安装最新稳定版本。
+- 更新会保留启动器设置和游戏目录中的模组配置。
+- 移动启动器目录时，请移动整个解压目录，不要只移动 EXE。
 
-- `LongYinLiZhiZhuan.exe`
-- `BepInEx\`
-- `dotnet\`
-- `doorstop_config.ini`
-- `winhttp.dll`
-- `LongYinProMaxApp\`
+## 卸载或重装
 
-如果你把压缩包解压成了多一层子文件夹，MOD 将不会生效。请确保这些文件和 `LongYinLiZhiZhuan.exe` 在同一层目录关系下。
+1. 完全关闭游戏。
+2. 使用启动器中的卸载功能；也可运行已安装到游戏目录的 `Uninstall.cmd`。
+3. 如需重装，重新运行启动器并选择同一游戏目录。
 
-## 二、运行方法
+## 故障排查
 
-1. 运行 `Launch-LongYinProMax.cmd` 或 `LongYinProMaxApp\LongYinProMax.exe`
-2. 让应用自动识别或手动选择游戏目录
-3. 如需修改功能，先调整选项
-4. 点击 `保存并启动`
-5. 游戏启动后，MOD 会自动随游戏加载
-6. 如果你想先清理再重装，可使用应用内卸载，或运行 `Uninstall.cmd`
+### 启动器打不开
 
-## 三、首次启动说明
+- 确认 ZIP 已完整解压，不要直接在压缩软件中运行。
+- 确认 `LongYinProMax.exe` 和 `resources/` 仍在同一解压目录。
+- 本项目当前没有代码签名；请先确认文件来自本仓库的正式 Release。
 
-- 首次启动可能会比平时稍慢，这是正常现象
-- MOD 配置文件如果不存在，会在首次打开配置工具或首次启动游戏时自动创建
-- `BepInEx` 不是“首次运行自动联网安装”，而是已经随本压缩包一起提供
-- 新版 Electron 启动器会通过 GitHub Releases 拉取更新，但它不会覆盖你的游戏目录内容
-- 安装器会自动清除下载标记，尽量减少 Windows Defender 的云安全扫描提示
-- BepInEx 控制台默认禁用，以避免 Windows 控制台进入“选择模式”后阻塞游戏并造成白屏
-- 控制台关闭不影响磁盘日志；排查问题时仍可查看 `BepInEx\LogOutput.log`
+### 游戏能启动，但模组没有生效
 
-## 四、常见问题
+- 在启动器中重新确认游戏目录，并查看“安装体检”。
+- 游戏根目录应包含 `BepInEx/`、`winhttp.dll` 和 `doorstop_config.ini`。
+- 日志位于 `BepInEx/LogOutput.log`。
 
-### 1. 运行 `LongYinProMax.exe` 没反应
+### 没有 BepInEx 控制台窗口
 
-请确认你是把压缩包解压到了游戏根目录，而不是别的文件夹。
+这是正常设置。控制台默认关闭以避免阻塞游戏，磁盘日志不受影响。
 
-### 2. Windows 弹出安全提示
+## 高级：手动安装载荷
 
-请直接运行：`LongYinProMax.exe`
-
-### 3. 游戏启动了，但 MOD 没生效
-
-请检查：
-
-- `LongYinLiZhiZhuan.exe` 所在目录里是否有 `BepInEx` 文件夹
-- 是否存在 `winhttp.dll`
-- 是否存在 `doorstop_config.ini`
-- `BepInEx\plugins` 里是否有本 MOD 的 `.dll` 文件
-
-### 4. 为什么没有弹出 BepInEx 控制台
-
-这是正常设置。Electron 启动器会在启动游戏前保持 BepInEx 控制台关闭，防止控制台“选择模式”造成游戏白屏。运行日志仍会写入 `BepInEx\LogOutput.log`。
-
-## 五、卸载方法
-
-如果你想卸载本 MOD，请运行 `Uninstall.cmd`，或手动删除本压缩包解压进去的相关文件和文件夹。
-
-建议在安装 MOD 前先备份原始游戏目录。
+仅在启动器安装不可用时，完全关闭游戏，再把 `resources/payload/` **里面的内容**复制到游戏根目录。不要复制 `payload` 文件夹本身，也不要在游戏运行时替换 DLL。

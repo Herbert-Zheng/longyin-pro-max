@@ -143,11 +143,17 @@ try {
       if (-not $entryName) {
         throw 'ZIP 包含空路径条目。'
       }
-      if ($entryName.StartsWith('/') -or $entryName -match '^[A-Za-z]:' -or ($entryName.Split('/') -contains '..')) {
+      if ($entryName.StartsWith('/') -or $entryName -match '^[A-Za-z]:') {
         throw "ZIP 包含不安全路径：$entryName"
       }
-      if (-not $normalizedEntries.Add($entryName)) {
-        throw "ZIP 包含重复规范化路径：$entryName"
+      $trimmedEntryName = $entryName.TrimEnd('/')
+      $entrySegments = @($trimmedEntryName.Split('/'))
+      if (-not $trimmedEntryName -or @($entrySegments | Where-Object { -not $_ -or $_ -eq '.' -or $_ -eq '..' }).Count -gt 0) {
+        throw "ZIP 包含不安全或非规范路径：$entryName"
+      }
+      $canonicalEntryName = $entrySegments -join '/'
+      if (-not $normalizedEntries.Add($canonicalEntryName)) {
+        throw "ZIP 包含重复规范化路径：$entryName -> $canonicalEntryName"
       }
       $totalUncompressedBytes += $entry.Length
       if ($entry.Length -gt 1GB) {
@@ -184,20 +190,22 @@ try {
   [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractRoot)
   $appExe = Join-Path $extractRoot 'LongYinProMax.exe'
   $updaterExe = Join-Path $extractRoot 'resources\updater\LongYinUpdater.exe'
-  $publishedPlugin = Join-Path $extractRoot 'resources\payload\BepInEx\plugins\LongYinProMax.dll'
   $publishedInterop = Join-Path $extractRoot 'resources\payload\BepInEx\interop\Assembly-CSharp.dll'
   Assert-File -Path $appExe -Label '解压后的 LongYinProMax.exe'
   Assert-File -Path $updaterExe -Label '解压后的 LongYinUpdater.exe'
-  Assert-File -Path $publishedPlugin -Label '解压后的 LongYinProMax.dll'
   Assert-File -Path $publishedInterop -Label '解压后的 Assembly-CSharp.dll'
 
   $repoRoot = Split-Path -Parent $PSScriptRoot
-  $repoPlugin = Join-Path $repoRoot 'dist\BepInEx\plugins\LongYinProMax.dll'
   $repoInterop = Join-Path $repoRoot 'dist\BepInEx\interop\Assembly-CSharp.dll'
-  Assert-File -Path $repoPlugin -Label '仓库 LongYinProMax.dll 基线'
   Assert-File -Path $repoInterop -Label '仓库 Assembly-CSharp.dll 基线'
-  if ((Get-Sha256Lower $publishedPlugin) -ne (Get-Sha256Lower $repoPlugin)) {
-    throw 'Release ZIP 中 LongYinProMax.dll 与 tag 源码树的 dist 基线不一致。'
+  foreach ($pluginName in @('LongYinProMax', 'LongYinBattleTurbo', 'LongYinHorseStaminaMultiplier', 'LongYinSkipIntro')) {
+    $publishedPlugin = Join-Path $extractRoot "resources\payload\BepInEx\plugins\$pluginName.dll"
+    $repoPlugin = Join-Path $repoRoot "dist\BepInEx\plugins\$pluginName.dll"
+    Assert-File -Path $publishedPlugin -Label "解压后的 $pluginName.dll"
+    Assert-File -Path $repoPlugin -Label "仓库 $pluginName.dll 基线"
+    if ((Get-Sha256Lower $publishedPlugin) -ne (Get-Sha256Lower $repoPlugin)) {
+      throw "Release ZIP 中 $pluginName.dll 与 tag 源码树的 dist 基线不一致。"
+    }
   }
   if ((Get-Sha256Lower $publishedInterop) -ne (Get-Sha256Lower $repoInterop)) {
     throw 'Release ZIP 中 Assembly-CSharp.dll 与 tag 源码树的 dist 基线不一致。'
@@ -215,7 +223,8 @@ try {
       $smokeProcess.Refresh()
     }
     if (-not $smokeProcess.HasExited) {
-      Stop-Process -Id $smokeProcess.Id -Force -ErrorAction SilentlyContinue
+      & taskkill.exe /PID $smokeProcess.Id /T /F 2>$null | Out-Null
+      $smokeProcess.WaitForExit(5000) | Out-Null
       throw "LongYinProMax.exe smoke test 超过 $SmokeTimeoutSeconds 秒。"
     }
     if ($smokeProcess.ExitCode -ne 0) {

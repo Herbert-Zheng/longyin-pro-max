@@ -78,6 +78,9 @@ jobs:
     needs: build-and-verify
     runs-on: windows-latest
     timeout-minutes: 15
+    concurrency:
+      group: release-publication
+      cancel-in-progress: false
     permissions:
       contents: write
 

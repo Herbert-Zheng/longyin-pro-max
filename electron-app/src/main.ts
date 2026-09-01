@@ -1040,7 +1040,9 @@ async function createMainWindow(): Promise<void> {
   catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await writeStartupLog(`界面加载失败：${message}`);
-    await dialog.showErrorBox('界面加载失败', message);
+    if (!IS_SMOKE_TEST) {
+      dialog.showErrorBox('界面加载失败', message);
+    }
     throw error;
   }
 

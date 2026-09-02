@@ -77,6 +77,7 @@ jobs:
         with:
           name: release-${{ github.ref_name }}
           path: |
+            electron-app/release/LongYinProMaxSetup-*-win-x64.exe
             electron-app/release/LongYinProMaxApp-*-win-x64.zip
             electron-app/release/update-manifest.json
           if-no-files-found: error
@@ -85,7 +86,7 @@ jobs:
   publish:
     needs: build-and-verify
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     concurrency:
       group: release-publication
       cancel-in-progress: false

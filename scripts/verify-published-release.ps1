@@ -129,26 +129,15 @@ try {
   }
 
   $assets = @($release.assets)
-  $actualAssetNames = @($assets | ForEach-Object { [string]$_.name } | Sort-Object)
-  $expectedAssetNames = @($expectedManifestName, $expectedZipName) | Sort-Object
-  $assetDifference = @(Compare-Object -ReferenceObject $expectedAssetNames -DifferenceObject $actualAssetNames)
-  if ($assetDifference.Count -ne 0) {
-    throw "Release 资产集合不符合预期：$($actualAssetNames -join ', ')"
-  }
-
   $manifestAsset = $assets | Where-Object { $_.name -eq $expectedManifestName } | Select-Object -First 1
-  $zipAsset = $assets | Where-Object { $_.name -eq $expectedZipName } | Select-Object -First 1
-  if (-not $manifestAsset.browser_download_url -or -not $zipAsset.browser_download_url) {
-    throw 'Release 资产缺少 browser_download_url。'
+  if (-not $manifestAsset.browser_download_url) {
+    throw 'Release 缺少可下载的 update-manifest.json。'
   }
 
   $manifestPath = Join-Path $DownloadRoot $expectedManifestName
-  $zipPath = Join-Path $DownloadRoot $expectedZipName
-  Write-Step '从 Release browser_download_url 重新下载 manifest 与 ZIP'
+  Write-Step '从 Release browser_download_url 下载 manifest'
   Invoke-WebRequest -Uri $manifestAsset.browser_download_url -Headers $headers -OutFile $manifestPath
-  Invoke-WebRequest -Uri $zipAsset.browser_download_url -Headers $headers -OutFile $zipPath
   Assert-File -Path $manifestPath -Label '下载后的 update-manifest.json'
-  Assert-File -Path $zipPath -Label '下载后的 Release ZIP'
 
   $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
   if ([string]$manifest.version -ne $version) {
@@ -157,9 +146,60 @@ try {
   if ([string]$manifest.zipAsset -ne $expectedZipName) {
     throw "manifest.zipAsset 不匹配：$($manifest.zipAsset) vs $expectedZipName"
   }
+
+  $hasInstallerAsset = $manifest.PSObject.Properties.Name -contains 'installerAsset'
+  $hasInstallerSha256 = $manifest.PSObject.Properties.Name -contains 'installerSha256'
+  if ($hasInstallerAsset -ne $hasInstallerSha256) {
+    throw 'manifest 必须同时提供 installerAsset 与 installerSha256。'
+  }
+  $expectedInstallerName = $null
+  if ($hasInstallerAsset) {
+    $expectedInstallerName = "LongYinProMaxSetup-$version-win-x64.exe"
+    if ([string]$manifest.installerAsset -ne $expectedInstallerName -or [string]::IsNullOrWhiteSpace([string]$manifest.installerSha256)) {
+      throw 'manifest 中的 Windows 安装器名称或 SHA-256 无效。'
+    }
+  }
+
+  $actualAssetNames = @($assets | ForEach-Object { [string]$_.name } | Sort-Object)
+  $expectedAssetNames = @($expectedManifestName, $expectedZipName)
+  if ($expectedInstallerName) {
+    $expectedAssetNames += $expectedInstallerName
+  }
+  $expectedAssetNames = @($expectedAssetNames | Sort-Object)
+  $assetDifference = @(Compare-Object -ReferenceObject $expectedAssetNames -DifferenceObject $actualAssetNames)
+  if ($assetDifference.Count -ne 0) {
+    throw "Release 资产集合不符合预期：$($actualAssetNames -join ', ')"
+  }
+
+  $zipAsset = $assets | Where-Object { $_.name -eq $expectedZipName } | Select-Object -First 1
+  $installerAsset = if ($expectedInstallerName) {
+    $assets | Where-Object { $_.name -eq $expectedInstallerName } | Select-Object -First 1
+  } else {
+    $null
+  }
+  if (-not $zipAsset.browser_download_url -or ($expectedInstallerName -and -not $installerAsset.browser_download_url)) {
+    throw 'Release 资产缺少 browser_download_url。'
+  }
+
+  $zipPath = Join-Path $DownloadRoot $expectedZipName
+  $installerPath = if ($expectedInstallerName) { Join-Path $DownloadRoot $expectedInstallerName } else { $null }
+  Write-Step '从 Release browser_download_url 重新下载 OTA ZIP 与用户安装器'
+  Invoke-WebRequest -Uri $zipAsset.browser_download_url -Headers $headers -OutFile $zipPath
+  if ($expectedInstallerName) {
+    Invoke-WebRequest -Uri $installerAsset.browser_download_url -Headers $headers -OutFile $installerPath
+  }
+  Assert-File -Path $zipPath -Label '下载后的 Release ZIP'
   $zipSha256 = Get-Sha256Lower -Path $zipPath
   if ([string]$manifest.sha256 -ne $zipSha256) {
     throw "下载 ZIP 的 SHA256 与 manifest 不一致：$zipSha256 vs $($manifest.sha256)"
+  }
+  $installerSha256 = $null
+  if ($expectedInstallerName) {
+    Assert-File -Path $installerPath -Label '下载后的 Windows 安装器'
+    $installerSha256 = Get-Sha256Lower -Path $installerPath
+    if ([string]$manifest.installerSha256 -ne $installerSha256) {
+      throw "下载 Windows 安装器的 SHA256 与 manifest 不一致：$installerSha256 vs $($manifest.installerSha256)"
+    }
   }
 
   Write-Step '检查 ZIP 路径安全、布局和解压体积'
@@ -280,6 +320,8 @@ try {
   [pscustomobject]@{
     TagName = $TagName
     ReleaseUrl = [string]$release.html_url
+    InstallerAsset = $expectedInstallerName
+    InstallerSha256 = $installerSha256
     ZipAsset = $expectedZipName
     ZipSha256 = $zipSha256
     AppVersion = [string]$smokeResult.appVersion

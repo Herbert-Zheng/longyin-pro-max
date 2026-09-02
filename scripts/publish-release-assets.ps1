@@ -32,9 +32,11 @@ if ($TagName -ne $expectedTag) {
 }
 
 $zipName = "LongYinProMaxApp-$version-win-x64.zip"
+$installerName = "LongYinProMaxSetup-$version-win-x64.exe"
 $zipPath = Join-Path $AssetsRoot $zipName
+$installerPath = Join-Path $AssetsRoot $installerName
 $manifestPath = Join-Path $AssetsRoot 'update-manifest.json'
-foreach ($path in @($zipPath, $manifestPath)) {
+foreach ($path in @($installerPath, $zipPath, $manifestPath)) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
     throw "发布资产不存在：$path"
   }
@@ -42,8 +44,12 @@ foreach ($path in @($zipPath, $manifestPath)) {
 
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$installerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ([string]$manifest.version -ne $version -or [string]$manifest.zipAsset -ne $zipName -or [string]$manifest.sha256 -ne $zipHash) {
   throw '下载到 publish job 的 ZIP 与 update-manifest.json 不一致。'
+}
+if ([string]$manifest.installerAsset -ne $installerName -or [string]$manifest.installerSha256 -ne $installerHash) {
+  throw '下载到 publish job 的 Windows 安装器与 update-manifest.json 不一致。'
 }
 
 function Invoke-Gh {
@@ -118,6 +124,7 @@ if ($actualReleaseBody -cne $expectedReleaseBody) {
 }
 
 $expectedAssets = [ordered]@{
+  $installerName = $installerPath
   $zipName = $zipPath
   'update-manifest.json' = $manifestPath
 }

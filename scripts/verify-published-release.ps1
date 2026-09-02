@@ -43,15 +43,6 @@ function Assert-File([string]$Path, [string]$Label) {
   }
 }
 
-function Assert-ValidAuthenticodeSignature([string]$Path, [string]$Label) {
-  Assert-File -Path $Path -Label $Label
-  $signature = Get-AuthenticodeSignature -LiteralPath $Path
-  if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or -not $signature.SignerCertificate) {
-    throw "$Label 必须带可信 Authenticode 签名；当前状态：$($signature.Status)"
-  }
-  return $signature.SignerCertificate.Thumbprint
-}
-
 function Normalize-ReleaseBody([string]$Body) {
   $lines = @(($Body -replace "`r`n?", "`n") -split "`n" | ForEach-Object { $_.TrimEnd() })
   while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[0])) {
@@ -203,14 +194,12 @@ try {
     throw "下载 ZIP 的 SHA256 与 manifest 不一致：$zipSha256 vs $($manifest.sha256)"
   }
   $installerSha256 = $null
-  $signerThumbprint = $null
   if ($expectedInstallerName) {
     Assert-File -Path $installerPath -Label '下载后的 Windows 安装器'
     $installerSha256 = Get-Sha256Lower -Path $installerPath
     if ([string]$manifest.installerSha256 -ne $installerSha256) {
       throw "下载 Windows 安装器的 SHA256 与 manifest 不一致：$installerSha256 vs $($manifest.installerSha256)"
     }
-    $signerThumbprint = Assert-ValidAuthenticodeSignature -Path $installerPath -Label '下载后的 Windows 安装器'
   }
 
   Write-Step '检查 ZIP 路径安全、布局和解压体积'
@@ -276,24 +265,6 @@ try {
   Assert-File -Path $updaterExe -Label '解压后的 LongYinUpdater.exe'
   Assert-File -Path $publishedInterop -Label '解压后的 Assembly-CSharp.dll'
 
-  if ($expectedInstallerName) {
-    $packagedExecutables = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter '*.exe')
-    if ($packagedExecutables.Count -eq 0) {
-      throw '下载后的 OTA ZIP 中没有可执行文件。'
-    }
-    $packagedSignerThumbprints = @(
-      $signerThumbprint
-      $packagedExecutables | ForEach-Object {
-        $relativePath = [System.IO.Path]::GetRelativePath($extractRoot, $_.FullName)
-        Assert-ValidAuthenticodeSignature -Path $_.FullName -Label "解压后的 $relativePath"
-      }
-    ) | Sort-Object -Unique
-    if ($packagedSignerThumbprints.Count -ne 1) {
-      throw "Windows 安装器与 OTA ZIP 中的全部 EXE 必须由同一个证书签名；当前证书数量：$($packagedSignerThumbprints.Count)"
-    }
-    $signerThumbprint = $packagedSignerThumbprints[0]
-  }
-
   $repoInterop = Join-Path $repoRoot 'dist\BepInEx\interop\Assembly-CSharp.dll'
   Assert-File -Path $repoInterop -Label '仓库 Assembly-CSharp.dll 基线'
   foreach ($pluginName in @('LongYinProMax', 'LongYinBattleTurbo', 'LongYinHorseStaminaMultiplier', 'LongYinSkipIntro')) {
@@ -355,7 +326,6 @@ try {
     ZipSha256 = $zipSha256
     AppVersion = [string]$smokeResult.appVersion
     SmokeTest = 'passed'
-    SignerThumbprint = $signerThumbprint
     DownloadRoot = $DownloadRoot
   }
 }

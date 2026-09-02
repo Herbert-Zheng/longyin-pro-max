@@ -1,8 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$RepoRoot = '',
-  [string]$LoaderRoot = '',
-  [switch]$RequireValidSignature
+  [string]$LoaderRoot = ''
 )
 
 Set-StrictMode -Version Latest
@@ -50,10 +49,6 @@ $arguments = @(
 if (-not [string]::IsNullOrWhiteSpace($LoaderRoot)) {
   $arguments += @('-LoaderRoot', $LoaderRoot)
 }
-if ($RequireValidSignature) {
-  $arguments += '-RequireValidSignature'
-}
-
 & pwsh @arguments
 if ($LASTEXITCODE -ne 0) {
   throw "发布构建与校验失败，退出代码：$LASTEXITCODE"

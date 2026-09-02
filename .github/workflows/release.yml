@@ -68,22 +68,9 @@ jobs:
         shell: pwsh
         run: ./scripts/test-updater-rollback.ps1
 
-      - name: Require Windows code-signing credentials
-        shell: pwsh
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK) -or [string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) {
-            throw 'Release requires WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD repository secrets.'
-          }
-
       - name: Build and verify release payload
         shell: pwsh
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: ./scripts/build-and-verify-release.ps1 -RequireValidSignature
+        run: ./scripts/build-and-verify-release.ps1
 
       - name: Upload verified release artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

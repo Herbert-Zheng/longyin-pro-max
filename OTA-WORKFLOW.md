@@ -81,7 +81,7 @@ CI 使用干净的 Windows runner，并执行：
 7. 执行 staged DLL 和 updater rollback tests。
 8. 调用 `scripts/build-and-verify-release.ps1` 完成真实打包和 OTA 校验。
 
-PR 会完成完整构建和校验，但不保存大型二进制。`main` push 成功后会保存 7 天的安装器 EXE + OTA ZIP + manifest Actions artifact，供维护者下载检查。这些日常 CI 产物不使用正式签名，不得作为用户 Release 分发。
+PR 会完成完整构建和校验，但不保存大型二进制。`main` push 成功后会保存 7 天的安装器 EXE + OTA ZIP + manifest Actions artifact，供维护者下载检查。这些日常 CI 产物不得作为用户 Release 分发。
 
 ## 本地构建门禁
 
@@ -133,21 +133,15 @@ pwsh ./scripts/prepare-release.ps1 -SkipBuild -PushTag
 
 `prepare-release.ps1` 不具备 GitHub Release 写权限。正式安装器和 OTA ZIP 始终由 GitHub tag workflow 构建。
 
-## Windows 代码签名前置条件
+## Windows 安全提示
 
-正式 Release 必须使用受 Windows 信任的 Authenticode 代码签名证书。仓库 Actions secrets 需要配置：
+当前安装器和 OTA 可执行文件没有 Authenticode 代码签名，Windows 可能显示“未知发布者”或 SmartScreen 提示。只从本仓库的正式 Release 下载，并使用同一 Release 中 `update-manifest.json` 记录的 SHA-256 校验文件。自签名证书不能建立公开信任，不得为了隐藏提示而加入发布流程。
 
-- `WIN_CSC_LINK`：受密码保护的 PFX/P12 证书内容（可使用 electron-builder 支持的 Base64 形式）。
-- `WIN_CSC_KEY_PASSWORD`：该证书的密码。
-
-证书和密码只保存在 GitHub Actions secrets 中，不提交到 Git。自签名证书在 SmartScreen 中与未签名文件等同，不能用于正式发布。
-
-有效代码签名会让 Windows 能识别发布者，并让后续版本逐步积累发布者信誉；它不等于“新证书的第一个文件一定没有 SmartScreen 提示”。SmartScreen 同时参考发布者和文件哈希信誉。若 Windows Defender 报告的是具体恶意软件名称或产生隔离记录，应停止发布并通过 Microsoft 文件提交入口复核，而不是绕过告警。
+若 Windows Defender 报告的是具体恶意软件名称或产生隔离记录，应停止发布并通过 Microsoft 文件提交入口复核，而不是绕过告警。
 
 参考资料：
 
 - [Microsoft：SmartScreen 应用信誉与代码签名](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
-- [electron-builder：Windows 代码签名](https://www.electron.build/docs/features/code-signing/code-signing-win/)
 - [Microsoft：提交文件进行 Defender 分析](https://www.microsoft.com/en-us/wdsi/filesubmission)
 
 ## 正式 Release
@@ -160,8 +154,8 @@ build job：
 2. 验证 tag commit 属于 `origin/main`。
 3. 验证 tag、`package.json` 和 `package-lock.json` 版本一致。
 4. 安装与 CI 相同的 Node 和 .NET。
-5. 要求 `WIN_CSC_LINK` 和 `WIN_CSC_KEY_PASSWORD`，执行与 CI 相同的测试和带签名门禁的 `build-and-verify`。
-6. 验证安装器和 OTA ZIP 中全部 EXE 的 Authenticode 签名有效且发布者证书一致。
+5. 执行与 CI 相同的测试和 `build-and-verify`。
+6. 验证安装器、OTA ZIP、manifest、SHA-256 和 DLL 构建来源。
 7. 上传仅包含该版本安装器 EXE、OTA ZIP 和 `update-manifest.json` 的 Actions artifact。
 
 publish job：
@@ -171,7 +165,7 @@ publish job：
 3. 创建 draft GitHub Release。
 4. 上传缺失的安装器 EXE、OTA ZIP 和 manifest，不使用覆盖上传。
 5. 从 GitHub 重新下载资产并比较 SHA-256。
-6. 重新验证下载后的安装器及 OTA ZIP 内全部 EXE 的签名。
+6. 解压 OTA ZIP，检查路径安全、必要文件、DLL 哈希并运行启动 smoke test。
 7. 资产完全匹配后发布为 latest stable Release。
 
 Release 页面中的资产职责固定为：
@@ -208,7 +202,7 @@ draft 和 prerelease 不进入当前 stable OTA channel。
 ## 失败和重试
 
 - tag/version/main ancestry 不一致：build job 失败，不创建 Release。
-- 测试、构建、签名、manifest、SHA-256 或 DLL provenance 失败：不创建 Release。
+- 测试、构建、manifest、SHA-256 或 DLL provenance 失败：不创建 Release。
 - draft 缺少资产：同一 workflow 重跑可以补上传缺失资产。
 - draft 已有同名资产：必须先下载并验证与本次 build artifact 完全一致。
 - 已发布 Release 资产一致：重跑只验证，不覆盖。
@@ -224,7 +218,7 @@ draft 和 prerelease 不进入当前 stable OTA channel。
 3. 在 GitHub 为 `main` 启用：禁止 force push、禁止删除、PR 合并、required CI check。
 4. 准备第一个稳定版本 PR。
 5. 从同步后的 `main` 创建并推送第一个 `vX.Y.Z` tag。
-6. 检查 Actions build、Release 页面、安装器 EXE、OTA ZIP、manifest、SHA-256 和 Authenticode 发布者。
+6. 检查 Actions build、Release 页面、安装器 EXE、OTA ZIP、manifest 和 SHA-256。
 7. 使用现有客户端验证 `releases/latest`、下载、暂存和重启替换。
 
 远程 branch protection 必须在 CI check 首次成功后启用，避免先引用一个尚不存在的 required check 而锁死 `main`。

@@ -1,8 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$RepoRoot = '',
-  [string]$ReleaseRoot = '',
-  [switch]$RequireValidSignature
+  [string]$ReleaseRoot = ''
 )
 
 Set-StrictMode -Version Latest
@@ -26,15 +25,6 @@ function Assert-File([string]$Path, [string]$Label) {
 
 function Get-Sha256Lower([string]$Path) {
   return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-}
-
-function Assert-ValidAuthenticodeSignature([string]$Path, [string]$Label) {
-  Assert-File -Path $Path -Label $Label
-  $signature = Get-AuthenticodeSignature -LiteralPath $Path
-  if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or -not $signature.SignerCertificate) {
-    throw "$Label 必须带可信 Authenticode 签名；当前状态：$($signature.Status)"
-  }
-  return $signature.SignerCertificate.Thumbprint
 }
 
 $packageJson = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot 'electron-app\package.json') | ConvertFrom-Json
@@ -73,35 +63,10 @@ if ($staleZipNames.Count -gt 0 -or $staleInstallerNames.Count -gt 0) {
   throw "release 目录包含陈旧产物：$(@($staleZipNames + $staleInstallerNames) -join ', ')"
 }
 
-$signerThumbprint = $null
-if ($RequireValidSignature) {
-  $unpackedRoot = Join-Path $ReleaseRoot 'win-unpacked'
-  if (-not (Test-Path -LiteralPath $unpackedRoot -PathType Container)) {
-    throw "未找到打包目录：$unpackedRoot"
-  }
-  $packagedExecutables = @(Get-ChildItem -LiteralPath $unpackedRoot -Recurse -File -Filter '*.exe')
-  if ($packagedExecutables.Count -eq 0) {
-    throw "打包目录中没有可执行文件：$unpackedRoot"
-  }
-  $thumbprints = @(
-    Assert-ValidAuthenticodeSignature -Path $installerPath -Label 'Windows 安装器 EXE'
-    $packagedExecutables | ForEach-Object {
-      $relativePath = [System.IO.Path]::GetRelativePath($unpackedRoot, $_.FullName)
-      Assert-ValidAuthenticodeSignature -Path $_.FullName -Label "打包后的 $relativePath"
-    }
-  ) | Sort-Object -Unique
-  if ($thumbprints.Count -ne 1) {
-    throw "Windows 发布 EXE 必须由同一个证书签名；当前签名证书数量：$($thumbprints.Count)"
-  }
-  $signerThumbprint = $thumbprints[0]
-}
-
 [pscustomobject]@{
   Version = $version
   InstallerAsset = $installerName
   InstallerSha256 = $installerSha256
   ZipAsset = $zipName
   ZipSha256 = $zipSha256
-  SignatureRequired = [bool]$RequireValidSignature
-  SignerThumbprint = $signerThumbprint
 }

@@ -55,7 +55,7 @@
 
 **如何确认下载文件可信**
 
-只从本仓库的正式 Release 下载安装器。新的正式发布流程会拒绝没有有效 Authenticode 签名的安装器；旧版本不具备这一保证。
+只从本仓库的正式 Release 下载安装器。当前安装器没有代码签名，Windows 可能显示“未知发布者”或 SmartScreen 提示；请核对 Release 页面和 `update-manifest.json` 中的文件名与 SHA-256，不要从第三方转载地址下载。
 
 ## 版本记录与开发
 

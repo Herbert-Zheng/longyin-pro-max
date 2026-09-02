@@ -4,8 +4,9 @@
 
 ## Unreleased
 
+## v0.1.52
+
 - Windows 正式版改为直接提供安装器 EXE；ZIP 保留给启动器自动更新使用。
-- 正式发布新增 Authenticode 签名门禁，拒绝发布未签名或签名不一致的 Windows 可执行文件。
 
 ## v0.1.51
 

@@ -32,7 +32,7 @@
 ### 启动器打不开
 
 - 确认下载的是正式 Release 中的 `LongYinProMaxSetup-<版本>-win-x64.exe`，而不是 OTA ZIP 或 manifest。
-- 在安装器文件属性的“数字签名”页检查签名是否有效；新的正式发布流程会拒绝未签名安装器，旧版本不具备这一保证。
+- 当前安装器没有代码签名，Windows 可能显示“未知发布者”或 SmartScreen 提示。请确认下载地址属于本仓库的正式 Release，并核对 `update-manifest.json` 中的文件名与 SHA-256。
 - 如 Windows Defender 明确报告了威胁名称或隔离记录，请不要绕过提示，保留告警详情并向项目反馈。
 
 ### 游戏能启动，但模组没有生效

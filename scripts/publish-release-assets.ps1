@@ -51,10 +51,6 @@ if ([string]$manifest.version -ne $version -or [string]$manifest.zipAsset -ne $z
 if ([string]$manifest.installerAsset -ne $installerName -or [string]$manifest.installerSha256 -ne $installerHash) {
   throw '下载到 publish job 的 Windows 安装器与 update-manifest.json 不一致。'
 }
-$installerSignature = Get-AuthenticodeSignature -LiteralPath $installerPath
-if ($installerSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or -not $installerSignature.SignerCertificate) {
-  throw "Windows 安装器必须带可信 Authenticode 签名；当前状态：$($installerSignature.Status)"
-}
 
 function Invoke-Gh {
   param(

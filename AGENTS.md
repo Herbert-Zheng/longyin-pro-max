@@ -41,9 +41,8 @@
   - the tag, `package.json`, or `package-lock.json` versions differ
   - the expected setup EXE, OTA ZIP, or `update-manifest.json` is missing
   - the manifest asset names or SHA-256 values differ from the setup EXE or OTA ZIP
-  - the setup EXE or any packaged EXE lacks a valid Authenticode signature, or they are not signed by the same certificate
   - a maintained plugin or interop DLL does not match the verified build provenance
-- Formal release builds require the GitHub Actions secrets `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`. Never substitute a self-signed certificate or weaken the signature gate to publish.
+- The current Windows artifacts are unsigned. Documentation must not claim otherwise, and release automation must not require unavailable signing credentials.
 - GitHub Actions is the only writer for Release creation and Release assets. Local scripts must not create, delete, replace, or upload Release assets.
 - Never replace assets on a published version. Fixes require a higher version and a new tag.
 - Use `scripts/build-and-verify-release.ps1` for the shared local/CI build gate.

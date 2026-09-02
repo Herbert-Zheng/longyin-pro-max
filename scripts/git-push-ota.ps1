@@ -2,7 +2,8 @@
 param(
   [string]$RepoRoot = '',
   [string]$LoaderRoot = '',
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  [switch]$RequireValidSignature
 )
 
 Set-StrictMode -Version Latest
@@ -482,6 +483,18 @@ if ($interopHashes[0] -ne $zipInteropHash) {
 Write-Step "已校验 OTA 资产: $zipName + update-manifest.json"
 foreach ($payloadSync in $payloadSyncs) {
   Write-Step "$($payloadSync.PluginName) 可追溯校验: source=$($payloadSync.SourceHash), interop=$($payloadSync.InteropHash), artifact=$($payloadSync.ArtifactHash)"
+}
+
+$windowsArtifactVerification = & (Join-Path $RepoRoot 'scripts\assert-windows-release-artifacts.ps1') `
+  -RepoRoot $RepoRoot `
+  -ReleaseRoot $ReleaseRoot `
+  -RequireValidSignature:$RequireValidSignature
+if ($LASTEXITCODE -ne 0) {
+  throw 'Windows 安装器、OTA ZIP 或签名校验失败。'
+}
+Write-Step "已校验用户安装器: $($windowsArtifactVerification.InstallerAsset)"
+if ($RequireValidSignature) {
+  Write-Step "已校验 Windows Authenticode 签名: $($windowsArtifactVerification.SignerThumbprint)"
 }
 
 Write-Step '发布构建与 OTA 资产校验完成；本脚本不会 push、创建 tag 或写入 GitHub Release。'

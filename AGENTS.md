@@ -26,8 +26,9 @@
 - The canonical GitHub repository slug is `longyin-pro-max`; repository URLs and OTA API endpoints must use that slug.
 - Preserve legacy runtime compatibility identifiers such as `com.zhihong.longyinplus`, `.longyin-plus`, `longyin-plus-update`, and `LongYinPlus-InstallBundle-*` unless a dedicated migration supports existing installations and rollback data.
 - `dist/` is intentionally tracked as the current portable payload baseline and build input. Do not remove it as part of unrelated release work.
-- Rebuild first-party plugin DLLs from source and verify that the staged DLL, tracked payload DLL, and DLL inside the final ZIP have the same SHA-256.
+- Rebuild first-party plugin DLLs from source and verify that the staged DLL, tracked payload DLL, and DLL inside the final OTA ZIP have the same SHA-256.
 - Do not commit generated Electron outputs from `electron-app/release/`, `electron-app/updater-dist/`, or `electron-app/dist/`.
+- The NSIS setup EXE is the ordinary user's stable download. The ZIP is an OTA payload, not the recommended manual download. `update-manifest.json` binds both assets to their version and SHA-256.
 - GitHub Actions artifacts are short-lived CI outputs. GitHub Release assets are the stable user download and OTA source.
 
 ## CI and Release Workflow
@@ -38,9 +39,11 @@
 - The release workflow must reject a tag when:
   - its commit is not part of `origin/main`
   - the tag, `package.json`, or `package-lock.json` versions differ
-  - the expected ZIP or `update-manifest.json` is missing
-  - the manifest asset name or SHA-256 differs from the ZIP
+  - the expected setup EXE, OTA ZIP, or `update-manifest.json` is missing
+  - the manifest asset names or SHA-256 values differ from the setup EXE or OTA ZIP
+  - the setup EXE or any packaged EXE lacks a valid Authenticode signature, or they are not signed by the same certificate
   - a maintained plugin or interop DLL does not match the verified build provenance
+- Formal release builds require the GitHub Actions secrets `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`. Never substitute a self-signed certificate or weaken the signature gate to publish.
 - GitHub Actions is the only writer for Release creation and Release assets. Local scripts must not create, delete, replace, or upload Release assets.
 - Never replace assets on a published version. Fixes require a higher version and a new tag.
 - Use `scripts/build-and-verify-release.ps1` for the shared local/CI build gate.

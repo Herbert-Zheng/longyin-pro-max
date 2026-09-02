@@ -3,7 +3,7 @@
   "author": "Zhihong0321",
   "private": true,
   "version": "0.1.51",
-  "description": "龙胤立志传 Pro Max 的便携式 Electron 启动器与更新器",
+  "description": "龙胤立志传 Pro Max 的 Electron 启动器与更新器",
   "main": "dist/main/main.js",
   "type": "commonjs",
   "scripts": {
@@ -11,7 +11,7 @@
     "dev:main": "tsc -p tsconfig.main.json -w",
     "dev:renderer": "vite",
     "dev:electron": "wait-on dist/main/main.js dist/renderer/index.html && electron .",
-    "build": "npm run build:updater && npm run build:main && npm run build:renderer && set CSC_IDENTITY_AUTO_DISCOVERY=false&&electron-builder --win zip && npm run build:manifest",
+    "build": "npm run build:updater && npm run build:main && npm run build:renderer && set CSC_IDENTITY_AUTO_DISCOVERY=false&&electron-builder --win && npm run build:manifest",
     "build:updater": "pwsh -NoProfile -ExecutionPolicy Bypass -File ..\\scripts\\build-updater.ps1",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
@@ -65,8 +65,14 @@
       }
     ],
     "win": {
-      "signAndEditExecutable": false,
+      "signAndEditExecutable": true,
       "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
         {
           "target": "zip",
           "arch": [
@@ -75,6 +81,15 @@
         }
       ],
       "artifactName": "LongYinProMaxApp-${version}-${os}-${arch}.${ext}"
+    },
+    "nsis": {
+      "artifactName": "LongYinProMaxSetup-${version}-${os}-${arch}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   }
 }

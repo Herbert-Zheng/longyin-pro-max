@@ -5,35 +5,35 @@
 ## 安装
 
 1. **完全关闭游戏。**不要在游戏运行时安装、更新或替换 DLL。
-2. 从 [GitHub Releases](https://github.com/Herbert-Zheng/longyin-pro-max/releases/latest) 下载 `LongYinProMaxApp-<版本>-win-x64.zip`。
-3. 把 ZIP 解压到游戏目录以外的任意文件夹。
-4. 确认解压目录中能看到 `LongYinProMax.exe`、`resources/` 等文件；不要只复制 EXE。
-5. 运行 `LongYinProMax.exe`。
-6. 让启动器自动识别游戏，或选择包含 `LongYinLiZhiZhuan.exe` 的游戏目录。
-7. 调整需要的功能，点击“保存并启动”。
+2. 从 [GitHub Releases](https://github.com/Herbert-Zheng/longyin-pro-max/releases/latest) 下载 `LongYinProMaxSetup-<版本>-win-x64.exe`。
+3. 运行安装器，并按提示完成安装。
+4. 从桌面或开始菜单打开“龙胤立志传 Pro Max”。
+5. 让启动器自动识别游戏，或选择包含 `LongYinLiZhiZhuan.exe` 的游戏目录。
+6. 调整需要的功能，点击“保存并启动”。
 
-正式 ZIP 是完整的便携启动器，内置模组载荷位于 `resources/payload`。启动器会把载荷安装到所选游戏目录；不要把整个 Release ZIP 解压到游戏根目录。
+普通用户无需下载 Release 中的 ZIP 或 `update-manifest.json`；它们是启动器 OTA 更新使用的资产。启动器会把内置模组载荷安装到所选游戏目录。
 
 ## 后续使用
 
-- 继续运行解压目录中的 `LongYinProMax.exe` 来修改配置或启动游戏。
+- 继续从桌面或开始菜单打开启动器来修改配置或启动游戏。
 - 启动器可检查并安装最新稳定版本。
 - 更新会保留启动器设置和游戏目录中的模组配置。
-- 移动启动器目录时，请移动整个解压目录，不要只移动 EXE。
+- 如需更改安装位置，请重新运行安装器并选择目标目录。
 
 ## 卸载或重装
 
 1. 完全关闭游戏。
-2. 使用启动器中的卸载功能；也可运行已安装到游戏目录的 `Uninstall.cmd`。
-3. 如需重装，重新运行启动器并选择同一游戏目录。
+2. 使用启动器中的卸载功能移除游戏模组；也可运行游戏目录中的 `Uninstall.cmd`。
+3. 如需移除启动器本身，请在 Windows“已安装的应用”中卸载“龙胤立志传 Pro Max”。
+4. 如需重装模组，重新运行启动器并选择同一游戏目录。
 
 ## 故障排查
 
 ### 启动器打不开
 
-- 确认 ZIP 已完整解压，不要直接在压缩软件中运行。
-- 确认 `LongYinProMax.exe` 和 `resources/` 仍在同一解压目录。
-- 本项目当前没有代码签名；请先确认文件来自本仓库的正式 Release。
+- 确认下载的是正式 Release 中的 `LongYinProMaxSetup-<版本>-win-x64.exe`，而不是 OTA ZIP 或 manifest。
+- 在安装器文件属性的“数字签名”页检查签名是否有效；新的正式发布流程会拒绝未签名安装器，旧版本不具备这一保证。
+- 如 Windows Defender 明确报告了威胁名称或隔离记录，请不要绕过提示，保留告警详情并向项目反馈。
 
 ### 游戏能启动，但模组没有生效
 

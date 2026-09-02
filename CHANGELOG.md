@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Windows 正式版改为直接提供安装器 EXE；ZIP 保留给启动器自动更新使用。
+- 正式发布新增 Authenticode 签名门禁，拒绝发布未签名或签名不一致的 Windows 可执行文件。
+
 ## v0.1.51
 
 - 恢复 Battle Turbo 的 10 倍与 20 倍战斗速度，继续通过原版战斗速度按钮切换。

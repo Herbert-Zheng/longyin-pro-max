@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
   [string]$RepoRoot = '',
-  [string]$LoaderRoot = ''
+  [string]$LoaderRoot = '',
+  [switch]$RequireValidSignature
 )
 
 Set-StrictMode -Version Latest
@@ -49,6 +50,9 @@ $arguments = @(
 if (-not [string]::IsNullOrWhiteSpace($LoaderRoot)) {
   $arguments += @('-LoaderRoot', $LoaderRoot)
 }
+if ($RequireValidSignature) {
+  $arguments += '-RequireValidSignature'
+}
 
 & pwsh @arguments
 if ($LASTEXITCODE -ne 0) {
@@ -57,15 +61,21 @@ if ($LASTEXITCODE -ne 0) {
 
 $packageJson = Get-Content -Raw -LiteralPath (Join-Path $electronRoot 'package.json') | ConvertFrom-Json
 $zipName = "LongYinProMaxApp-$($packageJson.version)-win-x64.zip"
+$installerName = "LongYinProMaxSetup-$($packageJson.version)-win-x64.exe"
 $zipPath = Join-Path $resolvedReleaseRoot $zipName
+$installerPath = Join-Path $resolvedReleaseRoot $installerName
 $manifestPath = Join-Path $resolvedReleaseRoot 'update-manifest.json'
 
 if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
   throw "构建完成后未找到预期 ZIP：$zipPath"
+}
+if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {
+  throw "构建完成后未找到预期 Windows 安装器：$installerPath"
 }
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
   throw "构建完成后未找到 OTA manifest：$manifestPath"
 }
 
 Write-Host "Verified release ZIP: $zipPath" -ForegroundColor Green
+Write-Host "Verified Windows installer: $installerPath" -ForegroundColor Green
 Write-Host "Verified OTA manifest: $manifestPath" -ForegroundColor Green

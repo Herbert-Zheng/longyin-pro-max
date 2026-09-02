@@ -68,15 +68,29 @@ jobs:
         shell: pwsh
         run: ./scripts/test-updater-rollback.ps1
 
+      - name: Require Windows code-signing credentials
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK) -or [string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) {
+            throw 'Release requires WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD repository secrets.'
+          }
+
       - name: Build and verify release payload
         shell: pwsh
-        run: ./scripts/build-and-verify-release.ps1
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: ./scripts/build-and-verify-release.ps1 -RequireValidSignature
 
       - name: Upload verified release artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ github.ref_name }}
           path: |
+            electron-app/release/LongYinProMaxSetup-*-win-x64.exe
             electron-app/release/LongYinProMaxApp-*-win-x64.zip
             electron-app/release/update-manifest.json
           if-no-files-found: error
@@ -85,7 +99,7 @@ jobs:
   publish:
     needs: build-and-verify
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     concurrency:
       group: release-publication
       cancel-in-progress: false

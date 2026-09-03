@@ -6907,7 +6907,7 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
         var buyPrice = Math.Max(0, TryGetTradePriceForItem(icon, item, buy: true, fallback: 0));
         var currentSellPrice = Math.Max(0, TryGetTradePriceForItem(icon, item, buy: false, fallback: 0));
-        if (buyPrice <= 0 && currentSellPrice <= 0)
+        if (buyPrice <= 0)
         {
             return false;
         }
@@ -10742,9 +10742,10 @@ public sealed class LongYinProMaxPlugin : BasePlugin
 
         try
         {
-            // Runtime verification against the appraisal tooltip in v1.1.0f5 shows that
-            // GetTreasureRealValue() matches the knowledge-dependent value in parentheses.
-            appraisedValue = Math.Max(0, item.GetTreasureRealValue());
+            // QuickDetail renders its parenthesized "({value}?)" appraisal from
+            // GetTreasureValue(true). GetTreasureRealValue() exposes the hidden
+            // actual value and must not drive player-facing selection or commerce.
+            appraisedValue = Math.Max(0, item.GetTreasureValue(guess: true));
             return true;
         }
         catch (Exception ex)

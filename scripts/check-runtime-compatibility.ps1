@@ -68,7 +68,7 @@ if ($sourceHasStaticHeroTagReference) {
 
 if ($sourceUsesPrivateIdentifyAnswer) {
     $failures.Add(
-        'The treasure-identify assist still reads IdentifyMatchController.correctTreasure. The current implementation must select by ItemData.GetTreasureRealValue instead of the private answer list.'
+        'The treasure-identify assist still reads IdentifyMatchController.correctTreasure. The current implementation must select by the player-visible ItemData.GetTreasureValue(true) appraisal instead of the private answer list.'
     )
 }
 
@@ -125,7 +125,7 @@ $requiredInteropMembers = [ordered]@{
     ItemListData = @('Clone', 'allItem')
     ItemListController = @('itemGrid')
     ItemIconController = @('itemData')
-    ItemData = @('GetTreasureRealValue', 'type', 'rareLv', 'itemLv')
+    ItemData = @('GetTreasureValue', 'type', 'rareLv', 'itemLv')
     HeroSpeAddData = @('GetDescribe')
     ItemType = @('Material')
 }

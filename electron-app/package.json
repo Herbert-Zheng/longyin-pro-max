@@ -2,7 +2,7 @@
   "name": "longyin-pro-max-electron",
   "author": "Zhihong0321",
   "private": true,
-  "version": "0.1.52",
+  "version": "0.1.53",
   "description": "龙胤立志传 Pro Max 的 Electron 启动器与更新器",
   "main": "dist/main/main.js",
   "type": "commonjs",

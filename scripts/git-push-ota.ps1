@@ -412,6 +412,7 @@ $semanticChecks = @(
   @{ File = 'check-external-trainer-money-compatibility.ps1'; Label = '外部金钱修改器兼容性' },
   @{ File = 'check-mogao-direct-forget-semantics.ps1'; Label = '莫高窟直接遗忘' },
   @{ File = 'check-mogao-disciple-forget-semantics.ps1'; Label = '莫高窟弟子遗忘' },
+  @{ File = 'check-treasure-commerce-semantics.ps1'; Label = '珍宝鉴定与扫货' },
   @{ File = 'check-treasure-pavilion-capacity-semantics.ps1'; Label = '藏宝阁容量倍率' },
   @{ File = 'check-relationship-feature-guards.ps1'; Label = '关系功能隔离' },
   @{ File = 'check-skill-book-ownership-semantics.ps1'; Label = '功法书拥有状态' }
